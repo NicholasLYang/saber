@@ -1,6 +1,8 @@
 use std::fs::File;
 use std::io::Write;
 
+mod lexer;
+
 struct Value {
     val: i32,
     _type: String,
@@ -23,26 +25,27 @@ struct Op {
 }
 
 fn main() -> std::io::Result<()> {
-    let mut f = File::create("test.wat")?;
-    let add = Op {
-        name: String::from("add"),
-        _type: String::from("i32"),
-    };
-    let lhs = Node::Value(Value {
-        val: 10,
-        _type: String::from("i32"),
-    });
-    let rhs = Node::Value(Value {
-        val: 10,
-        _type: String::from("i32"),
-    });
-    let bin = BinOp {
-        op: add,
-        lhs: Box::new(lhs),
-        rhs: Box::new(rhs),
-    };
-    let sexpr = bin_op(&bin);
-    f.write(&sexpr.into_bytes())?;
+    // let mut f = File::create("test.wat")?;
+    // let add = Op {
+    //     name: String::from("add"),
+    //     _type: String::from("i32"),
+    // };
+    // let lhs = Node::Value(Value {
+    //     val: 10,
+    //     _type: String::from("i32"),
+    // });
+    // let rhs = Node::Value(Value {
+    //     val: 10,
+    //     _type: String::from("i32"),
+    // });
+    // let bin = BinOp {
+    //     op: add,
+    //     lhs: Box::new(lhs),
+    //     rhs: Box::new(rhs),
+    // };
+    // let sexpr = bin_op(&bin);
+    // f.write(&sexpr.into_bytes())?;
+    lexer::lex(&String::from("test.wat"));
     Ok(())
 }
 
