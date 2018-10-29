@@ -3,5 +3,9 @@ name = "saber"
 version = "0.1.0"
 authors = ["Nicholas Yang <ny585@nyu.edu>"]
 
+[build-dependencies]
+lalrpop = "0.16.1"
+
 [dependencies]
+lalrpop-util = "0.16.1"
 failure = "0.1.2"

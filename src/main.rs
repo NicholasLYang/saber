@@ -1,13 +1,14 @@
 #[macro_use]
 extern crate failure;
 
+#[macro_use]
+extern crate lalrpop_util;
+lalrpop_mod!(pub parser);
 use std::fs::File;
-use std::io::Write;
+use std::io::Read;
 
 mod ast;
 mod lexer;
-
-use ast::*;
 
 fn main() -> std::io::Result<()> {
     // let mut f = File::create("test.wat")?;
@@ -30,22 +31,28 @@ fn main() -> std::io::Result<()> {
     // };
     // let sexpr = bin_op(&bin);
     // f.write(&sexpr.into_bytes())?;
-    lexer::lex(&String::from("test.sbr"));
+    let mut f = File::open("test.sbr")?;
+    let mut source = String::new();
+    f.read_to_string(&mut source);
+    let lexer = lexer::Lexer::new(&source);
+    let parser_out = parser::ExprParser::new().parse(lexer);
+
+    println!("{:?}", parser_out);
     Ok(())
 }
 
-fn constant(v: &Value) -> String {
-    format!("({}.constant {})", v._type, v.val)
-}
+// fn constant(v: &Value) -> String {
+//     format!("({}.constant {})", v._type, v.val)
+// }
 
-fn node(n: &Node) -> String {
-    match n {
-        Node::Value(v) => constant(v),
-        Node::BinOp(b) => bin_op(b),
-    }
-}
+// fn node(n: &Node) -> String {
+//     match n {
+//         Node::Value(v) => constant(v),
+//         Node::BinOp(b) => bin_op(b),
+//     }
+// }
 
-fn bin_op(bin: &BinOp) -> String {
-    let BinOp { op, lhs, rhs } = bin;
-    format!("({}.{} {} {})", op._type, op.name, node(lhs), node(rhs))
-}
+// fn bin_op(bin: &BinOp) -> String {
+//     let BinOp { op, lhs, rhs } = bin;
+//     format!("({}.{} {} {})", op._type, op.name, node(lhs), node(rhs))
+// }

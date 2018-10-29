@@ -3,14 +3,8 @@ use std::fs::File;
 use std::io::Read;
 use std::str::CharIndices;
 
-#[derive(Debug)]
-pub struct Token<'input> {
-    tokenType: TokenType<'input>,
-    location: Location,
-}
-
-#[derive(Debug)]
-enum TokenType<'input> {
+#[derive(Debug, PartialEq)]
+pub enum Token<'input> {
     Illegal,
     EndOfFile,
     False,
@@ -25,7 +19,7 @@ enum TokenType<'input> {
     Let,
     While,
     Ident(String),
-    Number(f64),
+    Number(f32),
     LBrace,
     RBrace,
     LBracket,
@@ -51,20 +45,14 @@ enum TokenType<'input> {
     PlusEqual,
     Minus,
     MinusEqual,
-    Slash,
-    SlashEqual,
-    Star,
-    StarEqual,
-    String { content: &'input str, end: Location },
+    Div,
+    DivEqual,
+    Times,
+    TimesEqual,
+    String { content: &'input str },
 }
 
-#[derive(Debug)]
-enum OpType {
-    Plus,
-    Minus,
-    Times,
-    Div,
-}
+pub type Spanned<'a, Token, Loc, Error> = Result<(Loc, Token, Loc), Error>;
 
 #[inline]
 fn is_id_start(ch: char) -> bool {
@@ -76,22 +64,17 @@ fn is_id_body(ch: char) -> bool {
     ch == '_' || ch.is_ascii_digit() || ch.is_ascii_alphabetic()
 }
 
-pub type Location = (usize, usize);
-
 #[derive(Debug, Fail, PartialEq)]
 pub enum LexicalError {
-    #[fail(display = "Invalid character '{}' found at {}:{}", ch, row, col)]
-    InvalidCharacter { ch: char, row: usize, col: usize },
+    #[fail(display = "Invalid character '{}' found at {}", ch, location)]
+    InvalidCharacter { ch: char, location: usize },
 
-    #[fail(display = "String starting at {}:{} was not terminated", row, col)]
-    UnterminatedString { row: usize, col: usize },
+    #[fail(display = "String starting at {} was not terminated", location)]
+    UnterminatedString { location: usize },
 }
 
-pub type SpanResult<'input> = Result<Token<'input>, LexicalError>;
-
-struct Lexer<'input> {
+pub struct Lexer<'input> {
     source: &'input str,
-    location: Location,
     chars: CharIndices<'input>,
     lookahead: Option<(usize, char)>,
     lookahead2: Option<(usize, char)>,
@@ -108,39 +91,32 @@ impl<'input> Lexer<'input> {
             chars,
             lookahead,
             lookahead2,
-            location: (1, 0),
         }
     }
     fn bump(&mut self) -> Option<(usize, char)> {
         let next = self.lookahead;
-        self.location.1 += 1;
-        if let Some((_, '\n')) = next {
-            self.location.0 += 1;
-            self.location.1 = 0;
-        }
         self.lookahead = self.lookahead2;
         self.lookahead2 = self.chars.next();
         next
     }
 
-    fn lookahead_match<'a>(
+    fn lookahead_match(
         &mut self,
-        location: Location,
-        alt_tokentype: TokenType<'a>,
-        matched_tokentype: TokenType<'a>,
-        ch: char,
-    ) -> Token<'a> {
-        if let Some((_, ch)) = self.lookahead {
-            self.bump();
-            Token {
-                tokenType: matched_tokentype,
-                location,
+        start_pos: usize,
+        alt_tokentype: Token<'input>,
+        matched_token: Token<'input>,
+        match_ch: char,
+    ) -> <Lexer<'input> as Iterator>::Item {
+        match self.lookahead {
+            Some((i, ch)) => {
+                if match_ch == ch {
+                    self.bump();
+                    Ok((start_pos, matched_token, i))
+                } else {
+                    Ok((start_pos, matched_token, start_pos))
+                }
             }
-        } else {
-            Token {
-                tokenType: alt_tokentype,
-                location,
-            }
+            None => Ok((start_pos, matched_token, start_pos)),
         }
     }
 
@@ -173,27 +149,25 @@ impl<'input> Lexer<'input> {
         self.take_while(|ch| ch.is_whitespace());
     }
 
-    fn read_string(&mut self, start_index: usize) -> SpanResult<'input> {
-        let location = self.location.clone();
+    fn read_string(&mut self, start_pos: usize) -> <Lexer<'input> as Iterator>::Item {
         match self.take_until(|ch| ch == '"') {
             Some(i) => {
                 self.bump();
-                Ok(Token {
-                    location,
-                    tokenType: TokenType::String {
-                        content: &self.source[start_index + 1..i],
-                        end: (self.location.0, i + 1),
+                Ok((
+                    start_pos,
+                    Token::String {
+                        content: &self.source[start_pos + 1..i],
                     },
-                })
+                    i,
+                ))
             }
             None => Err(LexicalError::UnterminatedString {
-                row: location.0,
-                col: location.1,
+                location: start_pos,
             }),
         }
     }
 
-    fn read_number(&mut self, start_location: Location, start_index: usize) -> SpanResult<'input> {
+    fn read_number(&mut self, start_pos: usize) -> <Lexer<'input> as Iterator>::Item {
         let mut end = self.take_while(|ch| ch.is_ascii_digit());
 
         if let Some((_, '.')) = self.lookahead {
@@ -207,134 +181,57 @@ impl<'input> Lexer<'input> {
         }
 
         let end = end.unwrap_or_else(|| self.source.len());
-        Ok((Token {
-            tokenType: TokenType::Number(
-                self.source[start_index..end]
+        Ok((
+            start_pos,
+            Token::Number(
+                self.source[start_pos..end]
                     .parse()
                     .expect("unparseable number"),
             ),
-            location: start_location,
-        }))
+            end,
+        ))
     }
 
-    fn read_identifier(&mut self, start_location: Location, pos: usize) -> SpanResult<'input> {
+    fn read_identifier(&mut self, start_pos: usize) -> <Lexer<'input> as Iterator>::Item {
         let end = self
             .take_while(|ch| is_id_start(ch) || is_id_body(ch))
             .unwrap_or_else(|| self.source.len());
-        match &self.source[pos..end] {
-            "else" => Ok(Token {
-                tokenType: TokenType::Else,
-                location: start_location,
-            }),
-            "false" => Ok(Token {
-                tokenType: TokenType::False,
-                location: start_location,
-            }),
-            "fun" => Ok(Token {
-                tokenType: TokenType::Fun,
-                location: start_location,
-            }),
-            "for" => Ok(Token {
-                tokenType: TokenType::For,
-                location: start_location,
-            }),
-            "if" => Ok(Token {
-                tokenType: TokenType::If,
-                location: start_location,
-            }),
-            "print" => Ok(Token {
-                tokenType: TokenType::Print,
-                location: start_location,
-            }),
-            "return" => Ok(Token {
-                tokenType: TokenType::Return,
-                location: start_location,
-            }),
-            "this" => Ok(Token {
-                tokenType: TokenType::This,
-                location: start_location,
-            }),
-            "true" => Ok(Token {
-                tokenType: TokenType::True,
-                location: start_location,
-            }),
-            "let" => Ok(Token {
-                tokenType: TokenType::Let,
-                location: start_location,
-            }),
-            "while" => Ok(Token {
-                tokenType: TokenType::While,
-                location: start_location,
-            }),
-            id => Ok(Token {
-                tokenType: TokenType::Ident(id.to_string()),
-                location: start_location,
-            }),
+        match &self.source[start_pos..end] {
+            "else" => Ok((start_pos, Token::Else, end)),
+            "false" => Ok((start_pos, Token::False, end)),
+            "fun" => Ok((start_pos, Token::Fun, end)),
+            "for" => Ok((start_pos, Token::For, end)),
+            "if" => Ok((start_pos, Token::If, end)),
+            "print" => Ok((start_pos, Token::Print, end)),
+            "return" => Ok((start_pos, Token::Return, end)),
+            "this" => Ok((start_pos, Token::This, end)),
+            "true" => Ok((start_pos, Token::True, end)),
+            "let" => Ok((start_pos, Token::Let, end)),
+            "while" => Ok((start_pos, Token::While, end)),
+            id => Ok((start_pos, Token::Ident(id.to_string()), end)),
         }
     }
 }
 
 impl<'input> Iterator for Lexer<'input> {
-    type Item = SpanResult<'input>;
-    fn next(&mut self) -> Option<SpanResult<'input>> {
+    type Item = Spanned<'input, Token<'input>, usize, LexicalError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
         self.skip_whitespace();
-        let location = self.location;
-        if let Some((i, ch)) = self.bump() {
+        if let Some((location, ch)) = self.bump() {
             match ch {
-                '{' => Some(Ok(Token {
-                    tokenType: TokenType::LBrace,
-                    location,
-                })),
-                '}' => Some(Ok(Token {
-                    tokenType: TokenType::RBrace,
-                    location,
-                })),
-                '(' => Some(Ok(Token {
-                    tokenType: TokenType::LParen,
-                    location,
-                })),
-                ')' => Some(Ok(Token {
-                    tokenType: TokenType::RParen,
-                    location,
-                })),
-                '[' => Some(Ok(Token {
-                    tokenType: TokenType::LBracket,
-                    location,
-                })),
-                ']' => Some(Ok(Token {
-                    tokenType: TokenType::RBracket,
-                    location,
-                })),
-                ';' => Some(Ok(Token {
-                    tokenType: TokenType::Semicolon,
-                    location,
-                })),
-                ',' => Some(Ok(Token {
-                    tokenType: TokenType::Comma,
-                    location,
-                })),
-                '.' => Some(Ok(Token {
-                    tokenType: TokenType::Dot,
-                    location,
-                })),
-                '+' => Some(Ok(self.lookahead_match(
-                    location,
-                    TokenType::PlusEqual,
-                    TokenType::Plus,
-                    '=',
-                ))),
-                '-' => Some(Ok(self.lookahead_match(
-                    location,
-                    TokenType::MinusEqual,
-                    TokenType::Minus,
-                    '=',
-                ))),
-                '*' => Some(Ok(self.lookahead_match(
-                    location,
-                    TokenType::StarEqual,
-                    TokenType::Star,
-                    '=',
-                ))),
+                '{' => Some(Ok((location, Token::LBrace, location))),
+                '}' => Some(Ok((location, Token::RBrace, location))),
+                '(' => Some(Ok((location, Token::LParen, location))),
+                ')' => Some(Ok((location, Token::RParen, location))),
+                '[' => Some(Ok((location, Token::LBracket, location))),
+                ']' => Some(Ok((location, Token::RBracket, location))),
+                ';' => Some(Ok((location, Token::Semicolon, location))),
+                ',' => Some(Ok((location, Token::Comma, location))),
+                '.' => Some(Ok((location, Token::Dot, location))),
+                '+' => Some(self.lookahead_match(location, Token::PlusEqual, Token::Plus, '=')),
+                '-' => Some(self.lookahead_match(location, Token::MinusEqual, Token::Minus, '=')),
+                '*' => Some(self.lookahead_match(location, Token::TimesEqual, Token::Times, '=')),
                 '/' => match self.lookahead {
                     Some((_, '/')) => {
                         self.skip_to_line_end();
@@ -342,76 +239,25 @@ impl<'input> Iterator for Lexer<'input> {
                     }
                     Some((_, '=')) => {
                         self.bump();
-                        Some(Ok(Token {
-                            tokenType: TokenType::SlashEqual,
-                            location,
-                        }))
+                        Some(Ok((location, Token::DivEqual, location)))
                     }
-                    _ => Some(Ok(Token {
-                        tokenType: TokenType::Slash,
-                        location,
-                    })),
+                    _ => Some(Ok((location, Token::Div, location))),
                 },
-                '!' => Some(Ok(self.lookahead_match(
-                    location,
-                    TokenType::BangEqual,
-                    TokenType::Bang,
-                    '=',
-                ))),
-                '=' => Some(Ok(self.lookahead_match(
-                    location,
-                    TokenType::EqualEqual,
-                    TokenType::Equal,
-                    '=',
-                ))),
-                '>' => Some(Ok(self.lookahead_match(
-                    location,
-                    TokenType::GreaterEqual,
-                    TokenType::Greater,
-                    '=',
-                ))),
-                '<' => Some(Ok(self.lookahead_match(
-                    location,
-                    TokenType::LessEqual,
-                    TokenType::Less,
-                    '=',
-                ))),
-                '&' => Some(Ok(self.lookahead_match(
-                    location,
-                    TokenType::AmpAmp,
-                    TokenType::Amp,
-                    '&',
-                ))),
-                '|' => Some(Ok(self.lookahead_match(
-                    location,
-                    TokenType::PipePipe,
-                    TokenType::Pipe,
-                    '|',
-                ))),
-                '"' => Some(self.read_string(i)),
-                ch if is_id_start(ch) => Some(self.read_identifier(location, i)),
-                ch if ch.is_ascii_digit() => Some(self.read_number(location, i)),
-                ch => Some(Err(LexicalError::InvalidCharacter {
-                    ch,
-                    row: location.0,
-                    col: location.1,
-                })),
+                '!' => Some(self.lookahead_match(location, Token::BangEqual, Token::Bang, '=')),
+                '=' => Some(self.lookahead_match(location, Token::EqualEqual, Token::Equal, '=')),
+                '>' => {
+                    Some(self.lookahead_match(location, Token::GreaterEqual, Token::Greater, '='))
+                }
+                '<' => Some(self.lookahead_match(location, Token::LessEqual, Token::Less, '=')),
+                '&' => Some(self.lookahead_match(location, Token::AmpAmp, Token::Amp, '&')),
+                '|' => Some(self.lookahead_match(location, Token::PipePipe, Token::Pipe, '|')),
+                '"' => Some(self.read_string(location)),
+                ch if is_id_start(ch) => Some(self.read_identifier(location)),
+                ch if ch.is_ascii_digit() => Some(self.read_number(location)),
+                ch => Some(Err(LexicalError::InvalidCharacter { ch, location })),
             }
         } else {
             None
         }
     }
-}
-
-pub fn lex(filename: &String) -> Result<(), Error> {
-    let mut f = File::open(filename)?;
-    let mut source = String::new();
-    f.read_to_string(&mut source);
-    let lexer = Lexer::new(&source);
-    for res in lexer {
-        if let Ok(token) = res {
-            println!("{:?}", token);
-        }
-    }
-    Ok(())
 }

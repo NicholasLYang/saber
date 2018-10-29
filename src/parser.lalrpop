@@ -1,0 +1,36 @@
+use lexer::{Token, LexicalError};
+use ast::{Op, Expr};
+
+grammar<'input>;
+
+pub Expr: Expr = {
+    <l:Expr> "+" <r:Factor> => Expr::BinOp(Op::Plus, Box::new(l), Box::new(r)),
+    <l:Expr> "-" <r:Factor> => Expr::BinOp(Op::Minus, Box::new(l), Box::new(r)),
+    Factor,
+}
+
+pub Factor: Expr = {
+    <l:Factor> "*" <r:Term> => Expr::BinOp(Op::Times, Box::new(l), Box::new(r)),
+    <l:Factor> "/" <r:Term> => Expr::BinOp(Op::Div, Box::new(l), Box::new(r)),
+    Term,
+}
+
+pub Term: Expr = {
+    <n: Num> => Expr::Value(n),
+    "(" <Expr> ")"
+};
+
+extern {
+    type Location = usize;
+    type Error = LexicalError;
+
+    enum Token<'input> {
+        "+" => Token::Plus,
+        "-" => Token::Minus,
+        "*" => Token::Times,
+        "/" => Token::Div,
+        "(" => Token::LParen,
+        ")" => Token::RParen,
+        Num => Token::Number(<f32>)
+    }
+}
