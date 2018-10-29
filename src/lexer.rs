@@ -1,6 +1,3 @@
-use failure::Error;
-use std::fs::File;
-use std::io::Read;
 use std::str::CharIndices;
 
 #[derive(Debug, PartialEq)]
@@ -103,8 +100,8 @@ impl<'input> Lexer<'input> {
     fn lookahead_match(
         &mut self,
         start_pos: usize,
-        alt_tokentype: Token<'input>,
         matched_token: Token<'input>,
+        alt_token: Token<'input>,
         match_ch: char,
     ) -> <Lexer<'input> as Iterator>::Item {
         match self.lookahead {
@@ -113,10 +110,10 @@ impl<'input> Lexer<'input> {
                     self.bump();
                     Ok((start_pos, matched_token, i))
                 } else {
-                    Ok((start_pos, matched_token, start_pos))
+                    Ok((start_pos, alt_token, start_pos))
                 }
             }
-            None => Ok((start_pos, matched_token, start_pos)),
+            None => Ok((start_pos, alt_token, start_pos)),
         }
     }
 

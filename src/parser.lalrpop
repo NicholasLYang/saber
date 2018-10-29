@@ -1,23 +1,59 @@
 use lexer::{Token, LexicalError};
-use ast::{Op, Expr};
+use ast::{Op, Expr, Unary, Value};
 
 grammar<'input>;
 
-pub Expr: Expr = {
-    <l:Expr> "+" <r:Factor> => Expr::BinOp(Op::Plus, Box::new(l), Box::new(r)),
-    <l:Expr> "-" <r:Factor> => Expr::BinOp(Op::Minus, Box::new(l), Box::new(r)),
-    Factor,
+pub Expression: Expr = {
+    Equality
 }
 
-pub Factor: Expr = {
-    <l:Factor> "*" <r:Term> => Expr::BinOp(Op::Times, Box::new(l), Box::new(r)),
-    <l:Factor> "/" <r:Term> => Expr::BinOp(Op::Div, Box::new(l), Box::new(r)),
-    Term,
+pub Equality: Expr = {
+    <l:Comparison> "!=" <r:Comparison> =>
+        Expr::BinOp(Op::BangEqual, Box::new(l), Box::new(r)),
+    <l:Comparison> "==" <r:Comparison> =>
+        Expr::BinOp(Op::EqualEqual, Box::new(l), Box::new(r)),
+    Comparison
+}
+
+pub Comparison: Expr = {
+    <l:Addition> ">" <r:Comparison> =>
+        Expr::BinOp(Op::Greater, Box::new(l), Box::new(r)),
+    <l:Addition> ">="  <r:Comparison> =>
+        Expr::BinOp(Op::GreaterEqual, Box::new(l), Box::new(r)),
+    <l:Addition> "<" <r:Comparison> =>
+        Expr::BinOp(Op::Less, Box::new(l), Box::new(r)),
+    <l:Addition> "<="  <r:Comparison> =>
+        Expr::BinOp(Op::LessEqual, Box::new(l), Box::new(r)),
+    Addition
+}
+
+pub Addition: Expr = {
+    <l:Multiplication> "+" <r:Addition> =>
+        Expr::BinOp(Op::Plus, Box::new(l), Box::new(r)),
+    <l:Multiplication> "-" <r:Addition> =>
+        Expr::BinOp(Op::Minus, Box::new(l), Box::new(r)),
+    Multiplication
+}
+
+pub Multiplication: Expr = {
+    <l:Unary> "*" <r:Multiplication> =>
+        Expr::BinOp(Op::Times, Box::new(l), Box::new(r)),
+    <l:Unary> "/" <r:Multiplication> =>
+        Expr::BinOp(Op::Div, Box::new(l), Box::new(r)),
+    Unary,
+}
+
+pub Unary: Expr = {
+    "!" <u: Term> => Expr::UnaryOp(Unary::Bang, Box::new(u)),
+    "-" <u: Term> => Expr::UnaryOp(Unary::Minus, Box::new(u)),
+    Term
 }
 
 pub Term: Expr = {
-    <n: Num> => Expr::Value(n),
-    "(" <Expr> ")"
+    <n: Num> => Expr::Primary(Value::Num(n)),
+    "true" => Expr::Primary(Value::Bool(true)),
+    "false" => Expr::Primary(Value::Bool(false)),
+    "(" <Expression> ")"
 };
 
 extern {
@@ -31,6 +67,19 @@ extern {
         "/" => Token::Div,
         "(" => Token::LParen,
         ")" => Token::RParen,
+        "+=" => Token::PlusEqual,
+        "-=" => Token::MinusEqual,
+        "*=" => Token::TimesEqual,
+        "/=" => Token::DivEqual,
+        "!=" => Token::BangEqual,
+        "==" => Token::EqualEqual,
+        ">" => Token::Greater,
+        ">=" => Token::GreaterEqual,
+        "<" => Token::Less,
+        "<=" => Token::LessEqual,
+        "!" => Token::Bang,
+        "true" => Token::True,
+        "false" => Token::False,
         Num => Token::Number(<f32>)
     }
 }
