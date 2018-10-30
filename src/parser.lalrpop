@@ -1,7 +1,27 @@
 use lexer::{Token, LexicalError};
-use ast::{Op, Expr, Unary, Value, Stmt, Asgn};
+use ast::{Op, Expr, Unary, Value, Stmt, Asgn, Name};
 
 grammar<'input>;
+
+// Macros
+
+// Simple macro for infix operator tiers
+Tier<Op, NextTier>: Expr = {
+    <l: Tier<Op, NextTier>> <op: Op> <r: NextTier> => Expr::BinOp(op, Box::new(l), Box::new(r)),
+    NextTier
+}
+
+Comma<T>: Vec<T> = {
+    <v: (<T> ",")*> <e:T?> => match e {
+        None => v,
+        Some(e) => {
+            let mut v = v;
+            v.push(e);
+            v
+        }
+    }
+}
+
 
 pub Program: Vec<Stmt> = {
     <Statement*>
@@ -10,12 +30,29 @@ pub Program: Vec<Stmt> = {
 pub Statement: Stmt = {
     "let" <l: Identifier> "=" <r: Expression> ";" =>
         Stmt::Var(Asgn::Single(l), r),
-    <l: Expression> ";" => Stmt::Expr(l)
+    <l: Expression> ";" => Stmt::Expr(l),
+    <f: Function> => Stmt::Expr(f)
 }
 
 pub Expression: Expr = {
-    Equality
+    Equality,
 }
+
+pub Function: Expr = {
+    <args: FunArgs> ":=" <body: FunBody> =>
+        Expr::Function(args, body)
+}
+
+FunBody: Vec<Stmt> = {
+    <s: Statement> => vec![s],
+    <e: Expression> => vec![Stmt::Expr(e)]
+}
+
+FunArgs: Vec<Name> = {
+    "(" <ids: Comma<Identifier>> ")" => ids,
+    <id: Identifier> => vec![id]
+}
+
 
 pub Equality: Expr = {
     <l:Comparison> "!=" <r:Comparison> =>
@@ -25,33 +62,33 @@ pub Equality: Expr = {
     Comparison
 }
 
+
 pub Comparison: Expr = {
-    <l:Addition> ">" <r:Comparison> =>
+    <l:Addition> ">" <r:Addition> =>
         Expr::BinOp(Op::Greater, Box::new(l), Box::new(r)),
-    <l:Addition> ">="  <r:Comparison> =>
+    <l:Addition> ">="  <r:Addition> =>
         Expr::BinOp(Op::GreaterEqual, Box::new(l), Box::new(r)),
-    <l:Addition> "<" <r:Comparison> =>
+    <l:Addition> "<" <r:Addition> =>
         Expr::BinOp(Op::Less, Box::new(l), Box::new(r)),
-    <l:Addition> "<="  <r:Comparison> =>
+    <l:Addition> "<="  <r:Addition> =>
         Expr::BinOp(Op::LessEqual, Box::new(l), Box::new(r)),
     Addition
 }
 
-pub Addition: Expr = {
-    <l:Multiplication> "+" <r:Addition> =>
-        Expr::BinOp(Op::Plus, Box::new(l), Box::new(r)),
-    <l:Multiplication> "-" <r:Addition> =>
-        Expr::BinOp(Op::Minus, Box::new(l), Box::new(r)),
-    Multiplication
+
+AddOp: Op = {
+    "+" => Op::Plus,
+    "-" => Op::Minus
 }
 
-pub Multiplication: Expr = {
-    <l:Unary> "*" <r:Multiplication> =>
-        Expr::BinOp(Op::Times, Box::new(l), Box::new(r)),
-    <l:Unary> "/" <r:Multiplication> =>
-        Expr::BinOp(Op::Div, Box::new(l), Box::new(r)),
-    Unary,
+MultOp: Op = {
+    "*" => Op::Times,
+    "/" => Op::Div,
 }
+
+Addition = Tier<AddOp, Multiplication>;
+
+Multiplication: Expr = Tier<MultOp, Unary>;
 
 pub Unary: Expr = {
     "!" <u: Term> => Expr::UnaryOp(Unary::Bang, Box::new(u)),
@@ -93,6 +130,8 @@ extern {
         ";"        => Token::Semicolon,
         "let"      => Token::Let,
         "="        => Token::Equal,
+        ":="       => Token::ColonEqual,
+        ","        => Token::Comma,
         Num        => Token::Number(<f32>),
         Identifier => Token::Ident(<String>)
     }

@@ -1,3 +1,5 @@
+pub type Name = String;
+
 #[derive(Debug, PartialEq, Clone)]
 pub enum Stmt {
     Var(Asgn, Expr),
@@ -7,14 +9,18 @@ pub enum Stmt {
 #[derive(Debug, PartialEq, Clone)]
 pub enum Asgn {
     // Single assignment, versus multi assignment (TODO)
-    Single(String),
+    Single(Name),
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Expr {
     Primary(Value),
+    Var(Name),
     BinOp(Op, Box<Expr>, Box<Expr>),
     UnaryOp(Unary, Box<Expr>),
+    // TODO: Allow different argument styles like ({ a, b}) or
+    // (:named_arg, :other_named_arg)
+    Function(Vec<Name>, Vec<Stmt>),
 }
 
 #[derive(Debug, PartialEq, Clone)]
