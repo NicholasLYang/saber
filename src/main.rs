@@ -15,8 +15,8 @@ fn main() -> std::io::Result<()> {
     let mut source = String::new();
     f.read_to_string(&mut source)?;
     let lexer = lexer::Lexer::new(&source);
-    let parser_out = parser::ExpressionParser::new().parse(lexer);
+    let parser_out = parser::ProgramParser::new().parse(lexer);
 
-    println!("{:?}", parser_out);
+    println!("{:#?}", parser_out);
     Ok(())
 }

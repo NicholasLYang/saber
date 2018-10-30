@@ -1,7 +1,17 @@
 use lexer::{Token, LexicalError};
-use ast::{Op, Expr, Unary, Value};
+use ast::{Op, Expr, Unary, Value, Stmt, Asgn};
 
 grammar<'input>;
+
+pub Program: Vec<Stmt> = {
+    <Statement*>
+}
+
+pub Statement: Stmt = {
+    "let" <l: Identifier> "=" <r: Expression> ";" =>
+        Stmt::Var(Asgn::Single(l), r),
+    <l: Expression> ";" => Stmt::Expr(l)
+}
 
 pub Expression: Expr = {
     Equality
@@ -61,25 +71,29 @@ extern {
     type Error = LexicalError;
 
     enum Token<'input> {
-        "+" => Token::Plus,
-        "-" => Token::Minus,
-        "*" => Token::Times,
-        "/" => Token::Div,
-        "(" => Token::LParen,
-        ")" => Token::RParen,
-        "+=" => Token::PlusEqual,
-        "-=" => Token::MinusEqual,
-        "*=" => Token::TimesEqual,
-        "/=" => Token::DivEqual,
-        "!=" => Token::BangEqual,
-        "==" => Token::EqualEqual,
-        ">" => Token::Greater,
-        ">=" => Token::GreaterEqual,
-        "<" => Token::Less,
-        "<=" => Token::LessEqual,
-        "!" => Token::Bang,
-        "true" => Token::True,
-        "false" => Token::False,
-        Num => Token::Number(<f32>)
+        "+"        => Token::Plus,
+        "-"        => Token::Minus,
+        "*"        => Token::Times,
+        "/"        => Token::Div,
+        "("        => Token::LParen,
+        ")"        => Token::RParen,
+        "+="       => Token::PlusEqual,
+        "-="       => Token::MinusEqual,
+        "*="       => Token::TimesEqual,
+        "/="       => Token::DivEqual,
+        "!="       => Token::BangEqual,
+        "=="       => Token::EqualEqual,
+        ">"        => Token::Greater,
+        ">="       => Token::GreaterEqual,
+        "<"        => Token::Less,
+        "<="       => Token::LessEqual,
+        "!"        => Token::Bang,
+        "true"     => Token::True,
+        "false"    => Token::False,
+        ";"        => Token::Semicolon,
+        "let"      => Token::Let,
+        "="        => Token::Equal,
+        Num        => Token::Number(<f32>),
+        Identifier => Token::Ident(<String>)
     }
 }
