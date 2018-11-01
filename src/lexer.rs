@@ -25,7 +25,6 @@ pub enum Token<'input> {
     RParen,
     Semicolon,
     Colon,
-    ColonEqual,
     Comma,
     Dot,
     Amp,
@@ -48,6 +47,7 @@ pub enum Token<'input> {
     DivEqual,
     Times,
     TimesEqual,
+    FatArrow,
     Slash,
     String { content: &'input str },
 }
@@ -245,14 +245,23 @@ impl<'input> Iterator for Lexer<'input> {
                     _ => Some(Ok((location, Token::Div, location))),
                 },
                 '!' => Some(self.lookahead_match(location, Token::BangEqual, Token::Bang, '=')),
-                '=' => Some(self.lookahead_match(location, Token::EqualEqual, Token::Equal, '=')),
+                '=' => match self.lookahead {
+                    Some((_, '>')) => {
+                        self.bump();
+                        Some(Ok((location, Token::FatArrow, location)))
+                    }
+                    Some((_, '=')) => {
+                        self.bump();
+                        Some(Ok((location, Token::EqualEqual, location)))
+                    }
+                    _ => Some(Ok((location, Token::Equal, location))),
+                },
                 '>' => {
                     Some(self.lookahead_match(location, Token::GreaterEqual, Token::Greater, '='))
                 }
                 '<' => Some(self.lookahead_match(location, Token::LessEqual, Token::Less, '=')),
                 '&' => Some(self.lookahead_match(location, Token::AmpAmp, Token::Amp, '&')),
                 '|' => Some(self.lookahead_match(location, Token::PipePipe, Token::Pipe, '|')),
-                ':' => Some(self.lookahead_match(location, Token::ColonEqual, Token::Colon, '=')),
                 '"' => Some(self.read_string(location)),
                 ch if is_id_start(ch) => Some(self.read_identifier(location)),
                 ch if ch.is_ascii_digit() => Some(self.read_number(location)),

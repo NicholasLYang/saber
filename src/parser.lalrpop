@@ -28,23 +28,28 @@ pub Program: Vec<Stmt> = {
 }
 
 pub Statement: Stmt = {
-    "let" <l: Identifier> "=" <r: Expression> ";" =>
+    "let" <l: Identifier> "=" <r: LeftExpr> =>
         Stmt::Var(Asgn::Single(l), r),
-    <f: Function> => Stmt::Expr(f),
     <l: Expression> ";" => Stmt::Expr(l),
 }
 
+pub LeftExpr: Expr = {
+    <Function>,
+    <Expression> ";"
+}
+
 pub Expression: Expr = {
-    Equality,
+    Equality
 }
 
 pub Function: Expr = {
-    "fun" <args: FunArgs> <body: FunBody> =>
+    "\\" <args: FunArgs> "=>" <body: FunBody> =>
         Expr::Function(args, body),
 }
 
 FunBody: Vec<Stmt> = {
-    "{" <Statement*> "}"
+    "{" <Statement*> "}",
+    "(" <e: Expression> ")" => vec![Stmt::Expr(e)]
 }
 
 FunArgs: Vec<Name> = {
@@ -129,8 +134,8 @@ extern {
         ";"        => Token::Semicolon,
         "let"      => Token::Let,
         "="        => Token::Equal,
-        ":="       => Token::ColonEqual,
         ","        => Token::Comma,
+        "=>"       => Token::FatArrow,
         "\\"       => Token::Slash,
 	"fun"      => Token::Fun,
         "{"        => Token::LBrace,
