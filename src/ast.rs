@@ -4,6 +4,7 @@ pub type Name = String;
 pub enum Stmt {
     Var(Asgn, Expr),
     Expr(Expr),
+    Return(Expr),
 }
 
 #[derive(Debug, PartialEq, Clone)]

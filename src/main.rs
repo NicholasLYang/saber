@@ -24,6 +24,7 @@ fn main() -> std::io::Result<()> {
 
     let lexer = lexer::Lexer::new(&input);
     let parser_out = parser::ProgramParser::new().parse(lexer);
+    println!("{:#?}", parser_out);
     let mut out = Vec::new();
     if let Ok(stmts) = parser_out {
         for s in stmts {
