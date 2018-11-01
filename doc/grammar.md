@@ -23,7 +23,7 @@ start = top_level_stmts*
 
 top_level_stmts = function | stmt
 
-function = opt_f_name f_args ColonEqual f_body
+function = opt_f_name f_args ":=" f_body
 
 f_body = expr | block
 

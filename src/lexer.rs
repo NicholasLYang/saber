@@ -48,6 +48,7 @@ pub enum Token<'input> {
     DivEqual,
     Times,
     TimesEqual,
+    Slash,
     String { content: &'input str },
 }
 
@@ -228,6 +229,7 @@ impl<'input> Iterator for Lexer<'input> {
                 ';' => Some(Ok((location, Token::Semicolon, location))),
                 ',' => Some(Ok((location, Token::Comma, location))),
                 '.' => Some(Ok((location, Token::Dot, location))),
+                '\\' => Some(Ok((location, Token::Slash, location))),
                 '+' => Some(self.lookahead_match(location, Token::PlusEqual, Token::Plus, '=')),
                 '-' => Some(self.lookahead_match(location, Token::MinusEqual, Token::Minus, '=')),
                 '*' => Some(self.lookahead_match(location, Token::TimesEqual, Token::Times, '=')),

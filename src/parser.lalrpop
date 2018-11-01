@@ -30,8 +30,8 @@ pub Program: Vec<Stmt> = {
 pub Statement: Stmt = {
     "let" <l: Identifier> "=" <r: Expression> ";" =>
         Stmt::Var(Asgn::Single(l), r),
+    <f: Function> => Stmt::Expr(f),
     <l: Expression> ";" => Stmt::Expr(l),
-    <f: Function> => Stmt::Expr(f)
 }
 
 pub Expression: Expr = {
@@ -39,18 +39,16 @@ pub Expression: Expr = {
 }
 
 pub Function: Expr = {
-    <args: FunArgs> ":=" <body: FunBody> =>
-        Expr::Function(args, body)
+    "fun" <args: FunArgs> <body: FunBody> =>
+        Expr::Function(args, body),
 }
 
 FunBody: Vec<Stmt> = {
-    <s: Statement> => vec![s],
-    <e: Expression> => vec![Stmt::Expr(e)]
+    "{" <Statement*> "}"
 }
 
 FunArgs: Vec<Name> = {
     "(" <ids: Comma<Identifier>> ")" => ids,
-    <id: Identifier> => vec![id]
 }
 
 
@@ -100,6 +98,7 @@ pub Term: Expr = {
     <n: Num> => Expr::Primary(Value::Num(n)),
     "true" => Expr::Primary(Value::Bool(true)),
     "false" => Expr::Primary(Value::Bool(false)),
+    <id: Identifier> => Expr::Var(id),
     "(" <Expression> ")"
 };
 
@@ -132,6 +131,10 @@ extern {
         "="        => Token::Equal,
         ":="       => Token::ColonEqual,
         ","        => Token::Comma,
+        "\\"       => Token::Slash,
+	"fun"      => Token::Fun,
+        "{"        => Token::LBrace,
+        "}"        => Token::RBrace,
         Num        => Token::Number(<f32>),
         Identifier => Token::Ident(<String>)
     }
