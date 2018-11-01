@@ -21,6 +21,7 @@ pub enum Expr {
     // TODO: Allow different argument styles like ({ a, b}) or
     // (:named_arg, :other_named_arg)
     Function(Vec<Name>, Vec<Stmt>),
+    Call(Name, Vec<Expr>),
 }
 
 #[derive(Debug, PartialEq, Clone)]

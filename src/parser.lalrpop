@@ -27,23 +27,23 @@ pub Program: Vec<Stmt> = {
     <Statement*>
 }
 
-pub Statement: Stmt = {
+Statement: Stmt = {
     "let" <l: Identifier> "=" <r: LeftExpr> =>
         Stmt::Var(Asgn::Single(l), r),
     <l: Expression> ";" => Stmt::Expr(l),
 }
 
-pub LeftExpr: Expr = {
+LeftExpr: Expr = {
     <Function>,
     <Expression> ";"
 }
 
-pub Expression: Expr = {
+Expression: Expr = {
     Equality
 }
 
-pub Function: Expr = {
-    "\\" <args: FunArgs> "=>" <body: FunBody> =>
+Function: Expr = {
+    "\\" <args: FunParams> "=>" <body: FunBody> =>
         Expr::Function(args, body),
 }
 
@@ -52,12 +52,16 @@ FunBody: Vec<Stmt> = {
     "(" <e: Expression> ")" => vec![Stmt::Expr(e)]
 }
 
-FunArgs: Vec<Name> = {
-    "(" <ids: Comma<Identifier>> ")" => ids,
+// Important distinction: params are the *variables* with function
+// definition, args are the actual *values* that are passed with a
+// function call
+FunParams: Vec<Name> = {
+    "(" <Comma<Identifier>> ")",
+    <id: Identifier> => vec![id]
 }
 
 
-pub Equality: Expr = {
+Equality: Expr = {
     <l:Comparison> "!=" <r:Comparison> =>
         Expr::BinOp(Op::BangEqual, Box::new(l), Box::new(r)),
     <l:Comparison> "==" <r:Comparison> =>
@@ -66,7 +70,7 @@ pub Equality: Expr = {
 }
 
 
-pub Comparison: Expr = {
+Comparison: Expr = {
     <l:Addition> ">" <r:Addition> =>
         Expr::BinOp(Op::Greater, Box::new(l), Box::new(r)),
     <l:Addition> ">="  <r:Addition> =>
@@ -93,19 +97,24 @@ Addition = Tier<AddOp, Multiplication>;
 
 Multiplication: Expr = Tier<MultOp, Unary>;
 
-pub Unary: Expr = {
+Unary: Expr = {
     "!" <u: Term> => Expr::UnaryOp(Unary::Bang, Box::new(u)),
     "-" <u: Term> => Expr::UnaryOp(Unary::Minus, Box::new(u)),
     Term
 }
 
-pub Term: Expr = {
+Term: Expr = {
     <n: Num> => Expr::Primary(Value::Num(n)),
     "true" => Expr::Primary(Value::Bool(true)),
     "false" => Expr::Primary(Value::Bool(false)),
     <id: Identifier> => Expr::Var(id),
+    <id: Identifier> <args: FunArgs> => Expr::Call(id, args),
     "(" <Expression> ")"
 };
+
+FunArgs: Vec<Expr> = {
+    "(" <Comma<Expression>> ")",
+}
 
 extern {
     type Location = usize;
