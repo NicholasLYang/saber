@@ -32,6 +32,13 @@ Statement: Stmt = {
         Stmt::Var(Asgn::Single(l), r),
     "return" <e: Expression> ";" => Stmt::Return(e),
     <l: Expression> ";" => Stmt::Expr(l),
+    "if" <b: Expression> "{" <body: Statement*> "}" <els: OptElse?> => Stmt::If(b, body, els)
+}
+
+
+OptElse: Vec<Stmt> = {
+    "else" <Block>,
+    
 }
 
 LeftExpr: Expr = {
@@ -48,8 +55,13 @@ Function: Expr = {
         Expr::Function(args, body),
 }
 
+Block: Vec<Stmt> = {
+    "{" <Statement*> "}"
+}
+
+
 FunBody: Vec<Stmt> = {
-    "{" <Statement*> "}",
+    <Block>,
     "(" <e: Expression> ")" => vec![Stmt::Expr(e)]
 }
 
@@ -149,6 +161,8 @@ extern {
         "\\"       => Token::Slash,
 	"fun"      => Token::Fun,
         "return"   => Token::Return,
+        "if"       => Token::If,
+        "else"     => Token::Else,
         "{"        => Token::LBrace,
         "}"        => Token::RBrace,
         Num        => Token::Number(<f32>),

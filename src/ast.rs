@@ -5,6 +5,7 @@ pub enum Stmt {
     Var(Asgn, Expr),
     Expr(Expr),
     Return(Expr),
+    If(Expr, Vec<Stmt>, Option<Vec<Stmt>>),
 }
 
 #[derive(Debug, PartialEq, Clone)]
