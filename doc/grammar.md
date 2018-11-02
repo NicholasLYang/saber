@@ -2,7 +2,9 @@
 
 program = stmt*
 
-stmt = "let" id "=" left_expr
+stmt = let_decl | if_stmt
+
+let_decl = "let" id "=" left_expr
 
 left_expr = function | expression ";"
 
@@ -10,31 +12,29 @@ function = "\\" f_args "=>" f_body
 
 f_body = "(" expr ")" | block
 
-f_args = "(" (arg ",")* arg? ")"
+f_params = "(" ")" | "(" (param ",")* param ")"
 
 block = "{" stmt* "}"
 
-stmt = var_decl | if_stmt
+if_stmt = "if" comparison block opt_else
 
-if_stmt = If comparison LBrace block RBrace
+opt_else = none | "else" block
 
-var_decl = Let var_name Equal expr Colon
-
-var_name = name | name Dot var_name
+var_name = name | name "." var_name
 
 expr = equality
 
-equality = comparison  ((BangEqual | EqualEqual) comparison )*
+equality = comparison  (("!=" | "==") comparison )*
 
-comparison = addition ((Greater | GreaterEqual | Less | LessEqual ) addition)*
+comparison = addition ((">" | ">=" | "<" | "<=" ) addition)*
 
-addition = multiplication (( Minus | Plus ) multiplication)*
+addition = multiplication (( "-" | "+" ) multiplication)*
 
-multiplication = unary (( Slash | Star ) unary)*
+multiplication = unary (( "/" | "*" ) unary)*
 
-unary = ( Bang | Minus ) unary | primary
+unary = ( "+" | "-" ) primary
 
-primary = Number | String | False | True | Nil | LParen expression RParen
+primary = "[0-9]*(\.)?[0-9]*" | String | False | True | Nil | "(" expression ")"
 
 # Example
 
