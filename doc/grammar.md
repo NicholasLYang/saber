@@ -1,37 +1,18 @@
-# Tokens
-  
-- ColonEqual	':='
-- LParen	'('
-- RParen	')'
-- LBrace	'{'
-- RBrace	'}'
-- LBracket	'['
-- RBracket	']'
-- Comma		','
-- Colon		':'
-- Equal		'='
-- Let		'let'
-- Less		'<'
-- LessEqual	'<='
-- Greater	'>'
-- GreaterEqual	'>='
-
-
 # Grammar Rules
 
-start = top_level_stmts*
+program = stmt*
 
-top_level_stmts = function | stmt
+stmt = "let" id "=" left_expr
 
-function = opt_f_name f_args ":=" f_body
+left_expr = function | expression ";"
 
-f_body = expr | block
+function = "\\" f_args "=>" f_body
 
-opt_f_name = none | name
+f_body = "(" expr ")" | block
 
-f_args = LParen (arg Comma)* arg RParen
+f_args = "(" (arg ",")* arg? ")"
 
-block = stmt*
+block = "{" stmt* "}"
 
 stmt = var_decl | if_stmt
 
@@ -57,9 +38,6 @@ primary = Number | String | False | True | Nil | LParen expression RParen
 
 # Example
 
-my_func(a, b) := a + b
+let my_func = \(a, b) => (a + b)
 
-my_func(a, b) := {
-  a * 5 + b	   
-}
 
