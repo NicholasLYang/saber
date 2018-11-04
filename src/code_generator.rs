@@ -1,5 +1,4 @@
 use ast::{Asgn, Expr, Name, Op, Stmt, Unary, Value};
-use std::iter::Iterator;
 
 pub fn gen_program(program: &mut Vec<Stmt>) -> String {
     let mut out = String::new();

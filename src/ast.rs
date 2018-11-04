@@ -51,3 +51,33 @@ pub enum Unary {
     Bang,
     Minus,
 }
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct TypedExpr {
+    pub expr: Expr,
+    pub _type: Type,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct TypedStmt {
+    pub expr: Expr,
+    pub _type: Type,
+}
+
+// Yeah this is hilariously basic rn.
+#[derive(Debug, PartialEq, Clone)]
+pub enum Type {
+    Literal(Literal),
+    // Pair. Not sure how to do larger than two arguments. Nesting?
+    // Idk
+    Tuple(Vec<Type>),
+    // Function from n types to one type. Might extend to n types
+    // sometime
+    Arrow(Vec<Type>, Box<Type>),
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum Literal {
+    Float,
+    Char,
+}

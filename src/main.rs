@@ -3,7 +3,10 @@ extern crate failure;
 
 #[macro_use]
 extern crate lalrpop_util;
+
 lalrpop_mod!(pub parser);
+use ast::{Expr, Value};
+use std::collections::HashMap;
 use std::fs::File;
 use std::io;
 use std::io::Write;
@@ -11,6 +14,7 @@ use std::io::Write;
 mod ast;
 mod code_generator;
 mod lexer;
+mod typechecker;
 
 fn main() -> std::io::Result<()> {
     print!("> ");
@@ -23,6 +27,8 @@ fn main() -> std::io::Result<()> {
         .read_line(&mut input)
         .ok()
         .expect("Couldn't read line");
+    let ast = Expr::Primary(Value::Num(10.5));
+    println!("{:#?}", typechecker::infer_expr(HashMap::new(), ast));
 
     let lexer = lexer::Lexer::new(&input);
     let mut parser_out = parser::ProgramParser::new().parse(lexer);

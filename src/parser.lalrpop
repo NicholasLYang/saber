@@ -1,7 +1,7 @@
+grammar<'input>;
+
 use lexer::{Token, LexicalError};
 use ast::{Op, Expr, Unary, Value, Stmt, Asgn, Name};
-
-grammar<'input>;
 
 // Macros
 
