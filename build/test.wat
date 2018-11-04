@@ -1,1 +1,0 @@
-(module (func $main (result f32) f32.const 20 f32.const 11 f32.add f32.const 5 f32.sub ) (export "main" (func $main)))
