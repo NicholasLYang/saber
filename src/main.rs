@@ -27,7 +27,9 @@ fn main() -> std::io::Result<()> {
     let lexer = lexer::Lexer::new(&input);
     let mut parser_out = parser::ProgramParser::new().parse(lexer);
     if let Ok(out) = &mut parser_out {
-        println!("{}", code_generator::gen_program(out));
+        let mut file = File::create("build/test.wat")?;
+        let code = code_generator::gen_program(out);
+        file.write_all(code.as_bytes())?;
     }
     Ok(())
 }

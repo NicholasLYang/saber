@@ -20,13 +20,31 @@ fn gen_global_var(asgn: &Asgn, expr: &mut Expr) -> String {
     }
 }
 
-fn gen_function(params: &Vec<Name>, body: &mut Vec<Stmt>, name: &Name) -> String {
-    format!("(func {} (result f32) {})", name, gen_body(body))
+fn gen_params(params: &[Name]) -> String {
+    let mut out = String::new();
+    for param in params {
+        out = format!("{} (param ${} f32)", out, param);
+    }
+    out
+}
+
+fn gen_function(params: &[Name], body: &mut Vec<Stmt>, name: &str) -> String {
+    format!(
+        "(func ${} {} (result f32) {})",
+        name,
+        gen_params(params),
+        gen_body(body)
+    )
 }
 
 fn gen_body_stmt(stmt: &mut Stmt) -> String {
     match stmt {
-        Stmt::Var(Asgn::Single(name), expr) => format!("(local {} f32)", name),
+        Stmt::Var(Asgn::Single(name), expr) => format!(
+            "(local {} f32) (set_local {} {})",
+            name,
+            name,
+            gen_expr(expr)
+        ),
         Stmt::Expr(expr) => gen_expr(expr),
         Stmt::Return(expr) => format!("(return {})", gen_expr(expr)),
         Stmt::If(cond, then, opt_else) => {
