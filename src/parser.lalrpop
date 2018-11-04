@@ -42,12 +42,13 @@ OptElse: Vec<Stmt> = {
 }
 
 LeftExpr: Expr = {
-    <Function>,
-    <Expression> ";"
+    Function,
+    <Equality> ";"
 }
 
 Expression: Expr = {
-    Equality
+    Function,
+    Equality,
 }
 
 Function: Expr = {
@@ -56,13 +57,19 @@ Function: Expr = {
 }
 
 Block: Vec<Stmt> = {
-    "{" <Statement*> "}"
+    "{" <stmts: Statement*> <expr: Expression?> "}" => {
+        let mut stmts = stmts;
+        if let Some(e) = expr {
+            stmts.push(Stmt::Return(e));
+        }
+        stmts
+    }
 }
 
 
 FunBody: Vec<Stmt> = {
     <Block>,
-    "(" <e: Expression> ")" => vec![Stmt::Expr(e)]
+    "(" <e: Expression> ")" => vec![Stmt::Return(e)]
 }
 
 // Important distinction: params are the *variables* with function

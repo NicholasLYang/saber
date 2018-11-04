@@ -1,1 +1,0 @@
-(i32.add (i32.constant 10) (i32.constant 10))
