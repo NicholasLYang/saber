@@ -27,12 +27,10 @@ fn main() -> std::io::Result<()> {
         .read_line(&mut input)
         .ok()
         .expect("Couldn't read line");
-    let ast = Expr::Primary(Value::Num(10.5));
-    println!("{:#?}", typechecker::infer_expr(HashMap::new(), ast));
-
     let lexer = lexer::Lexer::new(&input);
     let mut parser_out = parser::ProgramParser::new().parse(lexer);
     if let Ok(out) = &mut parser_out {
+        println!("{:#?}", out);
         let mut file = File::create("build/test.wat")?;
         let code = code_generator::gen_program(out);
         file.write_all(code.as_bytes())?;

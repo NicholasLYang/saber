@@ -1,7 +1,7 @@
 grammar<'input>;
 
 use lexer::{Token, LexicalError};
-use ast::{Op, Expr, Unary, Value, Stmt, Asgn, Name};
+use ast::{Op, Expr, Unary, Value, Stmt, Asgn, Name, Pat};
 
 // Macros
 
@@ -20,7 +20,7 @@ Comma<T>: Vec<T> = {
             v
         }
     }
-}
+ }
 
 
 pub Program: Vec<Stmt> = {
@@ -48,7 +48,7 @@ LeftExpr: Expr = {
 
 Expression: Expr = {
     Function,
-    Equality,
+    CommaExpr,
 }
 
 Function: Expr = {
@@ -75,10 +75,11 @@ FunBody: Vec<Stmt> = {
 // Important distinction: params are the *variables* with function
 // definition, args are the actual *values* that are passed with a
 // function call
-FunParams: Vec<Name> = {
-    "(" <Comma<Identifier>> ")",
-    <id: Identifier> => vec![id]
+FunParams: Pat = {
+    <Pattern>
 }
+
+CommaExpr: Expr = Tier<CommaOp, Equality>;
 
 
 Equality: Expr = {
@@ -102,6 +103,9 @@ Comparison: Expr = {
     Addition
 }
 
+CommaOp: Op = {
+    "," => Op::Comma
+}
 
 AddOp: Op = {
     "+" => Op::Plus,
@@ -113,7 +117,7 @@ MultOp: Op = {
     "/" => Op::Div,
 }
 
-Addition = Tier<AddOp, Multiplication>;
+Addition: Expr = Tier<AddOp, Multiplication>;
 
 Multiplication: Expr = Tier<MultOp, Unary>;
 
@@ -128,12 +132,18 @@ Term: Expr = {
     "true" => Expr::Primary(Value::Bool(true)),
     "false" => Expr::Primary(Value::Bool(false)),
     <id: Identifier> => Expr::Var(id),
-    <id: Identifier> <args: FunArgs> => Expr::Call(id, args),
+    <id: Identifier> <args: FunArgs> => Expr::Call(id, Box::new(args)),
     "(" <Expression> ")"
 };
 
-FunArgs: Vec<Expr> = {
-    "(" <Comma<Expression>> ")",
+Pattern: Pat = {
+    "(" <pats: Comma<Pattern>> ")" => Pat::Tuple(pats),
+    "{" <ids: Comma<Identifier>> "}" => Pat::Record(ids),
+    <id: Identifier> => Pat::Id(id)
+}
+
+FunArgs: Expr = {
+    "(" <Expression> ")"
 }
 
 extern {

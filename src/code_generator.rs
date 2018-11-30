@@ -1,4 +1,4 @@
-use ast::{Asgn, Expr, Name, Op, Stmt, Unary, Value};
+use ast::{Asgn, Expr, Name, Op, Pat, Stmt, Unary, Value};
 
 pub fn gen_program(program: &mut Vec<Stmt>) -> String {
     let mut out = String::new();
@@ -19,15 +19,18 @@ fn gen_global_var(asgn: &Asgn, expr: &mut Expr) -> String {
     }
 }
 
-fn gen_params(params: &[Name]) -> String {
-    let mut out = String::new();
-    for param in params {
-        out = format!("{} (param ${} f32)", out, param);
+fn gen_params(params: &Pat) -> String {
+    match params {
+        Pat::Id(n) => format!("(param ${} f32)", n),
+        Pat::Tuple(pats) => pats
+            .iter()
+            .map(|pat| format!("(param ${} f32)", gen_params(pat)))
+            .collect(),
+        Pat::Record(_) => String::from("Not implemented yet!"),
     }
-    out
 }
 
-fn gen_function(params: &[Name], body: &mut Vec<Stmt>, name: &str) -> String {
+fn gen_function(params: &Pat, body: &mut Vec<Stmt>, name: &str) -> String {
     format!(
         "(func ${} {} (result f32) {})",
         name,
@@ -100,5 +103,6 @@ fn gen_op(op: &Op) -> String {
         Op::GreaterEqual => "f32.ge".to_string(),
         Op::Less => "f32.lt".to_string(),
         Op::LessEqual => "f32.le".to_string(),
+        Op::Comma => "Not implemented yet!".to_string(),
     }
 }

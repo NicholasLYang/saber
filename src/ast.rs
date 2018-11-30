@@ -2,16 +2,10 @@ pub type Name = String;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Stmt {
-    Var(Asgn, Expr),
+    Var(Pat, Expr),
     Expr(Expr),
     Return(Expr),
     If(Expr, Vec<Stmt>, Option<Vec<Stmt>>),
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub enum Asgn {
-    // Single assignment, versus multi assignment (TODO)
-    Single(Name),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -20,10 +14,18 @@ pub enum Expr {
     Var(Name),
     BinOp(Op, Box<Expr>, Box<Expr>),
     UnaryOp(Unary, Box<Expr>),
-    // TODO: Allow different argument styles like ({ a, b}) or
-    // (:named_arg, :other_named_arg)
-    Function(Vec<Name>, Vec<Stmt>),
-    Call(Name, Vec<Expr>),
+    Function(Pat, Vec<Stmt>),
+    Call(Name, Box<Expr>),
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum Expr {
+    Primary(Value),
+    Var(Name),
+    BinOp(Op, Box<Expr>, Box<Expr>),
+    UnaryOp(Unary, Box<Expr>),
+    Function(Pat, Vec<Stmt>),
+    Call(Name, Box<Expr>),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -34,6 +36,7 @@ pub enum Value {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Op {
+    Comma,
     Plus,
     Minus,
     Times,
@@ -64,10 +67,16 @@ pub struct TypedStmt {
     pub _type: Type,
 }
 
+#[derive(Debug, PartialEq, Clone)]
+pub struct TypedOp {
+    pub op: Op,
+    pub _type: Type,
+}
+
 // Yeah this is hilariously basic rn.
 #[derive(Debug, PartialEq, Clone)]
 pub enum Type {
-    Literal(Literal),
+    Primitive(Primitive),
     // Pair. Not sure how to do larger than two arguments. Nesting?
     // Idk
     Tuple(Vec<Type>),
@@ -77,7 +86,15 @@ pub enum Type {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub enum Literal {
+pub enum Primitive {
     Float,
+    Bool,
     Char,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum Pat {
+    Id(Name),
+    Record(Vec<Name>),
+    Tuple(Vec<Pat>),
 }
