@@ -9,13 +9,11 @@ pub enum Stmt {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub enum Expr {
-    Primary(Value),
-    Var(Name),
-    BinOp(Op, Box<Expr>, Box<Expr>),
-    UnaryOp(Unary, Box<Expr>),
-    Function(Pat, Vec<Stmt>),
-    Call(Name, Box<Expr>),
+pub enum TypedStmt {
+    Var(Pat, TypedExpr),
+    Expr(TypedExpr),
+    Return(TypedExpr),
+    If(Expr, Vec<TypedStmt>, Option<Vec<TypedStmt>>),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -26,6 +24,16 @@ pub enum Expr {
     UnaryOp(Unary, Box<Expr>),
     Function(Pat, Vec<Stmt>),
     Call(Name, Box<Expr>),
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum TypedExpr {
+    Primary(Value, Type),
+    Var(Name, Type),
+    BinOp(Op, Box<Expr>, Box<Expr>, Type),
+    UnaryOp(Unary, Box<Expr>, Type),
+    Function(Pat, Vec<Stmt>, Type),
+    Call(Name, Box<Expr>, Type),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -53,24 +61,6 @@ pub enum Op {
 pub enum Unary {
     Bang,
     Minus,
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub struct TypedExpr {
-    pub expr: Expr,
-    pub _type: Type,
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub struct TypedStmt {
-    pub expr: Expr,
-    pub _type: Type,
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub struct TypedOp {
-    pub op: Op,
-    pub _type: Type,
 }
 
 // Yeah this is hilariously basic rn.
