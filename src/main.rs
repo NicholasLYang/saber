@@ -5,9 +5,6 @@ extern crate failure;
 extern crate lalrpop_util;
 
 lalrpop_mod!(pub parser);
-use ast::{Expr, Value};
-use std::collections::HashMap;
-use std::fs::File;
 use std::io;
 use std::io::Write;
 
@@ -31,9 +28,6 @@ fn main() -> std::io::Result<()> {
     let mut parser_out = parser::ProgramParser::new().parse(lexer);
     if let Ok(out) = &mut parser_out {
         println!("{:#?}", out);
-        let mut file = File::create("build/test.wat")?;
-        let code = code_generator::gen_program(out);
-        file.write_all(code.as_bytes())?;
     }
     Ok(())
 }

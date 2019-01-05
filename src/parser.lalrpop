@@ -1,13 +1,14 @@
 grammar<'input>;
 
 use lexer::{Token, LexicalError};
-use ast::{Op, Expr, Unary, Value, Stmt, Asgn, Name, Pat};
+use ast::{Op, Expr, Unary, Value, Stmt, Pat};
 
 // Macros
 
 // Simple macro for infix operator tiers
 Tier<Op, NextTier>: Expr = {
-    <l: Tier<Op, NextTier>> <op: Op> <r: NextTier> => Expr::BinOp(op, Box::new(l), Box::new(r)),
+    <l: Tier<Op, NextTier>> <op: Op> <r: NextTier> =>
+        Expr::BinOp { op, lhs: Box::new(l), rhs: Box::new(r) },
     NextTier
 }
 
@@ -29,7 +30,7 @@ pub Program: Vec<Stmt> = {
 
 Statement: Stmt = {
     "let" <l: Identifier> "=" <r: LeftExpr> =>
-        Stmt::Var(Asgn::Single(l), r),
+        Stmt::Var(Pat::Id(l), r),
     "return" <e: Expression> ";" => Stmt::Return(e),
     <l: Expression> ";" => Stmt::Expr(l),
     "if" <b: Expression> "{" <body: Statement*> "}" <els: OptElse?> => Stmt::If(b, body, els)
@@ -52,8 +53,8 @@ Expression: Expr = {
 }
 
 Function: Expr = {
-    "\\" <args: FunParams> "=>" <body: FunBody> =>
-        Expr::Function(args, body),
+    "\\" <params: FunParams> "=>" <body: FunBody> =>
+        Expr::Function{ params, body },
 }
 
 Block: Vec<Stmt> = {
@@ -84,22 +85,22 @@ CommaExpr: Expr = Tier<CommaOp, Equality>;
 
 Equality: Expr = {
     <l:Comparison> "!=" <r:Comparison> =>
-        Expr::BinOp(Op::BangEqual, Box::new(l), Box::new(r)),
+        Expr::BinOp { op: Op::BangEqual, lhs: Box::new(l), rhs: Box::new(r) },
     <l:Comparison> "==" <r:Comparison> =>
-        Expr::BinOp(Op::EqualEqual, Box::new(l), Box::new(r)),
+        Expr::BinOp{ op: Op::EqualEqual, lhs: Box::new(l), rhs: Box::new(r) },
     Comparison
 }
 
 
 Comparison: Expr = {
     <l:Addition> ">" <r:Addition> =>
-        Expr::BinOp(Op::Greater, Box::new(l), Box::new(r)),
+        Expr::BinOp { op: Op::Greater, lhs: Box::new(l), rhs: Box::new(r) },
     <l:Addition> ">="  <r:Addition> =>
-        Expr::BinOp(Op::GreaterEqual, Box::new(l), Box::new(r)),
+        Expr::BinOp { op: Op::GreaterEqual, lhs: Box::new(l), rhs: Box::new(r) },
     <l:Addition> "<" <r:Addition> =>
-        Expr::BinOp(Op::Less, Box::new(l), Box::new(r)),
+        Expr::BinOp { op: Op::Less, lhs: Box::new(l), rhs: Box::new(r) },
     <l:Addition> "<="  <r:Addition> =>
-        Expr::BinOp(Op::LessEqual, Box::new(l), Box::new(r)),
+        Expr::BinOp { op: Op::LessEqual, lhs: Box::new(l), rhs: Box::new(r) },
     Addition
 }
 
@@ -122,17 +123,18 @@ Addition: Expr = Tier<AddOp, Multiplication>;
 Multiplication: Expr = Tier<MultOp, Unary>;
 
 Unary: Expr = {
-    "!" <u: Term> => Expr::UnaryOp(Unary::Bang, Box::new(u)),
-    "-" <u: Term> => Expr::UnaryOp(Unary::Minus, Box::new(u)),
+    "!" <u: Term> => Expr::UnaryOp { unary: Unary::Bang, rhs: Box::new(u)},
+    "-" <u: Term> => Expr::UnaryOp { unary: Unary::Minus, rhs: Box::new(u)},
     Term
 }
 
 Term: Expr = {
-    <n: Num> => Expr::Primary(Value::Num(n)),
-    "true" => Expr::Primary(Value::Bool(true)),
-    "false" => Expr::Primary(Value::Bool(false)),
-    <id: Identifier> => Expr::Var(id),
-    <id: Identifier> <args: FunArgs> => Expr::Call(id, Box::new(args)),
+    <n: Num> => Expr::Primary { value: Value::Num(n) } ,
+    "true" => Expr::Primary { value: Value::Bool(true) } ,
+    "false" => Expr::Primary { value: Value::Bool(false) },
+    <id: Identifier> => Expr::Var { name: id },
+    <callee: Term> <args: FunArgs> =>
+        Expr::Call { callee: Box::new(callee), arg: Box::new(args) },
     "(" <Expression> ")"
 };
 
