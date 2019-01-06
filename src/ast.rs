@@ -118,12 +118,11 @@ pub enum Type {
     Float,
     Bool,
     Char,
+    Var(Name),
     // Pair. Not sure how to do larger than two arguments. Nesting?
     // Idk
     Tuple(Box<Type>, Box<Type>),
-    // Function from n types to one type. Might extend to n types
-    // sometime
-    Arrow(Vec<Type>, Box<Type>),
+    Arrow(Box<Type>, Box<Type>),
 }
 
 #[derive(Debug, PartialEq, Clone)]

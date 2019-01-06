@@ -59,7 +59,7 @@ pub fn infer_expr(ctx: &HashMap<Name, Type>, expr: Expr) -> Result<TypedExpr, Ty
             let typed_rhs = infer_expr(&ctx, *rhs)?;
             let lhs_type = typed_lhs.get_type().clone();
             let rhs_type = typed_rhs.get_type().clone();
-            match infer_op(&op, lhs_type, rhs_type) {
+            match infer_op(ctx, &op, lhs_type, rhs_type) {
                 Some(op_type) => Ok(TypedExpr::BinOp {
                     op,
                     lhs: Box::new(typed_lhs),
@@ -77,10 +77,42 @@ pub fn infer_expr(ctx: &HashMap<Name, Type>, expr: Expr) -> Result<TypedExpr, Ty
     }
 }
 
-pub fn infer_op(op: &Op, lhs_type: Type, rhs_type: Type) -> Option<Type> {
+pub fn infer_op(
+    ctx: &HashMap<Name, Type>,
+    op: &Op,
+    lhs_type: Type,
+    rhs_type: Type,
+) -> Option<Type> {
     match op {
         Op::Comma => Some(Type::Tuple(Box::new(lhs_type), Box::new(rhs_type))),
-        Op::Plus => Some(Type::Float),
+        Op::Plus | Op::Minus | Op::Times | Op::Div => match (lhs_type, rhs_type) {
+            (Type::Float, Type::Float) | (Type::Bool, Type::Float) | (Type::Float, Type::Bool) => {
+                Some(Type::Float)
+            }
+            _ => None,
+        },
+        Op::BangEqual | Op::EqualEqual => {
+            if unify(ctx, &lhs_type, &rhs_type) {
+                Some(lhs_type)
+            } else {
+                None
+            }
+        }
         _ => None,
+    }
+}
+
+pub fn unify(ctx: &HashMap<Name, Type>, type1: &Type, type2: &Type) -> bool {
+    if type1 == type2 {
+        return true;
+    }
+    match (type1, type2) {
+        (Type::Tuple(fst1, snd1), Type::Tuple(fst2, snd2)) => {
+            unify(ctx, fst1, fst2) && unify(ctx, snd1, snd2)
+        }
+        (Type::Arrow(param_type1, return_type1), Type::Arrow(param_type2, return_type2)) => {
+            unify(ctx, param_type1, param_type2) && unify(ctx, return_type1, return_type2)
+        }
+        _ => false,
     }
 }
