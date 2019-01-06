@@ -1,7 +1,7 @@
 grammar<'input>;
 
 use lexer::{Token, LexicalError};
-use ast::{Op, Expr, Unary, Value, Stmt, Pat};
+use ast::{Op, Expr, Unary, Value, Stmt, Pat, Type};
 
 // Macros
 
@@ -29,8 +29,8 @@ pub Program: Vec<Stmt> = {
 }
 
 Statement: Stmt = {
-    "let" <l: Identifier> "=" <r: LeftExpr> =>
-        Stmt::Var(Pat::Id(l), r),
+    "let" <l: Pattern> "=" <r: RightExpr> =>
+        Stmt::Var(l, r),
     "return" <e: Expression> ";" => Stmt::Return(e),
     <l: Expression> ";" => Stmt::Expr(l),
     "if" <b: Expression> "{" <body: Statement*> "}" <els: OptElse?> => Stmt::If(b, body, els)
@@ -42,7 +42,7 @@ OptElse: Vec<Stmt> = {
     
 }
 
-LeftExpr: Expr = {
+RightExpr: Expr = {
     Function,
     <Equality> ";"
 }
@@ -141,7 +141,16 @@ Term: Expr = {
 Pattern: Pat = {
     "(" <pats: Comma<Pattern>> ")" => Pat::Tuple(pats),
     "{" <ids: Comma<Identifier>> "}" => Pat::Record(ids),
-    <id: Identifier> => Pat::Id(id)
+    <id: Identifier> ":" <type_: TypeAnnotation> => Pat::Id(id, Some(type_)),
+    <id: Identifier> => Pat::Id(id, None),
+}
+
+TypeAnnotation: Type = {
+    "[" <type_: TypeAnnotation> "]" => Type::Vec(Box::new(type_)),
+    <id: Identifier> => Type::Var(id),
+    "(" <fst: TypeAnnotation> "," <snd: TypeAnnotation> ")" => {
+       Type::Tuple(Box::new(fst), Box::new(snd))
+    }
 }
 
 FunArgs: Expr = {
@@ -184,6 +193,9 @@ extern {
         "else"     => Token::Else,
         "{"        => Token::LBrace,
         "}"        => Token::RBrace,
+        "["        => Token::LBracket,
+        "]"        => Token::RBracket,
+        ":"        => Token::Colon,
         Num        => Token::Number(<f32>),
         Identifier => Token::Ident(<String>)
     }

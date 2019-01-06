@@ -93,7 +93,7 @@ pub fn infer_op(
         },
         Op::BangEqual | Op::EqualEqual => {
             if unify(ctx, &lhs_type, &rhs_type) {
-                Some(lhs_type)
+                Some(Type::Bool)
             } else {
                 None
             }

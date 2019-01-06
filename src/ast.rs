@@ -119,6 +119,7 @@ pub enum Type {
     Bool,
     Char,
     Var(Name),
+    Vec(Box<Type>),
     // Pair. Not sure how to do larger than two arguments. Nesting?
     // Idk
     Tuple(Box<Type>, Box<Type>),
@@ -127,7 +128,7 @@ pub enum Type {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Pat {
-    Id(Name),
+    Id(Name, Option<Type>),
     Record(Vec<Name>),
     Tuple(Vec<Pat>),
 }
