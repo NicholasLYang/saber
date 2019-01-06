@@ -5,6 +5,7 @@ extern crate failure;
 extern crate lalrpop_util;
 
 lalrpop_mod!(pub parser);
+use std::collections::HashMap;
 use std::io;
 use std::io::Write;
 
@@ -28,6 +29,11 @@ fn main() -> std::io::Result<()> {
     let mut parser_out = parser::ProgramParser::new().parse(lexer);
     if let Ok(out) = &mut parser_out {
         println!("{:#?}", out);
+        if let Some(stmt) = out.pop() {
+            let ctx = HashMap::new();
+            let typed_stmt = typechecker::infer_stmt(&ctx, stmt);
+            println!("{:#?}", typed_stmt);
+        }
     }
     Ok(())
 }

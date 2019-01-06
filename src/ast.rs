@@ -41,38 +41,47 @@ pub enum Expr {
         callee: Box<Expr>,
         arg: Box<Expr>,
     },
+    Tuple {
+        fst: Box<Expr>,
+        snd: Box<Expr>,
+    },
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum TypedExpr {
     Primary {
         value: Value,
-        _type: Type,
+        type_: Type,
     },
     Var {
         name: Name,
-        _type: Type,
+        type_: Type,
     },
     BinOp {
         op: Op,
         lhs: Box<TypedExpr>,
         rhs: Box<TypedExpr>,
-        _type: Type,
+        type_: Type,
     },
     UnaryOp {
         unary: Unary,
         rhs: Box<TypedExpr>,
-        _type: Type,
+        type_: Type,
     },
     Function {
         params: Pat,
         body: Vec<TypedStmt>,
-        _type: Type,
+        type_: Type,
     },
     Call {
         callee: Box<TypedExpr>,
         arg: Box<TypedExpr>,
-        _type: Type,
+        type_: Type,
+    },
+    Tuple {
+        fst: Box<TypedExpr>,
+        snd: Box<TypedExpr>,
+        type_: Type,
     },
 }
 
@@ -111,7 +120,7 @@ pub enum Type {
     Char,
     // Pair. Not sure how to do larger than two arguments. Nesting?
     // Idk
-    Tuple(Vec<Type>),
+    Tuple(Box<Type>, Box<Type>),
     // Function from n types to one type. Might extend to n types
     // sometime
     Arrow(Vec<Type>, Box<Type>),
@@ -128,21 +137,34 @@ pub enum Pat {
 impl TypedExpr {
     pub fn get_type(&self) -> &Type {
         match &self {
-            TypedExpr::Primary { value, _type } => _type,
-            TypedExpr::Var { name, _type } => _type,
+            TypedExpr::Primary { value: _, type_ } => type_,
+            TypedExpr::Var { name: _, type_ } => type_,
+            TypedExpr::Tuple {
+                fst: _,
+                snd: _,
+                type_,
+            } => type_,
             TypedExpr::BinOp {
-                op,
-                lhs,
-                rhs,
-                _type,
-            } => _type,
-            TypedExpr::UnaryOp { unary, rhs, _type } => _type,
+                op: _,
+                lhs: _,
+                rhs: _,
+                type_,
+            } => type_,
+            TypedExpr::UnaryOp {
+                unary: _,
+                rhs: _,
+                type_,
+            } => type_,
             TypedExpr::Function {
-                params,
-                body,
-                _type,
-            } => _type,
-            TypedExpr::Call { callee, arg, _type } => _type,
+                params: _,
+                body: _,
+                type_,
+            } => type_,
+            TypedExpr::Call {
+                callee: _,
+                arg: _,
+                type_,
+            } => type_,
         }
     }
 }
