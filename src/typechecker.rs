@@ -98,6 +98,15 @@ pub fn infer_op(
                 None
             }
         }
+        Op::GreaterEqual | Op::Greater | Op::Less | Op::LessEqual => {
+            // If we can unify lhs and rhs, and lhs with Float then
+            // by transitivity we can unify everything with float
+            if unify(ctx, &lhs_type, &rhs_type) && unify(ctx, &lhs_type, &Type::Float) {
+                Some(Type::Bool)
+            } else {
+                None
+            }
+        }
         _ => None,
     }
 }
@@ -113,6 +122,7 @@ pub fn unify(ctx: &HashMap<Name, Type>, type1: &Type, type2: &Type) -> bool {
         (Type::Arrow(param_type1, return_type1), Type::Arrow(param_type2, return_type2)) => {
             unify(ctx, param_type1, param_type2) && unify(ctx, return_type1, return_type2)
         }
+        (Type::Float, Type::Bool) | (Type::Bool, Type::Float) => true,
         _ => false,
     }
 }

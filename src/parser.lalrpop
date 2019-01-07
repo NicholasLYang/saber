@@ -135,7 +135,7 @@ Term: Expr = {
     <id: Identifier> => Expr::Var { name: id },
     <callee: Term> <args: FunArgs> =>
         Expr::Call { callee: Box::new(callee), arg: Box::new(args) },
-    "(" <Expression> ")"
+    "(" <Expression> ")",
 };
 
 Pattern: Pat = {

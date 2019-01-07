@@ -27,10 +27,10 @@ fn main() -> std::io::Result<()> {
         .expect("Couldn't read line");
     let lexer = lexer::Lexer::new(&input);
     let mut parser_out = parser::ProgramParser::new().parse(lexer);
+    let ctx = HashMap::new();
     if let Ok(out) = &mut parser_out {
         println!("{:#?}", out);
         if let Some(stmt) = out.pop() {
-            let ctx = HashMap::new();
             let typed_stmt = typechecker::infer_stmt(&ctx, stmt);
             println!("{:#?}", typed_stmt);
         }
