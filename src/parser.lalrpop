@@ -30,7 +30,7 @@ pub Program: Vec<Stmt> = {
 
 Statement: Stmt = {
     "let" <l: Pattern> "=" <r: RightExpr> =>
-        Stmt::Var(l, r),
+        Stmt::Asgn(l, r),
     "return" <e: Expression> ";" => Stmt::Return(e),
     <l: Expression> ";" => Stmt::Expr(l),
     "if" <b: Expression> "{" <body: Statement*> "}" <els: OptElse?> => Stmt::If(b, body, els)

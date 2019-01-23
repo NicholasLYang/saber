@@ -2,7 +2,7 @@ pub type Name = String;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Stmt {
-    Var(Pat, Expr),
+    Asgn(Pat, Expr),
     Expr(Expr),
     Return(Expr),
     If(Expr, Vec<Stmt>, Option<Vec<Stmt>>),
@@ -10,7 +10,7 @@ pub enum Stmt {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum TypedStmt {
-    Var(Pat, TypedExpr),
+    Asgn(Pat, TypedExpr),
     Expr(TypedExpr),
     Return(TypedExpr),
     If(Expr, Vec<TypedStmt>, Option<Vec<TypedStmt>>),

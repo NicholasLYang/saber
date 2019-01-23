@@ -1,5 +1,7 @@
-#[macro_use]
 extern crate failure;
+
+#[macro_use]
+extern crate failure_derive;
 
 #[macro_use]
 extern crate lalrpop_util;
@@ -27,11 +29,11 @@ fn main() -> std::io::Result<()> {
         .expect("Couldn't read line");
     let lexer = lexer::Lexer::new(&input);
     let mut parser_out = parser::ProgramParser::new().parse(lexer);
-    let ctx = HashMap::new();
+    let mut ctx = HashMap::new();
     if let Ok(out) = &mut parser_out {
         println!("{:#?}", out);
         if let Some(stmt) = out.pop() {
-            let typed_stmt = typechecker::infer_stmt(&ctx, stmt);
+            let typed_stmt = typechecker::infer_stmt(&mut ctx, stmt);
             println!("{:#?}", typed_stmt);
         }
     }

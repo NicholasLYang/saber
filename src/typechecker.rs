@@ -1,5 +1,5 @@
 use ast::Value;
-use ast::{Expr, Name, Op, Stmt, Type, TypedExpr, TypedStmt};
+use ast::{Expr, Name, Op, Pat, Stmt, Type, TypedExpr, TypedStmt};
 use std::collections::HashMap;
 
 #[derive(Debug, Fail, PartialEq)]
@@ -17,6 +17,8 @@ pub enum TypeError {
         lhs_type: Type,
         rhs_type: Type,
     },
+    #[fail(display = "Could not unify {:?} with {:?}", type1, type2)]
+    UnificationFailure { type1: Type, type2: Type },
 }
 
 pub fn infer_value(value: Value) -> TypedExpr {
@@ -32,11 +34,37 @@ pub fn infer_value(value: Value) -> TypedExpr {
     }
 }
 
-pub fn infer_stmt(ctx: &HashMap<Name, Type>, stmt: Stmt) -> Result<TypedStmt, TypeError> {
+pub fn infer_stmt(ctx: &mut HashMap<Name, Type>, stmt: Stmt) -> Result<TypedStmt, TypeError> {
     match stmt {
         Stmt::Expr(expr) => {
             let typed_expr = infer_expr(ctx, expr)?;
             Ok(TypedStmt::Expr(typed_expr))
+        }
+        Stmt::Asgn(pat, expr) => infer_asgn(ctx, pat, expr),
+        _ => Err(TypeError::NotImplemented),
+    }
+}
+
+pub fn infer_asgn(
+    ctx: &mut HashMap<Name, Type>,
+    pat: Pat,
+    expr: Expr,
+) -> Result<TypedStmt, TypeError> {
+    let typed_rhs = infer_expr(ctx, expr)?;
+    match pat {
+        Pat::Id(name, Some(type_annotation)) => {
+            if unify(ctx, &type_annotation, typed_rhs.get_type()) {
+                ctx.insert(name.clone(), type_annotation.clone());
+                Ok(TypedStmt::Asgn(
+                    Pat::Id(name, Some(type_annotation)),
+                    typed_rhs,
+                ))
+            } else {
+                Err(TypeError::UnificationFailure {
+                    type1: type_annotation,
+                    type2: typed_rhs.get_type().clone(),
+                })
+            }
         }
         _ => Err(TypeError::NotImplemented),
     }
