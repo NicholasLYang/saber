@@ -1,7 +1,7 @@
 use std::str::CharIndices;
 
 #[derive(Debug, PartialEq)]
-pub enum Token<'input> {
+pub enum Token {
     Illegal,
     EndOfFile,
     False,
@@ -49,7 +49,7 @@ pub enum Token<'input> {
     TimesEqual,
     FatArrow,
     Slash,
-    String { content: &'input str },
+    String(String),
 }
 
 pub type Spanned<'a, Token, Loc, Error> = Result<(Loc, Token, Loc), Error>;
@@ -103,8 +103,8 @@ impl<'input> Lexer<'input> {
     fn lookahead_match(
         &mut self,
         start_pos: usize,
-        matched_token: Token<'input>,
-        alt_token: Token<'input>,
+        matched_token: Token,
+        alt_token: Token,
         match_ch: char,
     ) -> <Lexer<'input> as Iterator>::Item {
         match self.lookahead {
@@ -155,9 +155,7 @@ impl<'input> Lexer<'input> {
                 self.bump();
                 Ok((
                     start_pos,
-                    Token::String {
-                        content: &self.source[start_pos + 1..i],
-                    },
+                    Token::String(self.source[start_pos + 1..i].to_string()),
                     i,
                 ))
             }
@@ -214,7 +212,7 @@ impl<'input> Lexer<'input> {
 }
 
 impl<'input> Iterator for Lexer<'input> {
-    type Item = Spanned<'input, Token<'input>, usize, LexicalError>;
+    type Item = Spanned<'input, Token, usize, LexicalError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.skip_whitespace();

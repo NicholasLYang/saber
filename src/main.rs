@@ -7,7 +7,7 @@ extern crate failure_derive;
 extern crate lalrpop_util;
 
 lalrpop_mod!(pub parser);
-use crate::ast::Type;
+use crate::ast::{Name, Type};
 use std::collections::HashMap;
 use std::io;
 use std::io::Write;
@@ -16,6 +16,15 @@ mod ast;
 mod code_generator;
 mod lexer;
 mod typechecker;
+
+fn create_type_names() -> HashMap<Name, Type> {
+    let mut type_names = HashMap::new();
+    type_names.insert("integer".to_string(), Type::Int);
+    type_names.insert("float".to_string(), Type::Float);
+    type_names.insert("char".to_string(), Type::Char);
+    type_names.insert("stringr".to_string(), Type::String);
+    type_names
+}
 
 fn main() -> std::io::Result<()> {
     print!("> ");
@@ -31,10 +40,7 @@ fn main() -> std::io::Result<()> {
     let lexer = lexer::Lexer::new(&input);
     let mut parser_out = parser::ProgramParser::new().parse(lexer);
     let mut ctx = HashMap::new();
-    let mut type_names = HashMap::new();
-    type_names.insert("integer".to_string(), Type::Int);
-    type_names.insert("float".to_string(), Type::Float);
-    type_names.insert("char".to_string(), Type::Char);
+    let mut type_names = create_type_names();
     if let Ok(out) = &mut parser_out {
         println!("{:#?}", out);
         if let Some(stmt) = out.pop() {

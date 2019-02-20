@@ -89,6 +89,7 @@ pub enum TypedExpr {
 pub enum Value {
     Num(f32),
     Bool(bool),
+    String(String),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -119,6 +120,7 @@ pub enum Type {
     Int,
     Bool,
     Char,
+    String,
     Array(Box<Type>),
     // Pair. Not sure how to do larger than two arguments. Nesting?
     // Idk

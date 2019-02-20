@@ -31,6 +31,10 @@ pub fn infer_value(value: Value) -> TypedExpr {
             value,
             type_: Type::Bool,
         },
+        Value::String(s) => TypedExpr::Primary {
+            value: Value::String(s),
+            type_: Type::String,
+        },
     }
 }
 

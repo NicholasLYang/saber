@@ -1,4 +1,4 @@
-grammar<'input>;
+grammar;
 
 use lexer::{Token, LexicalError};
 use ast::{Op, Expr, Unary, Value, Stmt, Pat, TypeAnnotation};
@@ -138,6 +138,7 @@ Term: Expr = {
     "true" => Expr::Primary { value: Value::Bool(true) } ,
     "false" => Expr::Primary { value: Value::Bool(false) },
     <id: Identifier> => Expr::Var { name: id },
+    <string: String> => Expr::Primary { value: Value::String(string)},
     <callee: Term> <args: FunArgs> =>
         Expr::Call { callee: Box::new(callee), arg: Box::new(args) },
     "(" <Expression> ")",
@@ -164,7 +165,7 @@ extern {
     type Location = usize;
     type Error = LexicalError;
 
-    enum Token<'input> {
+    enum Token {
         "+"        => Token::Plus,
         "-"        => Token::Minus,
         "*"        => Token::Times,
@@ -199,6 +200,7 @@ extern {
         "["        => Token::LBracket,
         "]"        => Token::RBracket,
         ":"        => Token::Colon,
+        String     => Token::String(<String>),
         Num        => Token::Number(<f32>),
         Identifier => Token::Ident(<String>)
     }
