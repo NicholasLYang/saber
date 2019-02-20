@@ -29,11 +29,16 @@ pub Program: Vec<Stmt> = {
 }
 
 Statement: Stmt = {
-    "let" <l: Pattern> "=" <r: RightExpr> =>
-        Stmt::Asgn(l, r),
+    "let" <l: Pattern> <type_sig: OptTypeSig>  "=" <r: RightExpr> =>
+        Stmt::Asgn(l, type_sig, r),
     "return" <e: Expression> ";" => Stmt::Return(e),
     <l: Expression> ";" => Stmt::Expr(l),
     "if" <b: Expression> "{" <body: Statement*> "}" <els: OptElse?> => Stmt::If(b, body, els)
+}
+
+OptTypeSig: Option<Type> = {
+    ":" <type_: TypeAnnotation> => Some(type_),
+     => None
 }
 
 
@@ -138,11 +143,12 @@ Term: Expr = {
     "(" <Expression> ")",
 };
 
+
+
 Pattern: Pat = {
     "(" <pats: Comma<Pattern>> ")" => Pat::Tuple(pats),
     "{" <ids: Comma<Identifier>> "}" => Pat::Record(ids),
-    <id: Identifier> ":" <type_: TypeAnnotation> => Pat::Id(id, Some(type_)),
-    <id: Identifier> => Pat::Id(id, None),
+    <id: Identifier> => Pat::Id(id),
 }
 
 TypeAnnotation: Type = {

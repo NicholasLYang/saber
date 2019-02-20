@@ -40,7 +40,7 @@ pub fn infer_stmt(ctx: &mut HashMap<Name, Type>, stmt: Stmt) -> Result<TypedStmt
             let typed_expr = infer_expr(ctx, expr)?;
             Ok(TypedStmt::Expr(typed_expr))
         }
-        Stmt::Asgn(pat, expr) => infer_asgn(ctx, pat, expr),
+        Stmt::Asgn(pat, type_annotation, expr) => infer_asgn(ctx, pat, type_annotation, expr),
         _ => Err(TypeError::NotImplemented),
     }
 }
@@ -48,17 +48,15 @@ pub fn infer_stmt(ctx: &mut HashMap<Name, Type>, stmt: Stmt) -> Result<TypedStmt
 pub fn infer_asgn(
     ctx: &mut HashMap<Name, Type>,
     pat: Pat,
+    type_annotation: Option<Type>,
     expr: Expr,
 ) -> Result<TypedStmt, TypeError> {
     let typed_rhs = infer_expr(ctx, expr)?;
-    match pat {
-        Pat::Id(name, Some(type_annotation)) => {
+    match (type_annotation, pat) {
+        (Some(type_annotation), Pat::Id(name)) => {
             if unify(ctx, &type_annotation, typed_rhs.get_type()) {
                 ctx.insert(name.clone(), type_annotation.clone());
-                Ok(TypedStmt::Asgn(
-                    Pat::Id(name, Some(type_annotation)),
-                    typed_rhs,
-                ))
+                Ok(TypedStmt::Asgn(Pat::Id(name), typed_rhs))
             } else {
                 Err(TypeError::UnificationFailure {
                     type1: type_annotation,
@@ -66,6 +64,7 @@ pub fn infer_asgn(
                 })
             }
         }
+        (None, Pat::Id(name)) => Ok(TypedStmt::Asgn(Pat::Id(name), typed_rhs)),
         _ => Err(TypeError::NotImplemented),
     }
 }
@@ -135,7 +134,6 @@ pub fn infer_op(
                 None
             }
         }
-        _ => None,
     }
 }
 
