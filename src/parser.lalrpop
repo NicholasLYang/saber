@@ -1,7 +1,7 @@
 grammar<'input>;
 
 use lexer::{Token, LexicalError};
-use ast::{Op, Expr, Unary, Value, Stmt, Pat, Type};
+use ast::{Op, Expr, Unary, Value, Stmt, Pat, TypeAnnotation};
 
 // Macros
 
@@ -36,7 +36,7 @@ Statement: Stmt = {
     "if" <b: Expression> "{" <body: Statement*> "}" <els: OptElse?> => Stmt::If(b, body, els)
 }
 
-OptTypeSig: Option<Type> = {
+OptTypeSig: Option<TypeAnnotation> = {
     ":" <type_: TypeAnnotation> => Some(type_),
      => None
 }
@@ -151,12 +151,9 @@ Pattern: Pat = {
     <id: Identifier> => Pat::Id(id),
 }
 
-TypeAnnotation: Type = {
-    "[" <type_: TypeAnnotation> "]" => Type::Vec(Box::new(type_)),
-    <id: Identifier> => Type::Var(id),
-    "(" <fst: TypeAnnotation> "," <snd: TypeAnnotation> ")" => {
-       Type::Tuple(Box::new(fst), Box::new(snd))
-    }
+TypeAnnotation: TypeAnnotation = {
+    "[" <type_: TypeAnnotation> "]" => TypeAnnotation::Array(Box::new(type_)),
+    <id: Identifier> => TypeAnnotation::Name(id),
 }
 
 FunArgs: Expr = {

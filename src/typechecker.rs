@@ -1,5 +1,5 @@
 use ast::Value;
-use ast::{Expr, Name, Op, Pat, Stmt, Type, TypedExpr, TypedStmt};
+use ast::{Expr, Name, Op, Pat, Stmt, Type, TypeAnnotation, TypedExpr, TypedStmt};
 use std::collections::HashMap;
 
 #[derive(Debug, Fail, PartialEq)]
@@ -34,32 +34,67 @@ pub fn infer_value(value: Value) -> TypedExpr {
     }
 }
 
-pub fn infer_stmt(ctx: &mut HashMap<Name, Type>, stmt: Stmt) -> Result<TypedStmt, TypeError> {
+pub fn infer_stmt(
+    ctx: &mut HashMap<Name, Type>,
+    type_names: &HashMap<Name, Type>,
+    stmt: Stmt,
+) -> Result<TypedStmt, TypeError> {
     match stmt {
         Stmt::Expr(expr) => {
             let typed_expr = infer_expr(ctx, expr)?;
             Ok(TypedStmt::Expr(typed_expr))
         }
-        Stmt::Asgn(pat, type_annotation, expr) => infer_asgn(ctx, pat, type_annotation, expr),
+        Stmt::Asgn(pat, type_annotation, expr) => {
+            infer_asgn(ctx, type_names, pat, type_annotation, expr)
+        }
         _ => Err(TypeError::NotImplemented),
+    }
+}
+
+fn lookup_type_annotation(
+    type_names: &HashMap<Name, Type>,
+    annotation: TypeAnnotation,
+) -> Option<Type> {
+    match annotation {
+        TypeAnnotation::Array(annotation) => {
+            if let Some(type_) = lookup_type_annotation(type_names, *annotation) {
+                Some(Type::Array(Box::new(type_)))
+            } else {
+                None
+            }
+        }
+        TypeAnnotation::Name(name) => {
+            if let Some(type_) = type_names.get(&name) {
+                Some(type_.clone())
+            } else {
+                None
+            }
+        }
     }
 }
 
 pub fn infer_asgn(
     ctx: &mut HashMap<Name, Type>,
+    type_names: &HashMap<Name, Type>,
     pat: Pat,
-    type_annotation: Option<Type>,
+    type_annotation: Option<TypeAnnotation>,
     expr: Expr,
 ) -> Result<TypedStmt, TypeError> {
     let typed_rhs = infer_expr(ctx, expr)?;
-    match (type_annotation, pat) {
-        (Some(type_annotation), Pat::Id(name)) => {
-            if unify(ctx, &type_annotation, typed_rhs.get_type()) {
-                ctx.insert(name.clone(), type_annotation.clone());
+    let expected_type = if let Some(annotation) = type_annotation {
+        lookup_type_annotation(type_names, annotation)
+    } else {
+        None
+    };
+
+    match (expected_type, pat) {
+        (Some(expected_type), Pat::Id(name)) => {
+            if unify(ctx, &expected_type, typed_rhs.get_type()) {
+                ctx.insert(name.clone(), expected_type.clone());
                 Ok(TypedStmt::Asgn(Pat::Id(name), typed_rhs))
             } else {
                 Err(TypeError::UnificationFailure {
-                    type1: type_annotation,
+                    type1: expected_type,
                     type2: typed_rhs.get_type().clone(),
                 })
             }
@@ -149,6 +184,7 @@ pub fn unify(ctx: &HashMap<Name, Type>, type1: &Type, type2: &Type) -> bool {
             unify(ctx, param_type1, param_type2) && unify(ctx, return_type1, return_type2)
         }
         (Type::Float, Type::Bool) | (Type::Bool, Type::Float) => true,
+        (Type::Float, Type::Int) | (Type::Int, Type::Float) => true,
         _ => false,
     }
 }

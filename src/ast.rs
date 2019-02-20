@@ -2,7 +2,7 @@ pub type Name = String;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Stmt {
-    Asgn(Pat, Option<Type>, Expr),
+    Asgn(Pat, Option<TypeAnnotation>, Expr),
     Expr(Expr),
     Return(Expr),
     If(Expr, Vec<Stmt>, Option<Vec<Stmt>>),
@@ -116,14 +116,20 @@ pub enum Unary {
 #[derive(Debug, PartialEq, Clone)]
 pub enum Type {
     Float,
+    Int,
     Bool,
     Char,
-    Var(Name),
-    Vec(Box<Type>),
+    Array(Box<Type>),
     // Pair. Not sure how to do larger than two arguments. Nesting?
     // Idk
     Tuple(Box<Type>, Box<Type>),
     Arrow(Box<Type>, Box<Type>),
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum TypeAnnotation {
+    Array(Box<TypeAnnotation>),
+    Name(Name),
 }
 
 #[derive(Debug, PartialEq, Clone)]
