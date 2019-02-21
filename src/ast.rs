@@ -2,7 +2,7 @@ pub type Name = String;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Stmt {
-    Asgn(Pat, Option<TypeAnnotation>, Expr),
+    Asgn(Pat, Expr),
     Expr(Expr),
     Return(Expr),
     If(Expr, Vec<Stmt>, Option<Vec<Stmt>>),
@@ -129,14 +129,14 @@ pub enum Type {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub enum TypeAnnotation {
-    Array(Box<TypeAnnotation>),
+pub enum TypeSig {
+    Array(Box<TypeSig>),
     Name(Name),
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Pat {
-    Id(Name),
+    Id(Name, Option<TypeSig>),
     Record(Vec<Name>),
     Tuple(Vec<Pat>),
 }

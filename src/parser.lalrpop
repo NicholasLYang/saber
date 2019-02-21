@@ -1,7 +1,7 @@
 grammar;
 
 use lexer::{Token, LexicalError};
-use ast::{Op, Expr, Unary, Value, Stmt, Pat, TypeAnnotation};
+use ast::{Op, Expr, Unary, Value, Stmt, Pat, TypeSig};
 
 // Macros
 
@@ -29,16 +29,11 @@ pub Program: Vec<Stmt> = {
 }
 
 Statement: Stmt = {
-    "let" <l: Pattern> <type_sig: OptTypeSig>  "=" <r: RightExpr> =>
-        Stmt::Asgn(l, type_sig, r),
+    "let" <l: Pattern> "=" <r: RightExpr> =>
+        Stmt::Asgn(l, r),
     "return" <e: Expression> ";" => Stmt::Return(e),
     <l: Expression> ";" => Stmt::Expr(l),
     "if" <b: Expression> "{" <body: Statement*> "}" <els: OptElse?> => Stmt::If(b, body, els)
-}
-
-OptTypeSig: Option<TypeAnnotation> = {
-    ":" <type_: TypeAnnotation> => Some(type_),
-     => None
 }
 
 
@@ -144,17 +139,20 @@ Term: Expr = {
     "(" <Expression> ")",
 };
 
-
+OptTypeSig: Option<TypeSig> = {
+    ":" <type_: TypeSig> => Some(type_),
+     => None
+}
 
 Pattern: Pat = {
     "(" <pats: Comma<Pattern>> ")" => Pat::Tuple(pats),
     "{" <ids: Comma<Identifier>> "}" => Pat::Record(ids),
-    <id: Identifier> => Pat::Id(id),
+    <id: Identifier> <type_sig: OptTypeSig> => Pat::Id(id, type_sig),
 }
 
-TypeAnnotation: TypeAnnotation = {
-    "[" <type_: TypeAnnotation> "]" => TypeAnnotation::Array(Box::new(type_)),
-    <id: Identifier> => TypeAnnotation::Name(id),
+TypeSig: TypeSig = {
+    "[" <type_: TypeSig> "]" => TypeSig::Array(Box::new(type_)),
+    <id: Identifier> => TypeSig::Name(id),
 }
 
 FunArgs: Expr = {

@@ -40,7 +40,7 @@ fn main() -> std::io::Result<()> {
     let lexer = lexer::Lexer::new(&input);
     let mut parser_out = parser::ProgramParser::new().parse(lexer);
     let mut ctx = HashMap::new();
-    let mut type_names = create_type_names();
+    let type_names = create_type_names();
     if let Ok(out) = &mut parser_out {
         println!("{:#?}", out);
         if let Some(stmt) = out.pop() {
