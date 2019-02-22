@@ -94,6 +94,7 @@ impl<'input> Lexer<'input> {
             lookahead2,
         }
     }
+
     fn bump(&mut self) -> Option<(usize, char)> {
         let next = self.lookahead;
         self.lookahead = self.lookahead2;
