@@ -41,10 +41,7 @@ pub enum Expr {
         callee: Box<Expr>,
         arg: Box<Expr>,
     },
-    Tuple {
-        fst: Box<Expr>,
-        snd: Box<Expr>,
-    },
+    Tuple(Vec<Expr>),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -78,11 +75,7 @@ pub enum TypedExpr {
         arg: Box<TypedExpr>,
         type_: Type,
     },
-    Tuple {
-        fst: Box<TypedExpr>,
-        snd: Box<TypedExpr>,
-        type_: Type,
-    },
+    Tuple(Vec<TypedExpr>, Type),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -121,10 +114,11 @@ pub enum Type {
     Bool,
     Char,
     String,
+    Var(Name),
     Array(Box<Type>),
     // Pair. Not sure how to do larger than two arguments. Nesting?
     // Idk
-    Tuple(Box<Type>, Box<Type>),
+    Tuple(Vec<Type>),
     Arrow(Box<Type>, Box<Type>),
 }
 
@@ -133,7 +127,6 @@ pub enum TypeSig {
     Array(Box<TypeSig>),
     Name(Name),
 }
-
 #[derive(Debug, PartialEq, Clone)]
 pub enum Pat {
     Id(Name, Option<TypeSig>),
@@ -147,11 +140,7 @@ impl TypedExpr {
         match &self {
             TypedExpr::Primary { value: _, type_ } => type_,
             TypedExpr::Var { name: _, type_ } => type_,
-            TypedExpr::Tuple {
-                fst: _,
-                snd: _,
-                type_,
-            } => type_,
+            TypedExpr::Tuple(elems, type_) => type_,
             TypedExpr::BinOp {
                 op: _,
                 lhs: _,

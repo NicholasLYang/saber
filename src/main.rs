@@ -2,12 +2,12 @@ extern crate failure;
 
 #[macro_use]
 extern crate failure_derive;
-
+extern crate itertools;
 #[macro_use]
 extern crate lalrpop_util;
 
 lalrpop_mod!(pub parser);
-use crate::ast::{Name, Type};
+use crate::typechecker::TypeChecker;
 use std::collections::HashMap;
 use std::io;
 use std::io::Write;
@@ -16,15 +16,6 @@ mod ast;
 mod code_generator;
 mod lexer;
 mod typechecker;
-
-fn create_type_names() -> HashMap<Name, Type> {
-    let mut type_names = HashMap::new();
-    type_names.insert("integer".to_string(), Type::Int);
-    type_names.insert("float".to_string(), Type::Float);
-    type_names.insert("char".to_string(), Type::Char);
-    type_names.insert("stringr".to_string(), Type::String);
-    type_names
-}
 
 fn main() -> std::io::Result<()> {
     print!("> ");
@@ -39,12 +30,12 @@ fn main() -> std::io::Result<()> {
         .expect("Couldn't read line");
     let lexer = lexer::Lexer::new(&input);
     let mut parser_out = parser::ProgramParser::new().parse(lexer);
-    let mut ctx = HashMap::new();
-    let type_names = create_type_names();
+    let mut typechecker = TypeChecker::new();
+
     if let Ok(out) = &mut parser_out {
         println!("{:#?}", out);
         if let Some(stmt) = out.pop() {
-            let typed_stmt = typechecker::infer_stmt(&mut ctx, &type_names, stmt);
+            let typed_stmt = typechecker.infer_stmt(stmt);
             println!("{:#?}", typed_stmt);
         }
     }

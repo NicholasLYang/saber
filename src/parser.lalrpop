@@ -48,8 +48,7 @@ RightExpr: Expr = {
 }
 
 Expression: Expr = {
-    Function,
-    CommaExpr,
+    Function
 }
 
 Function: Expr = {
@@ -80,8 +79,6 @@ FunParams: Pat = {
     <Pattern>
 }
 
-CommaExpr: Expr = Tier<CommaOp, Equality>;
-
 
 Equality: Expr = {
     <l:Comparison> "!=" <r:Comparison> =>
@@ -104,10 +101,6 @@ Comparison: Expr = {
     Addition
 }
 
-CommaOp: Op = {
-    "," => Op::Comma
-}
-
 AddOp: Op = {
     "+" => Op::Plus,
     "-" => Op::Minus
@@ -125,8 +118,13 @@ Multiplication: Expr = Tier<MultOp, Unary>;
 Unary: Expr = {
     "!" <u: Term> => Expr::UnaryOp { unary: Unary::Bang, rhs: Box::new(u)},
     "-" <u: Term> => Expr::UnaryOp { unary: Unary::Minus, rhs: Box::new(u)},
-    Term
+    Tuple,
 }
+
+Tuple: Expr = {
+    "(" <elems: Comma<Tuple>> ")" => Expr::Tuple(elems),
+    Term
+};
 
 Term: Expr = {
     <n: Num> => Expr::Primary { value: Value::Num(n) } ,
@@ -135,7 +133,7 @@ Term: Expr = {
     <id: Identifier> => Expr::Var { name: id },
     <string: String> => Expr::Primary { value: Value::String(string)},
     <callee: Term> <args: FunArgs> =>
-        Expr::Call { callee: Box::new(callee), arg: Box::new(args) },
+        Expr::Call { callee: Box::new(callee), arg: Box::new(args) },   
     "(" <Expression> ")",
 };
 

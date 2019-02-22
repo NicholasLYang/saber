@@ -21,164 +21,237 @@ pub enum TypeError {
     UnificationFailure { type1: Type, type2: Type },
     #[fail(display = "Type {:?} does not exit", type_name)]
     TypeDoesNotExist { type_name: Name },
+    #[fail(display = "Arity mismatch: Expected {:?} but got {:?}", arity1, arity2)]
+    ArityMismatch { arity1: usize, arity2: usize },
 }
 
-pub fn infer_value(value: Value) -> TypedExpr {
-    match value {
-        Value::Num(_n) => TypedExpr::Primary {
-            value,
-            type_: Type::Float,
-        },
-        Value::Bool(_b) => TypedExpr::Primary {
-            value,
-            type_: Type::Bool,
-        },
-        Value::String(s) => TypedExpr::Primary {
-            value: Value::String(s),
-            type_: Type::String,
-        },
-    }
+pub struct TypeChecker {
+    ctx: HashMap<Name, Type>,
+    type_names: HashMap<Name, Type>,
+    variable_counter: usize,
 }
 
-pub fn infer_stmt(
-    ctx: &mut HashMap<Name, Type>,
-    type_names: &HashMap<Name, Type>,
-    stmt: Stmt,
-) -> Result<TypedStmt, TypeError> {
-    match stmt {
-        Stmt::Expr(expr) => {
-            let typed_expr = infer_expr(ctx, expr)?;
-            Ok(TypedStmt::Expr(typed_expr))
+impl TypeChecker {
+    pub fn new() -> TypeChecker {
+        let ctx = HashMap::new();
+        let mut type_names = HashMap::new();
+        type_names.insert("integer".to_string(), Type::Int);
+        type_names.insert("float".to_string(), Type::Float);
+        type_names.insert("char".to_string(), Type::Char);
+        type_names.insert("string".to_string(), Type::String);
+        TypeChecker {
+            ctx,
+            type_names,
+            variable_counter: 0,
         }
-        Stmt::Asgn(pat, expr) => infer_asgn(ctx, type_names, pat, expr),
-        _ => Err(TypeError::NotImplemented),
     }
-}
 
-fn lookup_type_sig(type_names: &HashMap<Name, Type>, sig: &TypeSig) -> Result<Type, TypeError> {
-    match sig {
-        TypeSig::Array(sig) => {
-            let type_ = lookup_type_sig(type_names, sig)?;
-            Ok(Type::Array(Box::new(type_)))
+    pub fn infer_stmt(&mut self, stmt: Stmt) -> Result<TypedStmt, TypeError> {
+        match stmt {
+            Stmt::Expr(expr) => {
+                let typed_expr = self.infer_expr(expr)?;
+                Ok(TypedStmt::Expr(typed_expr))
+            }
+            Stmt::Asgn(pat, expr) => {
+                let typed_rhs = self.infer_expr(expr)?;
+                let asgn_type = self.infer_asgn(&pat, typed_rhs.get_type().clone());
+                Ok(TypedStmt::Asgn(pat, typed_rhs))
+            }
+            _ => Err(TypeError::NotImplemented),
         }
-        TypeSig::Name(name) => {
-            if let Some(type_) = type_names.get(name) {
-                Ok(type_.clone())
-            } else {
-                Err(TypeError::TypeDoesNotExist {
-                    type_name: name.clone(),
-                })
+    }
+
+    fn infer_value(&self, value: Value) -> TypedExpr {
+        match value {
+            Value::Num(_n) => TypedExpr::Primary {
+                value,
+                type_: Type::Float,
+            },
+            Value::Bool(_b) => TypedExpr::Primary {
+                value,
+                type_: Type::Bool,
+            },
+            Value::String(s) => TypedExpr::Primary {
+                value: Value::String(s),
+                type_: Type::String,
+            },
+        }
+    }
+
+    fn lookup_type_sig(&self, sig: &TypeSig) -> Result<Type, TypeError> {
+        match sig {
+            TypeSig::Array(sig) => {
+                let type_ = self.lookup_type_sig(sig)?;
+                Ok(Type::Array(Box::new(type_.clone())))
+            }
+            TypeSig::Name(name) => {
+                if let Some(type_) = self.type_names.get(name) {
+                    Ok(type_.clone())
+                } else {
+                    Err(TypeError::TypeDoesNotExist {
+                        type_name: name.clone(),
+                    })
+                }
             }
         }
     }
-}
 
-pub fn infer_asgn(
-    ctx: &mut HashMap<Name, Type>,
-    type_names: &HashMap<Name, Type>,
-    pat: Pat,
-    expr: Expr,
-) -> Result<TypedStmt, TypeError> {
-    let typed_rhs = infer_expr(ctx, expr)?;
-    match pat {
-        Pat::Id(name, Some(type_sig)) => {
-            let expected_type = lookup_type_sig(type_names, &type_sig)?;
-            if unify(ctx, &expected_type, typed_rhs.get_type()) {
-                ctx.insert(name.clone(), expected_type.clone());
-                Ok(TypedStmt::Asgn(Pat::Id(name, Some(type_sig)), typed_rhs))
-            } else {
-                Err(TypeError::UnificationFailure {
-                    type1: expected_type,
-                    type2: typed_rhs.get_type().clone(),
-                })
+    fn infer_multiple_asgn(&mut self, asgns: &Vec<Pat>, rhs_type: Type) -> Result<Type, TypeError> {
+        let pat_types = self.get_types_from_pat_vec(asgns)?;
+        match rhs_type {
+            Type::Tuple(types) => {
+                if self.unify_type_vectors(&pat_types, &types) {
+                    return Ok(Type::Tuple(types));
+                } else {
+                    return Err(TypeError::UnificationFailure {
+                        type1: Type::Tuple(pat_types),
+                        type2: Type::Tuple(types),
+                    });
+                }
             }
-        }
-        Pat::Id(name, None) => Ok(TypedStmt::Asgn(Pat::Id(name, None), typed_rhs)),
-        _ => Err(TypeError::NotImplemented),
-    }
-}
-
-pub fn infer_expr(ctx: &HashMap<Name, Type>, expr: Expr) -> Result<TypedExpr, TypeError> {
-    match expr {
-        Expr::Primary { value } => Ok(infer_value(value)),
-        Expr::Var { name } => match ctx.get(&name) {
-            Some(type_) => Ok(TypedExpr::Var {
-                name,
-                type_: type_.clone(),
+            _ => Err(TypeError::UnificationFailure {
+                type1: rhs_type.clone(),
+                type2: Type::Tuple(pat_types),
             }),
-            None => Err(TypeError::InferFailure {
-                name: name.to_string(),
-            }),
-        },
-        Expr::BinOp { op, lhs, rhs } => {
-            let typed_lhs = infer_expr(&ctx, *lhs)?;
-            let typed_rhs = infer_expr(&ctx, *rhs)?;
-            let lhs_type = typed_lhs.get_type().clone();
-            let rhs_type = typed_rhs.get_type().clone();
-            match infer_op(ctx, &op, lhs_type, rhs_type) {
-                Some(op_type) => Ok(TypedExpr::BinOp {
-                    op,
-                    lhs: Box::new(typed_lhs),
-                    rhs: Box::new(typed_rhs),
-                    type_: op_type,
-                }),
-                None => Err(TypeError::OpFailure {
-                    op: op.clone(),
-                    lhs_type: typed_lhs.get_type().clone(),
-                    rhs_type: typed_rhs.get_type().clone(),
-                }),
-            }
-        }
-        _ => Err(TypeError::NotImplemented),
-    }
-}
-
-pub fn infer_op(
-    ctx: &HashMap<Name, Type>,
-    op: &Op,
-    lhs_type: Type,
-    rhs_type: Type,
-) -> Option<Type> {
-    match op {
-        Op::Comma => Some(Type::Tuple(Box::new(lhs_type), Box::new(rhs_type))),
-        Op::Plus | Op::Minus | Op::Times | Op::Div => match (lhs_type, rhs_type) {
-            (Type::Float, Type::Float) | (Type::Bool, Type::Float) | (Type::Float, Type::Bool) => {
-                Some(Type::Float)
-            }
-            _ => None,
-        },
-        Op::BangEqual | Op::EqualEqual => {
-            if unify(ctx, &lhs_type, &rhs_type) {
-                Some(Type::Bool)
-            } else {
-                None
-            }
-        }
-        Op::GreaterEqual | Op::Greater | Op::Less | Op::LessEqual => {
-            // If we can unify lhs and rhs, and lhs with Float then
-            // by transitivity we can unify everything with float
-            if unify(ctx, &lhs_type, &rhs_type) && unify(ctx, &lhs_type, &Type::Float) {
-                Some(Type::Bool)
-            } else {
-                None
-            }
         }
     }
-}
 
-pub fn unify(ctx: &HashMap<Name, Type>, type1: &Type, type2: &Type) -> bool {
-    if type1 == type2 {
+    fn get_types_from_pat_vec(&mut self, patterns: &Vec<Pat>) -> Result<Vec<Type>, TypeError> {
+        let mut types = Vec::new();
+        for pat in patterns.iter() {
+            let type_ = match pat {
+                Pat::Id(name, Some(type_sig)) => self.lookup_type_sig(&type_sig)?,
+                Pat::Id(name, None) => self.get_fresh_type_var(),
+                _ => self.get_fresh_type_var(),
+            };
+            types.push(type_);
+        }
+        Ok(types)
+    }
+
+    fn get_fresh_type_var(&mut self) -> Type {
+        let type_var = Type::Var(self.variable_counter.to_string());
+        self.variable_counter += 1;
+        type_var
+    }
+
+    fn infer_asgn(&mut self, pat: &Pat, rhs_type: Type) -> Result<Type, TypeError> {
+        match pat {
+            Pat::Id(name, Some(type_sig)) => {
+                let expected_type = self.lookup_type_sig(&type_sig)?;
+                if self.unify(&expected_type, &rhs_type) {
+                    self.ctx.insert(name.clone(), expected_type.clone());
+                    Ok(rhs_type)
+                } else {
+                    Err(TypeError::UnificationFailure {
+                        type1: expected_type,
+                        type2: rhs_type.clone(),
+                    })
+                }
+            }
+            Pat::Id(name, None) => Ok(self.get_fresh_type_var()),
+            Pat::Tuple(pats) => self.infer_multiple_asgn(pats, rhs_type),
+            _ => Err(TypeError::NotImplemented),
+        }
+    }
+
+    fn infer_expr(&self, expr: Expr) -> Result<TypedExpr, TypeError> {
+        match expr {
+            Expr::Primary { value } => Ok(self.infer_value(value)),
+            Expr::Var { name } => match self.ctx.get(&name) {
+                Some(type_) => Ok(TypedExpr::Var {
+                    name,
+                    type_: type_.clone(),
+                }),
+                None => Err(TypeError::InferFailure {
+                    name: name.to_string(),
+                }),
+            },
+            Expr::BinOp { op, lhs, rhs } => {
+                let typed_lhs = self.infer_expr(*lhs)?;
+                let typed_rhs = self.infer_expr(*rhs)?;
+                let lhs_type = typed_lhs.get_type().clone();
+                let rhs_type = typed_rhs.get_type().clone();
+                match self.infer_op(&op, lhs_type, rhs_type) {
+                    Some(op_type) => Ok(TypedExpr::BinOp {
+                        op,
+                        lhs: Box::new(typed_lhs),
+                        rhs: Box::new(typed_rhs),
+                        type_: op_type,
+                    }),
+                    None => Err(TypeError::OpFailure {
+                        op: op.clone(),
+                        lhs_type: typed_lhs.get_type().clone(),
+                        rhs_type: typed_rhs.get_type().clone(),
+                    }),
+                }
+            }
+            Expr::Tuple(elems) => {
+                let mut typed_elems = Vec::new();
+                let mut types = Vec::new();
+                for elem in elems {
+                    let typed_elem = self.infer_expr(elem)?;
+                    types.push(typed_elem.get_type().clone());
+                    typed_elems.push(typed_elem);
+                }
+                Ok(TypedExpr::Tuple(typed_elems, Type::Tuple(types)))
+            }
+            _ => Err(TypeError::NotImplemented),
+        }
+    }
+
+    fn infer_op(&self, op: &Op, lhs_type: Type, rhs_type: Type) -> Option<Type> {
+        match op {
+            Op::Comma => Some(Type::Tuple(vec![lhs_type, rhs_type])),
+            Op::Plus | Op::Minus | Op::Times | Op::Div => match (lhs_type, rhs_type) {
+                (Type::Float, Type::Float)
+                | (Type::Bool, Type::Float)
+                | (Type::Float, Type::Bool) => Some(Type::Float),
+                _ => None,
+            },
+            Op::BangEqual | Op::EqualEqual => {
+                if self.unify(&lhs_type, &rhs_type) {
+                    Some(Type::Bool)
+                } else {
+                    None
+                }
+            }
+            Op::GreaterEqual | Op::Greater | Op::Less | Op::LessEqual => {
+                // If we can unify lhs and rhs, and lhs with Float then
+                // by transitivity we can unify everything with float
+                if self.unify(&lhs_type, &rhs_type) && self.unify(&lhs_type, &Type::Float) {
+                    Some(Type::Bool)
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
+    fn unify_type_vectors(&self, type_vector1: &Vec<Type>, type_vector2: &Vec<Type>) -> bool {
+        if type_vector1.len() != type_vector2.len() {
+            return false;
+        }
+        for (t1, t2) in type_vector1.iter().zip(type_vector2.iter()) {
+            if !self.unify(t1, t2) {
+                return false;
+            }
+        }
         return true;
     }
-    match (type1, type2) {
-        (Type::Tuple(fst1, snd1), Type::Tuple(fst2, snd2)) => {
-            unify(ctx, fst1, fst2) && unify(ctx, snd1, snd2)
+
+    fn unify(&self, type1: &Type, type2: &Type) -> bool {
+        if type1 == type2 {
+            return true;
         }
-        (Type::Arrow(param_type1, return_type1), Type::Arrow(param_type2, return_type2)) => {
-            unify(ctx, param_type1, param_type2) && unify(ctx, return_type1, return_type2)
+        match (type1, type2) {
+            (Type::Tuple(t1), Type::Tuple(t2)) => self.unify_type_vectors(t1, t2),
+            (Type::Arrow(param_type1, return_type1), Type::Arrow(param_type2, return_type2)) => {
+                self.unify(param_type1, param_type2) && self.unify(return_type1, return_type2)
+            }
+            (Type::Float, Type::Bool) | (Type::Bool, Type::Float) => true,
+            (Type::Float, Type::Int) | (Type::Int, Type::Float) => true,
+            _ => false,
         }
-        (Type::Float, Type::Bool) | (Type::Bool, Type::Float) => true,
-        (Type::Float, Type::Int) | (Type::Int, Type::Float) => true,
-        _ => false,
     }
 }
