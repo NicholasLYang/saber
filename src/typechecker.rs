@@ -241,9 +241,11 @@ impl TypeChecker {
                 }
             }
             Op::GreaterEqual | Op::Greater | Op::Less | Op::LessEqual => {
-                // If we can unify lhs and rhs, and lhs with Float then
+                // If we can unify lhs and rhs, and lhs with Int or Float then
                 // by transitivity we can unify everything with float
-                if self.unify(&lhs_type, &rhs_type) && self.unify(&lhs_type, &Type::Float) {
+                let is_num =
+                    self.unify(&lhs_type, &Type::Float) || self.unify(&lhs_type, &Type::Int);
+                if self.unify(&lhs_type, &rhs_type) && is_num {
                     Some(Type::Bool)
                 } else {
                     None
@@ -273,7 +275,7 @@ impl TypeChecker {
             (Type::Arrow(param_type1, return_type1), Type::Arrow(param_type2, return_type2)) => {
                 self.unify(param_type1, param_type2) && self.unify(return_type1, return_type2)
             }
-            (Type::Float, Type::Bool) | (Type::Bool, Type::Float) => true,
+            (Type::Int, Type::Bool) | (Type::Bool, Type::Int) => true,
             _ => false,
         }
     }
