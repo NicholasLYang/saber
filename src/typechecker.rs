@@ -59,8 +59,23 @@ impl TypeChecker {
             }
             Stmt::Asgn(pat, expr) => {
                 let typed_rhs = self.infer_expr(expr)?;
-                let asgn_type = self.infer_asgn(&pat, typed_rhs.get_type().clone())?;
+                self.infer_asgn(&pat, typed_rhs.get_type().clone())?;
                 Ok(TypedStmt::Asgn(pat, typed_rhs))
+            }
+            Stmt::If(cond, then_stmt, else_stmt) => {
+                let typed_cond = self.infer_expr(cond)?;
+                if !self.unify(typed_cond.get_type(), &Type::Bool) {
+                    return Err(TypeError::UnificationFailure {
+                        type1: typed_cond.get_type().clone(),
+                        type2: Type::Bool,
+                    });
+                }
+                let typed_then = self.infer_stmt(*then_stmt)?;
+                let typed_else = match else_stmt {
+                    Some(else_stmt) => Some(Box::new(self.infer_stmt(*else_stmt)?)),
+                    None => None,
+                };
+                Ok(TypedStmt::If(typed_cond, Box::new(typed_then), typed_else))
             }
             _ => Err(TypeError::NotImplemented),
         }
@@ -129,8 +144,8 @@ impl TypeChecker {
         let mut types = Vec::new();
         for pat in patterns.iter() {
             let type_ = match pat {
-                Pat::Id(name, Some(type_sig)) => self.lookup_type_sig(&type_sig)?,
-                Pat::Id(name, None) => self.get_fresh_type_var(),
+                Pat::Id(_name, Some(type_sig)) => self.lookup_type_sig(&type_sig)?,
+                Pat::Id(_name, None) => self.get_fresh_type_var(),
                 _ => self.get_fresh_type_var(),
             };
             types.push(type_);
@@ -158,7 +173,7 @@ impl TypeChecker {
                     })
                 }
             }
-            Pat::Id(name, None) => Ok(self.get_fresh_type_var()),
+            Pat::Id(_name, None) => Ok(self.get_fresh_type_var()),
             Pat::Tuple(pats) => self.infer_multiple_asgn(pats, rhs_type),
             _ => Err(TypeError::NotImplemented),
         }

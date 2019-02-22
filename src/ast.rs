@@ -5,7 +5,8 @@ pub enum Stmt {
     Asgn(Pat, Expr),
     Expr(Expr),
     Return(Expr),
-    If(Expr, Vec<Stmt>, Option<Vec<Stmt>>),
+    Block(Vec<Stmt>),
+    If(Expr, Box<Stmt>, Option<Box<Stmt>>),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -13,7 +14,8 @@ pub enum TypedStmt {
     Asgn(Pat, TypedExpr),
     Expr(TypedExpr),
     Return(TypedExpr),
-    If(Expr, Vec<TypedStmt>, Option<Vec<TypedStmt>>),
+    Block(Vec<TypedStmt>),
+    If(TypedExpr, Box<TypedStmt>, Option<Box<TypedStmt>>),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -35,7 +37,7 @@ pub enum Expr {
     },
     Function {
         params: Pat,
-        body: Vec<Stmt>,
+        body: Box<Stmt>,
     },
     Call {
         callee: Box<Expr>,
@@ -67,7 +69,7 @@ pub enum TypedExpr {
     },
     Function {
         params: Pat,
-        body: Vec<TypedStmt>,
+        body: Box<TypedStmt>,
         type_: Type,
     },
     Call {
@@ -141,7 +143,7 @@ impl TypedExpr {
         match &self {
             TypedExpr::Primary { value: _, type_ } => type_,
             TypedExpr::Var { name: _, type_ } => type_,
-            TypedExpr::Tuple(elems, type_) => type_,
+            TypedExpr::Tuple(_elems, type_) => type_,
             TypedExpr::BinOp {
                 op: _,
                 lhs: _,

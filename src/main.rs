@@ -8,7 +8,6 @@ extern crate lalrpop_util;
 
 lalrpop_mod!(pub parser);
 use crate::typechecker::TypeChecker;
-use std::collections::HashMap;
 use std::io;
 use std::io::Write;
 

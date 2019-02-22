@@ -32,13 +32,14 @@ Statement: Stmt = {
     "let" <l: Pattern> "=" <r: RightExpr> =>
         Stmt::Asgn(l, r),
     "return" <e: Expression> ";" => Stmt::Return(e),
-    <l: Expression> ";" => Stmt::Expr(l),
-    "if" <b: Expression> "{" <body: Statement*> "}" <els: OptElse?> => Stmt::If(b, body, els)
+    "if" "(" <cond: Equality> ")" <then: Block> <els: OptElse?> =>
+        Stmt::If(cond, Box::new(then), els),
+    <l: Expression> ";" => Stmt::Expr(l)
 }
 
 
-OptElse: Vec<Stmt> = {
-    "else" <Block>,
+OptElse: Box<Stmt> = {
+    "else" <b: Block> => Box::new(b),
     
 }
 
@@ -56,20 +57,19 @@ Function: Expr = {
         Expr::Function{ params, body },
 }
 
-Block: Vec<Stmt> = {
+Block: Stmt = {
     "{" <stmts: Statement*> <expr: Expression?> "}" => {
         let mut stmts = stmts;
         if let Some(e) = expr {
             stmts.push(Stmt::Return(e));
         }
-        stmts
+        Stmt::Block(stmts)
     }
 }
 
-
-FunBody: Vec<Stmt> = {
-    <Block>,
-    "(" <e: Expression> ")" => vec![Stmt::Return(e)]
+FunBody: Box<Stmt> = {
+    <b: Block> => Box::new(b),
+    "(" <e: Expression> ")" => Box::new(Stmt::Return(e))
 }
 
 // Important distinction: params are the *variables* with function
@@ -83,8 +83,10 @@ FunParams: Pat = {
 Equality: Expr = {
     <l:Comparison> "!=" <r:Comparison> =>
         Expr::BinOp { op: Op::BangEqual, lhs: Box::new(l), rhs: Box::new(r) },
-    <l:Comparison> "==" <r:Comparison> =>
-        Expr::BinOp{ op: Op::EqualEqual, lhs: Box::new(l), rhs: Box::new(r) },
+    <l:Comparison> "==" <r:Comparison> => {
+        println!("COMPARISON");
+        Expr::BinOp{ op: Op::EqualEqual, lhs: Box::new(l), rhs: Box::new(r) }
+    },
     Comparison
 }
 
