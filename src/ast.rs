@@ -80,7 +80,8 @@ pub enum TypedExpr {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Value {
-    Num(f32),
+    Float(f32),
+    Integer(i32),
     Bool(bool),
     String(String),
 }

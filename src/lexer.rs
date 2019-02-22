@@ -16,7 +16,8 @@ pub enum Token {
     Let,
     While,
     Ident(String),
-    Number(f32),
+    Float(f32),
+    Integer(i32),
     LBrace,
     RBrace,
     LBracket,
@@ -167,11 +168,13 @@ impl<'input> Lexer<'input> {
 
     fn read_number(&mut self, start_pos: usize) -> <Lexer<'input> as Iterator>::Item {
         let mut end = self.take_while(|ch| ch.is_ascii_digit());
+        let mut is_decimal = false;
 
         if let Some((_, '.')) = self.lookahead {
             // Check if it's a decimal or a field access
             if let Some((_, next_ch)) = self.lookahead2 {
                 if next_ch.is_ascii_digit() {
+                    is_decimal = true;
                     self.bump();
                     end = self.take_while(|ch| ch.is_ascii_digit());
                 }
@@ -179,15 +182,27 @@ impl<'input> Lexer<'input> {
         }
 
         let end = end.unwrap_or_else(|| self.source.len());
-        Ok((
-            start_pos,
-            Token::Number(
-                self.source[start_pos..end]
-                    .parse()
-                    .expect("unparseable number"),
-            ),
-            end,
-        ))
+        if is_decimal {
+            Ok((
+                start_pos,
+                Token::Float(
+                    self.source[start_pos..end]
+                        .parse()
+                        .expect("unparseable number"),
+                ),
+                end,
+            ))
+        } else {
+            Ok((
+                start_pos,
+                Token::Integer(
+                    self.source[start_pos..end]
+                        .parse()
+                        .expect("unparseable number"),
+                ),
+                end,
+            ))
+        }
     }
 
     fn read_identifier(&mut self, start_pos: usize) -> <Lexer<'input> as Iterator>::Item {

@@ -33,12 +33,17 @@ pub struct TypeChecker {
 
 impl TypeChecker {
     pub fn new() -> TypeChecker {
+        let primitive_types = vec![
+            ("integer".to_string(), Type::Int),
+            ("float".to_string(), Type::Float),
+            ("char".to_string(), Type::Char),
+            ("string".to_string(), Type::String),
+        ];
         let ctx = HashMap::new();
         let mut type_names = HashMap::new();
-        type_names.insert("integer".to_string(), Type::Int);
-        type_names.insert("float".to_string(), Type::Float);
-        type_names.insert("char".to_string(), Type::Char);
-        type_names.insert("string".to_string(), Type::String);
+        for (name, type_) in primitive_types {
+            type_names.insert(name, type_);
+        }
         TypeChecker {
             ctx,
             type_names,
@@ -54,7 +59,7 @@ impl TypeChecker {
             }
             Stmt::Asgn(pat, expr) => {
                 let typed_rhs = self.infer_expr(expr)?;
-                let asgn_type = self.infer_asgn(&pat, typed_rhs.get_type().clone());
+                let asgn_type = self.infer_asgn(&pat, typed_rhs.get_type().clone())?;
                 Ok(TypedStmt::Asgn(pat, typed_rhs))
             }
             _ => Err(TypeError::NotImplemented),
@@ -63,7 +68,11 @@ impl TypeChecker {
 
     fn infer_value(&self, value: Value) -> TypedExpr {
         match value {
-            Value::Num(_n) => TypedExpr::Primary {
+            Value::Integer(_i) => TypedExpr::Primary {
+                value,
+                type_: Type::Int,
+            },
+            Value::Float(_f) => TypedExpr::Primary {
                 value,
                 type_: Type::Float,
             },
@@ -250,7 +259,6 @@ impl TypeChecker {
                 self.unify(param_type1, param_type2) && self.unify(return_type1, return_type2)
             }
             (Type::Float, Type::Bool) | (Type::Bool, Type::Float) => true,
-            (Type::Float, Type::Int) | (Type::Int, Type::Float) => true,
             _ => false,
         }
     }

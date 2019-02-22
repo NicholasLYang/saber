@@ -127,7 +127,8 @@ Tuple: Expr = {
 };
 
 Term: Expr = {
-    <n: Num> => Expr::Primary { value: Value::Num(n) } ,
+    <f: Float> => Expr::Primary { value: Value::Float(f) } ,
+    <i: Integer> => Expr::Primary { value: Value::Integer(i) } ,
     "true" => Expr::Primary { value: Value::Bool(true) } ,
     "false" => Expr::Primary { value: Value::Bool(false) },
     <id: Identifier> => Expr::Var { name: id },
@@ -197,7 +198,8 @@ extern {
         "]"        => Token::RBracket,
         ":"        => Token::Colon,
         String     => Token::String(<String>),
-        Num        => Token::Number(<f32>),
+        Float      => Token::Float(<f32>),
+        Integer    => Token::Integer(<i32>),
         Identifier => Token::Ident(<String>)
     }
 }
