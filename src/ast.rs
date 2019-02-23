@@ -133,7 +133,7 @@ pub enum TypeSig {
 #[derive(Debug, PartialEq, Clone)]
 pub enum Pat {
     Id(Name, Option<TypeSig>),
-    Record(Vec<Name>),
+    Record(Vec<(Name, Option<TypeSig>)>),
     Tuple(Vec<Pat>),
 }
 

@@ -1,4 +1,4 @@
-use crate::ast::{Expr, Pat, Stmt, TypeSig};
+use crate::ast::{Expr, Name, Pat, Stmt, TypeSig};
 use crate::lexer::{Lexer, Token};
 use crate::types::Result;
 use std::fmt;
@@ -85,13 +85,29 @@ impl<'input> Parser<'input> {
             (_, Token::LParen, _) => Ok(Pat::Tuple(
                 self.comma::<Pat>(&Self::parse_pattern, Token::RParen)?,
             )),
-            (_, Token::LBrace, _) => Ok(Pat::Record(Vec::new())),
+            (_, Token::LBrace, _) => Ok(Pat::Record(
+                self.comma::<(Name, Option<TypeSig>)>(&Self::parse_record_pattern, Token::RBrace)?,
+            )),
             (_, Token::Ident(name), _) => Ok(Pat::Id(name, self.parse_type_sig()?)),
             (start, token, end) => Err(ParseError::UnexpectedToken {
                 token,
                 location: Location(start, end),
                 expected_tokens: vec!["(", "{", "identifier"],
             })?,
+        }
+    }
+
+    fn parse_record_pattern(&mut self) -> Result<(Name, Option<TypeSig>)> {
+        let (start, token, end) = self.get_next_token()?;
+        if let Token::Ident(name) = token {
+            let type_sig = self.parse_type_sig()?;
+            Ok((name, type_sig))
+        } else {
+            Err(ParseError::UnexpectedToken {
+                token,
+                location: Location(start, end),
+                expected_tokens: vec!["identifier"],
+            })?
         }
     }
 
