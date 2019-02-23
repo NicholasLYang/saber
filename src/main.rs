@@ -30,7 +30,8 @@ fn main() -> std::io::Result<()> {
             .expect("Couldn't read line");
         let lexer = lexer::Lexer::new(&input);
         let mut parser = Parser::new(lexer);
-        parser.parse_statement();
+        let parse_res = parser.parse_statement();
+        println!("{:?}", parse_res);
         //     let mut parser_out = parser::ProgramParser::new().parse(lexer);
         //     let mut typechecker = TypeChecker::new();
 
