@@ -49,7 +49,7 @@ impl<'input> Parser<'input> {
         self.pushedback_tokens.push(token);
     }
 
-    fn get_next_token(&mut self) -> Result<(usize, Token, usize)> {
+    fn bump(&mut self) -> Result<(usize, Token, usize)> {
         if !self.pushedback_tokens.is_empty() {
             match self.pushedback_tokens.pop() {
                 Some(tok) => Ok(tok),
@@ -63,24 +63,31 @@ impl<'input> Parser<'input> {
         }
     }
     pub fn parse_statement(&mut self) -> Result<Stmt> {
-        let tok = self.get_next_token()?;
+        let tok = self.bump()?;
         match tok {
             (_, Token::Let, _) => self.parse_let_statement(),
-            _ => {
-                println!("PARSING SOMETHING ELSE");
-                Err(ParseError::NotImplemented)?
-            }
+            _ => Err(ParseError::NotImplemented)?,
         }
     }
 
-    pub fn parse_let_statement(&mut self) -> Result<Stmt> {
-        let pat = self.parse_pattern();
-        println!("{:?}", pat);
+    fn parse_let_statement(&mut self) -> Result<Stmt> {
+        let pat = self.parse_pattern()?;
+        let (start, token, end) = self.bump()?;
+        match token {
+            Token::Equal => {
+                let rhs_expr = self.parse_expression()?;
+                Ok(Stmt::Asgn(pat, Some(rhs_expr)))
+            }
+            _ => Ok(Stmt::Asgn(pat, None)),
+        }
+    }
+
+    fn parse_expression(&mut self) -> Result<Expr> {
         Err(ParseError::NotImplemented)?
     }
 
-    pub fn parse_pattern(&mut self) -> Result<Pat> {
-        let tok = self.get_next_token()?;
+    fn parse_pattern(&mut self) -> Result<Pat> {
+        let tok = self.bump()?;
         match tok {
             (_, Token::LParen, _) => Ok(Pat::Tuple(
                 self.comma::<Pat>(&Self::parse_pattern, Token::RParen)?,
@@ -98,7 +105,7 @@ impl<'input> Parser<'input> {
     }
 
     fn parse_record_pattern(&mut self) -> Result<(Name, Option<TypeSig>)> {
-        let (start, token, end) = self.get_next_token()?;
+        let (start, token, end) = self.bump()?;
         if let Token::Ident(name) = token {
             let type_sig = self.parse_type_sig()?;
             Ok((name, type_sig))
@@ -112,7 +119,7 @@ impl<'input> Parser<'input> {
     }
 
     fn parse_type_sig(&mut self) -> Result<Option<TypeSig>> {
-        let token = self.get_next_token()?;
+        let token = self.bump()?;
         match token {
             (_, Token::Colon, _) => Ok(Some(self.parse_type()?)),
             token => {
@@ -123,12 +130,12 @@ impl<'input> Parser<'input> {
     }
 
     fn parse_type(&mut self) -> Result<TypeSig> {
-        let tok = self.get_next_token()?;
+        let tok = self.bump()?;
         match tok {
             (_, Token::Ident(name), _) => Ok(TypeSig::Name(name)),
             (_, Token::LBracket, _) => {
                 let array_type = self.parse_type()?;
-                let (start, bracket, end) = self.get_next_token()?;
+                let (start, bracket, end) = self.bump()?;
                 if bracket != Token::RBracket {
                     Err(ParseError::UnexpectedToken {
                         token: bracket,
@@ -155,7 +162,7 @@ impl<'input> Parser<'input> {
         let mut parsed: Vec<T> = Vec::new();
         loop {
             parsed.push(parse_fn(self)?);
-            let (start, token, end) = self.get_next_token()?;
+            let (start, token, end) = self.bump()?;
             if token == delimiter {
                 return Ok(parsed);
             } else if token != Token::Comma {
