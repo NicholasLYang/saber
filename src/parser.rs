@@ -1,5 +1,5 @@
 use crate::ast::{Expr, Name, Op, Pat, Stmt, TypeSig, Value};
-use crate::lexer::{Lexer, Token};
+use crate::lexer::{Lexer, Token, TokenDiscriminants};
 use crate::types::Result;
 use std::fmt;
 use std::fmt::{Debug, Display, Formatter};
@@ -49,18 +49,25 @@ impl<'input> Parser<'input> {
         self.pushedback_tokens.push(token);
     }
 
-    // NOTE: PartialEq is NOT the same as type equality. Therefore do
-    // NOT use this function to check for identifiers, only for tokens
-    // with no fields. Eventually I will impl Eq for tokens with
-    // proper equality.
-    fn lookahead_match(&mut self, lookahead_token: Token) -> Result<bool> {
+    fn lookahead_match(&mut self, lookahead_token: Token) -> Result<Option<Token>> {
         let (start, token, end) = self.bump()?;
-        if token == lookahead_token {
-            Ok(true)
+        let token_discriminant: TokenDiscriminants = (&token).into();
+        let lookahead_discriminant: TokenDiscriminants = (&lookahead_token).into();
+        if token_discriminant == lookahead_discriminant {
+            Ok(Some(token))
         } else {
             self.pushback((start, token, end));
-            Ok(false)
+            Ok(None)
         }
+    }
+
+    fn match_multiple(&mut self, tokens: Vec<Token>) -> Result<Option<Token>> {
+        for token in tokens {
+            if let Some(token) = self.lookahead_match(token)? {
+                return Ok(Some(token));
+            }
+        }
+        Ok(None)
     }
 
     fn bump(&mut self) -> Result<(usize, Token, usize)> {
@@ -76,6 +83,23 @@ impl<'input> Parser<'input> {
             }
         }
     }
+
+    fn lookup_op_token(&mut self, token: Token) -> Result<Op> {
+        match token {
+            Token::EqualEqual => Ok(Op::EqualEqual),
+            Token::BangEqual => Ok(Op::BangEqual),
+            Token::Times => Ok(Op::Times),
+            Token::Div => Ok(Op::Div),
+            Token::Plus => Ok(Op::Plus),
+            Token::Minus => Ok(Op::Minus),
+            Token::Greater => Ok(Op::Greater),
+            Token::GreaterEqual => Ok(Op::GreaterEqual),
+            Token::Less => Ok(Op::Less),
+            Token::LessEqual => Ok(Op::LessEqual),
+            _ => Err(ParseError::NotReachable)?,
+        }
+    }
+
     pub fn parse_statement(&mut self) -> Result<Stmt> {
         let tok = self.bump()?;
         match tok {
@@ -86,7 +110,7 @@ impl<'input> Parser<'input> {
 
     fn parse_let_statement(&mut self) -> Result<Stmt> {
         let pat = self.parse_pattern()?;
-        if self.lookahead_match(Token::Equal)? {
+        if let Some(_) = self.lookahead_match(Token::Equal)? {
             let rhs_expr = self.parse_expression()?;
             Ok(Stmt::Asgn(pat, Some(rhs_expr)))
         } else {
@@ -95,7 +119,7 @@ impl<'input> Parser<'input> {
     }
 
     fn parse_expression(&mut self) -> Result<Expr> {
-        if self.lookahead_match(Token::Slash)? {
+        if let Some(_) = self.lookahead_match(Token::Slash)? {
             self.parse_function()
         } else {
             self.parse_equality()
@@ -104,13 +128,8 @@ impl<'input> Parser<'input> {
 
     fn parse_equality(&mut self) -> Result<Expr> {
         let lhs = self.parse_comparison()?;
-        let (start, token, end) = self.bump()?;
-        let op = match token {
-            Token::BangEqual => Some(Op::BangEqual),
-            Token::EqualEqual => Some(Op::EqualEqual),
-            _ => None,
-        };
-        if let Some(op) = op {
+        if let Some(token) = self.match_multiple(vec![Token::EqualEqual, Token::BangEqual])? {
+            let op = self.lookup_op_token(token)?;
             let rhs = self.parse_comparison()?;
             Ok(Expr::BinOp {
                 op,
@@ -118,25 +137,20 @@ impl<'input> Parser<'input> {
                 rhs: Box::new(rhs),
             })
         } else {
-            self.pushback((start, token, end));
             Ok(lhs)
         }
     }
-
     // Super repetative and objectively terrible code but I want to
     // get this working before I revise it and macro-ify it.
     fn parse_comparison(&mut self) -> Result<Expr> {
         let lhs = self.parse_addition()?;
-        let (start, token, end) = self.bump()?;
-        let op = match token {
-            Token::Greater => Some(Op::Greater),
-            Token::GreaterEqual => Some(Op::GreaterEqual),
-            Token::Less => Some(Op::Less),
-            Token::LessEqual => Some(Op::LessEqual),
-            _ => None,
-        };
-
-        if let Some(op) = op {
+        if let Some(token) = self.match_multiple(vec![
+            Token::GreaterEqual,
+            Token::Greater,
+            Token::Less,
+            Token::LessEqual,
+        ])? {
+            let op = self.lookup_op_token(token)?;
             let rhs = self.parse_addition()?;
             Ok(Expr::BinOp {
                 op,
@@ -144,39 +158,90 @@ impl<'input> Parser<'input> {
                 rhs: Box::new(rhs),
             })
         } else {
-            self.pushback((start, token, end));
             Ok(lhs)
         }
     }
 
     fn parse_addition(&mut self) -> Result<Expr> {
-        let lhs = self.parse_multiplication()?;
-        let (start, token, end) = self.bump()?;
-        let op = match token {
-            Token::Plus => Some(Op::Plus),
-            Token::Minus => Some(Op::Minus),
-            _ => None,
-        };
-
-        if let Some(op) = op {
+        let mut expr = self.parse_multiplication()?;
+        while let Some(token) = self.match_multiple(vec![Token::Plus, Token::Minus])? {
+            let op = self.lookup_op_token(token)?;
             let rhs = self.parse_addition()?;
-            Ok(Expr::BinOp {
+            expr = Expr::BinOp {
                 op,
-                lhs: Box::new(lhs),
+                lhs: Box::new(expr),
                 rhs: Box::new(rhs),
-            })
-        } else {
-            self.pushback((start, token, end));
-            Ok(lhs)
+            }
         }
+        Ok(expr)
     }
 
     fn parse_multiplication(&mut self) -> Result<Expr> {
-        let _tok = self.bump()?;
-        println!("{:?}", _tok);
-        Ok(Expr::Primary {
-            value: Value::Integer(10),
-        })
+        let mut expr = self.parse_unary()?;
+        while let Some(token) = self.match_multiple(vec![Token::Times, Token::Div])? {
+            let op = self.lookup_op_token(token)?;
+            let rhs = self.parse_unary()?;
+            expr = Expr::BinOp {
+                op,
+                lhs: Box::new(expr),
+                rhs: Box::new(rhs),
+            }
+        }
+        Ok(expr)
+    }
+
+    fn parse_unary(&mut self) -> Result<Expr> {
+        if let Some(token) = self.match_multiple(vec![Token::Bang, Token::Minus])? {
+            let op = self.lookup_op_token(token)?;
+            let rhs = self.parse_unary()?;
+            Ok(Expr::UnaryOp {
+                op,
+                rhs: Box::new(rhs),
+            })
+        } else {
+            Ok(self.parse_primary()?)
+        }
+    }
+
+    fn parse_primary(&mut self) -> Result<Expr> {
+        let (start, token, end) = self.bump()?;
+        match token {
+            Token::True => Ok(Expr::Primary {
+                value: Value::Bool(true),
+            }),
+            Token::False => Ok(Expr::Primary {
+                value: Value::Bool(false),
+            }),
+            Token::Integer(int) => Ok(Expr::Primary {
+                value: Value::Integer(int),
+            }),
+            Token::Float(float) => Ok(Expr::Primary {
+                value: Value::Float(float),
+            }),
+            Token::String(s) => Ok(Expr::Primary {
+                value: Value::String(s),
+            }),
+            Token::LParen => {
+                let expr = self.parse_expression()?;
+                let (start, token, end) = self.bump()?;
+                if let Token::RParen = token {
+                    Ok(expr)
+                } else {
+                    let token_clone = token.clone();
+                    self.pushback((start, token, end));
+                    Err(ParseError::UnexpectedToken {
+                        token: token_clone,
+                        location: Location(start, end),
+                        expected_tokens: vec![")"],
+                    })?
+                }
+            }
+            _ => Err(ParseError::UnexpectedToken {
+                token,
+                location: Location(start, end),
+                expected_tokens: vec!["true", "false", "integer", "float", "string", "("],
+            })?,
+        }
     }
 
     fn parse_function(&mut self) -> Result<Expr> {

@@ -32,7 +32,7 @@ pub enum Expr {
         rhs: Box<Expr>,
     },
     UnaryOp {
-        unary: Unary,
+        op: Op,
         rhs: Box<Expr>,
     },
     Function {
@@ -63,7 +63,7 @@ pub enum TypedExpr {
         type_: Type,
     },
     UnaryOp {
-        unary: Unary,
+        op: Op,
         rhs: Box<TypedExpr>,
         type_: Type,
     },
@@ -101,12 +101,6 @@ pub enum Op {
     GreaterEqual,
     Less,
     LessEqual,
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub enum Unary {
-    Bang,
-    Minus,
 }
 
 // Yeah this is hilariously basic rn.
@@ -151,7 +145,7 @@ impl TypedExpr {
                 type_,
             } => type_,
             TypedExpr::UnaryOp {
-                unary: _,
+                op: _,
                 rhs: _,
                 type_,
             } => type_,

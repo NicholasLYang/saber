@@ -3,6 +3,9 @@ extern crate failure;
 #[macro_use]
 extern crate failure_derive;
 extern crate itertools;
+extern crate strum;
+#[macro_use]
+extern crate strum_macros;
 
 use crate::parser::Parser;
 use crate::typechecker::TypeChecker;

@@ -1,6 +1,6 @@
 use std::str::CharIndices;
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, EnumDiscriminants)]
 pub enum Token {
     Illegal,
     EndOfFile,
