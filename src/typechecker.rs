@@ -57,10 +57,10 @@ impl TypeChecker {
                 let typed_expr = self.infer_expr(expr)?;
                 Ok(TypedStmt::Expr(typed_expr))
             }
-            Stmt::Asgn(pat, Some(expr)) => {
+            Stmt::Asgn(pat, expr) => {
                 let typed_rhs = self.infer_expr(expr)?;
                 self.infer_asgn(&pat, typed_rhs.get_type().clone())?;
-                Ok(TypedStmt::Asgn(pat, Some(typed_rhs)))
+                Ok(TypedStmt::Asgn(pat, typed_rhs))
             }
             Stmt::If(cond, then_stmt, else_stmt) => {
                 let typed_cond = self.infer_expr(cond)?;

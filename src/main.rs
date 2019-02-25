@@ -33,17 +33,13 @@ fn main() -> std::io::Result<()> {
             .expect("Couldn't read line");
         let lexer = lexer::Lexer::new(&input);
         let mut parser = Parser::new(lexer);
-        let parse_res = parser.parse_statement();
-        println!("{:?}", parse_res);
-        //     let mut parser_out = parser::ProgramParser::new().parse(lexer);
-        //     let mut typechecker = TypeChecker::new();
+        let parser_out = parser.parse_statement();
+        println!("PARSER OUT: {:#?}", parser_out);
+        let mut typechecker = TypeChecker::new();
 
-        //     if let Ok(out) = &mut parser_out {
-        //         println!("{:#?}", out);
-        //         if let Some(stmt) = out.pop() {
-        //             let typed_stmt = typechecker.infer_stmt(stmt);
-        //             println!("{:#?}", typed_stmt);
-        //         }
-        //     }
+        if let Ok(stmt) = parser_out {
+            let typed_stmt = typechecker.infer_stmt(stmt);
+            println!("{:#?}", typed_stmt);
+        }
     }
 }

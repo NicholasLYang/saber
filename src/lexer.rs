@@ -1,3 +1,4 @@
+use failure::Error;
 use std::str::CharIndices;
 
 #[derive(Clone, Debug, PartialEq, EnumDiscriminants)]
@@ -163,7 +164,7 @@ impl<'input> Lexer<'input> {
             }
             None => Err(LexicalError::UnterminatedString {
                 location: start_pos,
-            }),
+            })?,
         }
     }
 
@@ -228,7 +229,7 @@ impl<'input> Lexer<'input> {
 }
 
 impl<'input> Iterator for Lexer<'input> {
-    type Item = Spanned<'input, Token, usize, LexicalError>;
+    type Item = Spanned<'input, Token, usize, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.skip_whitespace();
@@ -280,7 +281,10 @@ impl<'input> Iterator for Lexer<'input> {
                 '"' => Some(self.read_string(location)),
                 ch if is_id_start(ch) => Some(self.read_identifier(location)),
                 ch if ch.is_ascii_digit() => Some(self.read_number(location)),
-                ch => Some(Err(LexicalError::InvalidCharacter { ch, location })),
+                ch => {
+                    let error: Error = (LexicalError::InvalidCharacter { ch, location }).into();
+                    Some(Err(error))
+                }
             }
         } else {
             None
