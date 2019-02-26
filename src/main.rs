@@ -3,10 +3,11 @@ extern crate failure;
 #[macro_use]
 extern crate failure_derive;
 extern crate itertools;
+extern crate strum;
 #[macro_use]
-extern crate lalrpop_util;
+extern crate strum_macros;
 
-lalrpop_mod!(pub parser);
+use crate::parser::Parser;
 use crate::typechecker::TypeChecker;
 use std::io;
 use std::io::Write;
@@ -14,7 +15,9 @@ use std::io::Write;
 mod ast;
 mod code_generator;
 mod lexer;
+mod parser;
 mod typechecker;
+mod types;
 
 fn main() -> std::io::Result<()> {
     loop {
@@ -29,15 +32,14 @@ fn main() -> std::io::Result<()> {
             .ok()
             .expect("Couldn't read line");
         let lexer = lexer::Lexer::new(&input);
-        let mut parser_out = parser::ProgramParser::new().parse(lexer);
+        let mut parser = Parser::new(lexer);
+        let parser_out = parser.parse_statement();
+        println!("PARSER OUT: {:#?}", parser_out);
         let mut typechecker = TypeChecker::new();
 
-        if let Ok(out) = &mut parser_out {
-            println!("{:#?}", out);
-            if let Some(stmt) = out.pop() {
-                let typed_stmt = typechecker.infer_stmt(stmt);
-                println!("{:#?}", typed_stmt);
-            }
+        if let Ok(stmt) = parser_out {
+            let typed_stmt = typechecker.infer_stmt(stmt);
+            println!("{:#?}", typed_stmt);
         }
     }
 }
