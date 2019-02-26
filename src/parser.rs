@@ -74,12 +74,11 @@ impl<'input> Parser<'input> {
         self.pushedback_tokens.push(token);
     }
 
-    fn lookahead_match(&mut self, lookahead_token: &Token) -> Result<Option<Token>> {
+    fn lookahead_match(&mut self, lookahead: TokenDiscriminants) -> Result<Option<Token>> {
         let token = self.bump()?;
-        let lookahead_discriminant: TokenDiscriminants = lookahead_token.into();
         if let Some((start, token, end)) = token {
             let token_discriminant: TokenDiscriminants = (&token).into();
-            if token_discriminant == lookahead_discriminant {
+            if token_discriminant == lookahead {
                 Ok(Some(token))
             } else {
                 self.pushback((start, token, end));
@@ -87,14 +86,14 @@ impl<'input> Parser<'input> {
             }
         } else {
             Err(ParseError::EndOfFile {
-                expected_tokens: vec![lookahead_discriminant],
+                expected_tokens: vec![lookahead],
             })?
         }
     }
 
     fn match_multiple(&mut self, tokens: Vec<Token>) -> Result<Option<Token>> {
         for token in tokens {
-            if let Some(token) = self.lookahead_match(&token)? {
+            if let Some(token) = self.lookahead_match((&token).into())? {
                 return Ok(Some(token));
             }
         }
@@ -138,7 +137,7 @@ impl<'input> Parser<'input> {
 
     fn parse_block(&mut self) -> Result<Stmt> {
         let mut stmts = Vec::new();
-        while let None = self.lookahead_match(&Token::RBrace)? {
+        while let None = self.lookahead_match(TokenDiscriminants::RBrace)? {
             stmts.push(self.parse_statement()?);
         }
         Ok(Stmt::Block(stmts))
@@ -161,7 +160,7 @@ impl<'input> Parser<'input> {
     }
 
     fn parse_expression(&mut self) -> Result<Expr> {
-        if let Some(_) = self.lookahead_match(&Token::Slash)? {
+        if let Some(_) = self.lookahead_match(TokenDiscriminants::Slash)? {
             self.parse_function()
         } else {
             self.parse_equality()
@@ -300,8 +299,15 @@ impl<'input> Parser<'input> {
             }),
             Some((start, Token::LParen, end)) => {
                 let expr = self.parse_expression()?;
-                self.expect(TokenDiscriminants::RParen)?;
-                Ok(expr)
+                if let Some(_) = self.lookahead_match(TokenDiscriminants::Comma)? {
+                    let mut elems = vec![expr];
+                    let mut rest = self.comma::<Expr>(&Self::parse_expression, Token::RParen)?;
+                    elems.append(&mut rest);
+                    Ok(Expr::Tuple(elems))
+                } else {
+                    self.expect(TokenDiscriminants::RParen)?;
+                    Ok(expr)
+                }
             }
             Some((start, Token::Ident(name), end)) => Ok(Expr::Var { name }),
             Some((start, token, end)) => Err(ParseError::UnexpectedToken {
@@ -389,7 +395,7 @@ impl<'input> Parser<'input> {
     }
 
     fn parse_type_sig(&mut self) -> Result<Option<TypeSig>> {
-        if let Some(_) = self.lookahead_match(&Token::Colon)? {
+        if let Some(_) = self.lookahead_match(TokenDiscriminants::Colon)? {
             Ok(Some(self.parse_type()?))
         } else {
             Ok(None)
@@ -424,7 +430,7 @@ impl<'input> Parser<'input> {
         let mut parsed: Vec<T> = Vec::new();
         loop {
             parsed.push(parse_fn(self)?);
-            if let Some(_) = self.lookahead_match(&end_token)? {
+            if let Some(_) = self.lookahead_match((&end_token).into())? {
                 return Ok(parsed);
             }
             self.expect(TokenDiscriminants::Comma)?;
