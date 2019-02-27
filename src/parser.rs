@@ -168,6 +168,12 @@ impl<'input> Parser<'input> {
     }
     fn parse_function(&mut self) -> Result<Expr> {
         let params = self.parse_pattern()?;
+        let return_type = if let Some(_) = self.lookahead_match(TokenDiscriminants::Colon)? {
+            Some(self.parse_pattern()?)
+        } else {
+            None
+        };
+
         self.expect(TokenDiscriminants::FatArrow)?;
         let token = self.bump()?;
         let body = match token {
@@ -198,6 +204,7 @@ impl<'input> Parser<'input> {
         };
         Ok(Expr::Function {
             params,
+            return_type,
             body: Box::new(body),
         })
     }
@@ -351,7 +358,7 @@ impl<'input> Parser<'input> {
                 }
             }
             Some((_, Token::LBrace, _)) => Ok(Pat::Record(
-                self.comma::<(Name, Option<TypeSig>)>(&Self::parse_record_pattern, Token::RBrace)?,
+                self.comma::<Pat>(&Self::parse_record_pattern, Token::RBrace)?,
             )),
             Some((_, Token::Ident(name), _)) => {
                 let type_sig = self.parse_type_sig()?;
@@ -376,12 +383,12 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn parse_record_pattern(&mut self) -> Result<(Name, Option<TypeSig>)> {
+    fn parse_record_pattern(&mut self) -> Result<Pat> {
         let token = self.bump()?;
         match token {
             Some((start, Token::Ident(name), end)) => {
                 let type_sig = self.parse_type_sig()?;
-                Ok((name, type_sig))
+                Ok(Pat::Id(name, type_sig))
             }
             Some((start, token, end)) => Err(ParseError::UnexpectedToken {
                 token,

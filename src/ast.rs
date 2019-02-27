@@ -37,6 +37,7 @@ pub enum Expr {
     },
     Function {
         params: Pat,
+        return_type: Option<Pat>,
         body: Box<Stmt>,
     },
     Call {
@@ -127,7 +128,7 @@ pub enum TypeSig {
 #[derive(Debug, PartialEq, Clone)]
 pub enum Pat {
     Id(Name, Option<TypeSig>),
-    Record(Vec<(Name, Option<TypeSig>)>),
+    Record(Vec<Pat>),
     Tuple(Vec<Pat>),
 }
 

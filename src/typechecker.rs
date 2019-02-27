@@ -1,5 +1,6 @@
 use ast::Value;
 use ast::{Expr, Name, Op, Pat, Stmt, Type, TypeSig, TypedExpr, TypedStmt};
+use itertools::Itertools;
 use std::collections::HashMap;
 
 #[derive(Debug, Fail, PartialEq)]
@@ -26,8 +27,14 @@ pub enum TypeError {
 }
 
 pub struct TypeChecker {
+    // Honestly I don't know. Probably just the types of the existing
+    // variables?
     ctx: HashMap<Name, Type>,
+    // Type names. Right now just has the primitives like string,
+    // integer, float, char
     type_names: HashMap<Name, Type>,
+    // The return type for the typing context
+    return_type: Option<Type>,
     variable_counter: usize,
 }
 
@@ -47,6 +54,7 @@ impl TypeChecker {
         TypeChecker {
             ctx,
             type_names,
+            return_type: None,
             variable_counter: 0,
         }
     }
@@ -159,27 +167,32 @@ impl TypeChecker {
         type_var
     }
 
-    fn infer_asgn(&mut self, pat: &Pat, rhs_type: Type) -> Result<Type, TypeError> {
+    fn infer_pat(&mut self, pat: &Pat) -> Result<Type, TypeError> {
         match pat {
-            Pat::Id(name, Some(type_sig)) => {
-                let expected_type = self.lookup_type_sig(&type_sig)?;
-                if self.unify(&expected_type, &rhs_type) {
-                    self.ctx.insert(name.clone(), expected_type.clone());
-                    Ok(rhs_type)
-                } else {
-                    Err(TypeError::UnificationFailure {
-                        type1: expected_type,
-                        type2: rhs_type.clone(),
-                    })
-                }
-            }
+            Pat::Id(name, Some(type_sig)) => self.lookup_type_sig(&type_sig),
             Pat::Id(_name, None) => Ok(self.get_fresh_type_var()),
-            Pat::Tuple(pats) => self.infer_multiple_asgn(pats, rhs_type),
+            Pat::Tuple(pats) => {
+                let types: Result<Vec<Type>, TypeError> =
+                    pats.iter().map(|pat| self.infer_pat(pat)).collect();
+                Ok(Type::Tuple(types?))
+            }
             _ => Err(TypeError::NotImplemented),
         }
     }
 
-    fn infer_expr(&self, expr: Expr) -> Result<TypedExpr, TypeError> {
+    fn infer_asgn(&mut self, pat: &Pat, rhs_type: Type) -> Result<Type, TypeError> {
+        let lhs_type = self.infer_pat(pat)?;
+        if self.unify(&lhs_type, &rhs_type) {
+            Ok(rhs_type)
+        } else {
+            Err(TypeError::UnificationFailure {
+                type1: lhs_type.clone(),
+                type2: rhs_type.clone(),
+            })
+        }
+    }
+
+    fn infer_expr(&mut self, expr: Expr) -> Result<TypedExpr, TypeError> {
         match expr {
             Expr::Primary { value } => Ok(self.infer_value(value)),
             Expr::Var { name } => match self.ctx.get(&name) {
@@ -220,8 +233,53 @@ impl TypeChecker {
                 }
                 Ok(TypedExpr::Tuple(typed_elems, Type::Tuple(types)))
             }
+            Expr::Function {
+                params,
+                body,
+                return_type,
+            } => {
+                // Insert params into ctx
+                self.insert_params(&params)?;
+                // Insert return type into typechecker so that
+                // typechecker can verify return statements.
+                if let Some(return_type_sig) = return_type {
+                    self.return_type = Some(self.infer_pat(&return_type_sig)?);
+                }
+                // Check body
+                let body = self.infer_stmt(*body)?;
+                self.return_type = None;
+                Ok(TypedExpr::Function {
+                    params,
+                    body: Box::new(body),
+                    type_: self.get_fresh_type_var(),
+                })
+            }
             _ => Err(TypeError::NotImplemented),
         }
+    }
+
+    fn insert_params(&mut self, params: &Pat) -> Result<(), TypeError> {
+        match params {
+            Pat::Id(name, Some(type_sig)) => {
+                let type_ = self.lookup_type_sig(type_sig)?;
+                self.ctx.insert(name.clone(), type_);
+            }
+            Pat::Id(name, None) => {
+                let type_ = self.get_fresh_type_var();
+                self.ctx.insert(name.clone(), type_);
+            }
+            Pat::Tuple(pats) => {
+                for pat in pats {
+                    self.insert_params(pat);
+                }
+            }
+            Pat::Record(pats) => {
+                for pat in pats {
+                    self.insert_params(pat);
+                }
+            }
+        };
+        Ok(())
     }
 
     fn infer_op(&self, op: &Op, lhs_type: Type, rhs_type: Type) -> Option<Type> {
