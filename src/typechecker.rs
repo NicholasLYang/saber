@@ -282,7 +282,7 @@ impl TypeChecker {
         Ok(())
     }
 
-    fn infer_op(&self, op: &Op, lhs_type: Type, rhs_type: Type) -> Option<Type> {
+    fn infer_op(&mut self, op: &Op, lhs_type: Type, rhs_type: Type) -> Option<Type> {
         match op {
             Op::Comma => Some(Type::Tuple(vec![lhs_type, rhs_type])),
             Op::Plus | Op::Minus | Op::Times | Op::Div => match (lhs_type, rhs_type) {
@@ -312,7 +312,7 @@ impl TypeChecker {
         }
     }
 
-    fn unify_type_vectors(&self, type_vector1: &Vec<Type>, type_vector2: &Vec<Type>) -> bool {
+    fn unify_type_vectors(&mut self, type_vector1: &Vec<Type>, type_vector2: &Vec<Type>) -> bool {
         if type_vector1.len() != type_vector2.len() {
             return false;
         }
@@ -324,7 +324,7 @@ impl TypeChecker {
         return true;
     }
 
-    fn unify(&self, type1: &Type, type2: &Type) -> bool {
+    fn unify(&mut self, type1: &Type, type2: &Type) -> bool {
         if type1 == type2 {
             return true;
         }
@@ -334,6 +334,17 @@ impl TypeChecker {
                 self.unify(param_type1, param_type2) && self.unify(return_type1, return_type2)
             }
             (Type::Int, Type::Bool) | (Type::Bool, Type::Int) => true,
+            (Type::Var(name), t2) | (t2, Type::Var(name)) => {
+                let var_type = self.ctx.remove(name);
+                if let Some(t1) = var_type {
+                    let is_unified = self.unify(&t1, t2);
+                    self.ctx.insert(name.to_string(), t1);
+                    is_unified
+                } else {
+                    self.ctx.insert(name.clone(), t2.clone());
+                    true
+                }
+            }
             _ => false,
         }
     }
