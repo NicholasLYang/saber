@@ -1,4 +1,5 @@
 use crate::types::Result;
+use ast::Type;
 use byteorder::{LittleEndian, WriteBytesExt};
 use opcodes::OpCode;
 use std::fs::File;
@@ -29,7 +30,18 @@ impl Emitter {
             }
             _ => Ok(()),
         }?;
+        Ok(())
+    }
 
+    pub fn emit_preamble(&mut self) -> Result<()> {
+        self.emit_code(OpCode::MagicNum)?;
+        self.emit_code(OpCode::Version)?;
+        Ok(())
+    }
+
+    // Emit function types. types should be all Type::Arrow but who
+    // knows?
+    pub fn emit_function_types(&mut self, types: Vec<Type>) -> Result<()> {
         Ok(())
     }
 }

@@ -27,6 +27,14 @@ mod typechecker;
 mod types;
 
 fn main() -> Result<()> {
+    let mut file = File::create("out.wasm")?;
+    let mut emitter = Emitter::new(file);
+    emitter.emit_code(OpCode::MagicNum)?;
+    emitter.emit_code(OpCode::Version)?;
+    Ok(())
+}
+
+fn run_repl() -> Result<()> {
     loop {
         print!("> ");
         io::stdout().flush().unwrap();
@@ -43,9 +51,6 @@ fn main() -> Result<()> {
         let parser_out = parser.parse_statement()?;
         let mut typechecker = TypeChecker::new();
         let typed_stmt = typechecker.infer_stmt(parser_out)?;
-        let mut file = File::create("out.wasm")?;
-        let mut emitter = Emitter::new(file);
-        emitter.emit_code(OpCode::MagicNum)?;
         println!("{:#?}", typed_stmt);
     }
 }
