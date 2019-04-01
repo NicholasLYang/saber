@@ -13,13 +13,14 @@ use crate::opcodes::OpCode;
 use crate::parser::Parser;
 use crate::typechecker::TypeChecker;
 use crate::types::Result;
+use ast::Type;
 use std::fs::File;
 use std::io;
 use std::io::Write;
 
 mod ast;
-mod code_generator;
 mod emitter;
+mod ir;
 mod lexer;
 mod opcodes;
 mod parser;
@@ -27,10 +28,7 @@ mod typechecker;
 mod types;
 
 fn main() -> Result<()> {
-    let mut file = File::create("out.wasm")?;
-    let mut emitter = Emitter::new(file);
-    emitter.emit_code(OpCode::MagicNum)?;
-    emitter.emit_code(OpCode::Version)?;
+    run_repl()?;
     Ok(())
 }
 

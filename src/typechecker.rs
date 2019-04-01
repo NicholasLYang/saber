@@ -85,6 +85,32 @@ impl TypeChecker {
                 };
                 Ok(TypedStmt::If(typed_cond, Box::new(typed_then), typed_else))
             }
+            Stmt::Return(expr) => {
+                let typed_exp = self.infer_expr(expr)?;
+                match self.return_type.clone() {
+                    Some(ref return_type) => {
+                        if self.unify(typed_exp.get_type(), &return_type) {
+                            Ok(TypedStmt::Return(typed_exp))
+                        } else {
+                            Err(TypeError::UnificationFailure {
+                                type1: typed_exp.get_type().clone(),
+                                type2: return_type.clone(),
+                            })
+                        }
+                    }
+                    None => {
+                        self.return_type = Some(typed_exp.get_type().clone());
+                        Ok(TypedStmt::Return(typed_exp))
+                    }
+                }
+            }
+            Stmt::Block(stmts) => {
+                let mut typed_stmts = Vec::new();
+                for stmt in stmts {
+                    typed_stmts.push(self.infer_stmt(stmt)?);
+                }
+                Ok(TypedStmt::Block(typed_stmts))
+            }
             _ => Err(TypeError::NotImplemented),
         }
     }
@@ -176,6 +202,7 @@ impl TypeChecker {
                     pats.iter().map(|pat| self.infer_pat(pat)).collect();
                 Ok(Type::Tuple(types?))
             }
+            Pat::Empty => Ok(Type::Unit),
             _ => Err(TypeError::NotImplemented),
         }
     }
@@ -247,17 +274,22 @@ impl TypeChecker {
                 }
                 // Check body
                 let body = self.infer_stmt(*body)?;
-                self.return_type = None;
+
+                let mut return_type = None;
+                std::mem::swap(&mut return_type, &mut self.return_type);
+                let return_type = return_type.unwrap_or(Type::Unit);
+                let function_type = Type::Arrow(Box::new(Type::Unit), Box::new(return_type));
                 Ok(TypedExpr::Function {
                     params,
                     body: Box::new(body),
-                    type_: self.get_fresh_type_var(),
+                    type_: function_type,
                 })
             }
             _ => Err(TypeError::NotImplemented),
         }
     }
 
+    // Insert params into context
     fn insert_params(&mut self, params: &Pat) -> Result<(), TypeError> {
         match params {
             Pat::Id(name, Some(type_sig)) => {
@@ -270,14 +302,15 @@ impl TypeChecker {
             }
             Pat::Tuple(pats) => {
                 for pat in pats {
-                    self.insert_params(pat);
+                    self.insert_params(pat)?;
                 }
             }
             Pat::Record(pats) => {
                 for pat in pats {
-                    self.insert_params(pat);
+                    self.insert_params(pat)?;
                 }
             }
+            _ => (),
         };
         Ok(())
     }

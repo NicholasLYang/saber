@@ -12,17 +12,21 @@ pub enum OpCode {
     // Function Type Signatures
     FunctionForm(u8),
     ParamCount(u32),
-    ValueType(WasmValue),
+    ValueType(WasmType),
 
     // Function section
     FunctionCount(u32),
     Types(Vec<u32>),
 }
 
-pub enum WasmValue {
+pub enum WasmType {
+    #[allow(non_camel_case_types)]
     i32,
+    #[allow(non_camel_case_types)]
     i64,
+    #[allow(non_camel_case_types)]
     f32,
+    #[allow(non_camel_case_types)]
     f64,
     AnyFunction,
     Function,

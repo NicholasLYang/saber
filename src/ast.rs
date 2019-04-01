@@ -107,6 +107,7 @@ pub enum Op {
 // Yeah this is hilariously basic rn.
 #[derive(Debug, PartialEq, Clone)]
 pub enum Type {
+    Unit,
     Float,
     Int,
     Bool,
@@ -114,10 +115,29 @@ pub enum Type {
     String,
     Var(Name),
     Array(Box<Type>),
-    // Pair. Not sure how to do larger than two arguments. Nesting?
-    // Idk
+    Record(Vec<(Name, Type)>),
     Tuple(Vec<Type>),
     Arrow(Box<Type>, Box<Type>),
+}
+
+impl Type {
+    pub fn get_total_count(&self) -> u32 {
+        let mut count = 0;
+        match self {
+            Type::Tuple(elems) => {
+                for elem in elems {
+                    count += elem.get_total_count();
+                }
+            }
+            Type::Record(elems) => {
+                for (name, type_) in elems {
+                    count += type_.get_total_count();
+                }
+            }
+            _ => count += 1,
+        }
+        count
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -130,6 +150,7 @@ pub enum Pat {
     Id(Name, Option<TypeSig>),
     Record(Vec<Pat>),
     Tuple(Vec<Pat>),
+    Empty,
 }
 
 // Oy vey, cause Rust doesn't allow enum field access

@@ -1,4 +1,4 @@
-use crate::ast::{Expr, Name, Op, Pat, Stmt, TypeSig, Value};
+use crate::ast::{Expr, Op, Pat, Stmt, TypeSig, Value};
 use crate::lexer::{Lexer, Token, TokenDiscriminants};
 use crate::types::Result;
 use std::fmt;
@@ -147,16 +147,39 @@ impl<'input> Parser<'input> {
         let tok = self.bump()?;
         match tok {
             Some((_, Token::Let, _)) => self.parse_let_statement(),
+            Some((_, Token::Return, _)) => self.parse_return_statement(),
             _ => Err(ParseError::NotImplemented)?,
         }
+    }
+
+    fn parse_return_statement(&mut self) -> Result<Stmt> {
+        let expr = self.parse_expression()?;
+        self.expect(TokenDiscriminants::Semicolon)?;
+        Ok(Stmt::Return(expr))
     }
 
     fn parse_let_statement(&mut self) -> Result<Stmt> {
         let pat = self.parse_pattern()?;
         self.expect(TokenDiscriminants::Equal)?;
         let rhs_expr = self.parse_expression()?;
-        self.expect(TokenDiscriminants::Semicolon)?;
-        Ok(Stmt::Asgn(pat, rhs_expr))
+        match rhs_expr {
+            Expr::Function {
+                params,
+                return_type,
+                body,
+            } => Ok(Stmt::Asgn(
+                pat,
+                Expr::Function {
+                    params,
+                    return_type,
+                    body,
+                },
+            )),
+            _ => {
+                self.expect(TokenDiscriminants::Semicolon)?;
+                Ok(Stmt::Asgn(pat, rhs_expr))
+            }
+        }
     }
 
     fn parse_expression(&mut self) -> Result<Expr> {
@@ -347,6 +370,10 @@ impl<'input> Parser<'input> {
         match tok {
             // If the pattern is singular, i.e. let (a) = 10, then we treat it as a single id
             Some((_, Token::LParen, _)) => {
+                if let Some(_) = self.lookahead_match(TokenDiscriminants::RParen)? {
+                    return Ok(Pat::Empty);
+                }
+
                 let mut tuple_patterns = self.comma::<Pat>(&Self::parse_pattern, Token::RParen)?;
                 if tuple_patterns.len() == 1 {
                     match tuple_patterns.pop() {

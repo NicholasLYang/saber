@@ -19,3 +19,16 @@ hopefully I'll be able to port it to other platforms.
   - Get something working.
   - Figure out a better way than string literals.
   - Probably build something like TS' emitter.
+
+## Design
+
+Goals:
+
+- Relatively good performance via browser JIT.
+  - Avoid common performance gotchas like overly dynamic dispatch,
+    reflection, etc.
+- Good (type!) compatibility with existing JS
+  - Allow for interfacing with completely untyped JS with potential
+    runtime checks (performance penalty?)
+- Lightweight syntax. Avoid using keywords when possible (however,
+  will affect syntax highlighting)
