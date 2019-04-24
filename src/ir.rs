@@ -47,21 +47,21 @@ pub enum ImportKind {
 }
 
 #[derive(Debug)]
-struct TableType {
+pub struct TableType {
     // element_type is always any
     limits: ResizableLimits,
 }
 
 #[derive(Debug)]
-struct MemoryType {
+pub struct MemoryType {
     limits: ResizableLimits,
 }
 
 #[derive(Debug)]
-struct ResizableLimits(bool, u32, Option<u32>);
+pub struct ResizableLimits(bool, u32, Option<u32>);
 
 #[derive(Debug)]
-struct GlobalType {
+pub struct GlobalType {
     content_type: ValueType,
     mutability: bool,
 }

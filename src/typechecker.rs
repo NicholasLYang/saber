@@ -24,6 +24,8 @@ pub enum TypeError {
     TypeDoesNotExist { type_name: Name },
     #[fail(display = "Arity mismatch: Expected {:?} but got {:?}", arity1, arity2)]
     ArityMismatch { arity1: usize, arity2: usize },
+    #[fail(display = "Record contains non indentifier patterns: {:?}", record)]
+    RecordContainsNonIds { record: Pat },
 }
 
 pub struct TypeChecker {
@@ -277,6 +279,7 @@ impl TypeChecker {
 
                 let mut return_type = None;
                 std::mem::swap(&mut return_type, &mut self.return_type);
+                let params_type = self.retrieve_params(&params);
                 let return_type = return_type.unwrap_or(Type::Unit);
                 let function_type = Type::Arrow(Box::new(Type::Unit), Box::new(return_type));
                 Ok(TypedExpr::Function {
@@ -286,6 +289,45 @@ impl TypeChecker {
                 })
             }
             _ => Err(TypeError::NotImplemented),
+        }
+    }
+
+    fn retrieve_params(&mut self, params: &Pat) -> Result<Type, TypeError> {
+        match params {
+            Pat::Id(name, _) => {
+                let type_var = self.get_fresh_type_var();
+                {
+                    let maybe_type = self.ctx.get(name);
+                    if let Some(type_) = maybe_type {
+                        return Ok(type_.clone());
+                    }
+                }
+                self.ctx.insert(name.clone(), type_var.clone());
+                Ok(type_var)
+            }
+            Pat::Tuple(pats) => {
+                let mut param_types = Vec::new();
+                for pat in pats {
+                    let type_ = self.retrieve_params(pat)?;
+                    param_types.push(type_);
+                }
+                Ok(Type::Tuple(param_types))
+            }
+            Pat::Record(pats) => {
+                let mut param_types = Vec::new();
+                for pat in pats {
+                    let type_ = self.retrieve_params(pat)?;
+                    if let Pat::Id(name, _) = pat {
+                        param_types.push((name.clone(), type_));
+                    } else {
+                        return Err(TypeError::RecordContainsNonIds {
+                            record: params.clone(),
+                        });
+                    }
+                }
+                Ok(Type::Record(param_types))
+            }
+            Pat::Empty => Ok(Type::Unit),
         }
     }
 
