@@ -1,10 +1,10 @@
 use crate::types::Result;
 use ast::Type;
 use byteorder::{LittleEndian, WriteBytesExt};
-use ir::FunctionType;
 use opcodes::{OpCode, WasmType};
 use std::fs::File;
 use std::io::prelude::*;
+use wasm::FunctionType;
 
 pub struct Emitter {
     file: File,

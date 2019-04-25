@@ -1,3 +1,4 @@
+use std::sync::Arc;
 pub type Name = String;
 
 #[derive(Debug, PartialEq, Clone)]
@@ -37,7 +38,7 @@ pub enum Expr {
     },
     Function {
         params: Pat,
-        return_type: Option<Pat>,
+        return_type: Option<TypeSig>,
         body: Box<Stmt>,
     },
     Call {
@@ -51,34 +52,34 @@ pub enum Expr {
 pub enum TypedExpr {
     Primary {
         value: Value,
-        type_: Type,
+        type_: Arc<Type>,
     },
     Var {
         name: Name,
-        type_: Type,
+        type_: Arc<Type>,
     },
     BinOp {
         op: Op,
         lhs: Box<TypedExpr>,
         rhs: Box<TypedExpr>,
-        type_: Type,
+        type_: Arc<Type>,
     },
     UnaryOp {
         op: Op,
         rhs: Box<TypedExpr>,
-        type_: Type,
+        type_: Arc<Type>,
     },
     Function {
         params: Pat,
         body: Box<TypedStmt>,
-        type_: Type,
+        type_: Arc<Type>,
     },
     Call {
         callee: Box<TypedExpr>,
         arg: Box<TypedExpr>,
-        type_: Type,
+        type_: Arc<Type>,
     },
-    Tuple(Vec<TypedExpr>, Type),
+    Tuple(Vec<TypedExpr>, Arc<Type>),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -114,10 +115,10 @@ pub enum Type {
     Char,
     String,
     Var(Name),
-    Array(Box<Type>),
-    Record(Vec<(Name, Type)>),
-    Tuple(Vec<Type>),
-    Arrow(Box<Type>, Box<Type>),
+    Array(Arc<Type>),
+    Record(Vec<(Name, Arc<Type>)>),
+    Tuple(Vec<Arc<Type>>),
+    Arrow(Arc<Type>, Arc<Type>),
 }
 
 impl Type {
@@ -155,32 +156,32 @@ pub enum Pat {
 
 // Oy vey, cause Rust doesn't allow enum field access
 impl TypedExpr {
-    pub fn get_type(&self) -> &Type {
+    pub fn get_type(&self) -> Arc<Type> {
         match &self {
-            TypedExpr::Primary { value: _, type_ } => type_,
-            TypedExpr::Var { name: _, type_ } => type_,
-            TypedExpr::Tuple(_elems, type_) => type_,
+            TypedExpr::Primary { value: _, type_ } => type_.clone(),
+            TypedExpr::Var { name: _, type_ } => type_.clone(),
+            TypedExpr::Tuple(_elems, type_) => type_.clone(),
             TypedExpr::BinOp {
                 op: _,
                 lhs: _,
                 rhs: _,
                 type_,
-            } => type_,
+            } => type_.clone(),
             TypedExpr::UnaryOp {
                 op: _,
                 rhs: _,
                 type_,
-            } => type_,
+            } => type_.clone(),
             TypedExpr::Function {
                 params: _,
                 body: _,
                 type_,
-            } => type_,
+            } => type_.clone(),
             TypedExpr::Call {
                 callee: _,
                 arg: _,
                 type_,
-            } => type_,
+            } => type_.clone(),
         }
     }
 }

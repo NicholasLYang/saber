@@ -191,11 +191,7 @@ impl<'input> Parser<'input> {
     }
     fn parse_function(&mut self) -> Result<Expr> {
         let params = self.parse_pattern()?;
-        let return_type = if let Some(_) = self.lookahead_match(TokenDiscriminants::Colon)? {
-            Some(self.parse_pattern()?)
-        } else {
-            None
-        };
+        let return_type = self.parse_type_sig()?;
 
         self.expect(TokenDiscriminants::FatArrow)?;
         let token = self.bump()?;
@@ -413,7 +409,7 @@ impl<'input> Parser<'input> {
     fn parse_record_pattern(&mut self) -> Result<Pat> {
         let token = self.bump()?;
         match token {
-            Some((start, Token::Ident(name), end)) => {
+            Some((_start, Token::Ident(name), _end)) => {
                 let type_sig = self.parse_type_sig()?;
                 Ok(Pat::Id(name, type_sig))
             }

@@ -1,5 +1,7 @@
 use crate::ast::{Type, TypedExpr};
 use crate::types::Result;
+use std::convert::TryInto;
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct Section {
@@ -96,43 +98,40 @@ pub enum ByteCode {
 }
 
 #[derive(Debug, Fail)]
-pub enum IrError {
+pub enum WasmError {
     #[fail(
         display = "INTERNAL: Invalid function type. Type {:?} was not an Arrow",
         type_
     )]
-    InvalidFunctionType { type_: Type },
+    InvalidFunctionType { type_: Arc<Type> },
     #[fail(display = "Could not infer type var {:?}", type_)]
-    CouldNotInfer { type_: Type },
+    CouldNotInfer { type_: Arc<Type> },
 }
 
-impl Type {
-    pub fn into_value_type(&self) -> Result<Option<ValueType>> {
-        match self {
-            Type::Unit => Ok(None),
-            Type::Int | Type::Bool | Type::Char => Ok(Some(ValueType::i32)),
-            Type::Float => Ok(Some(ValueType::f32)),
-            Type::String
-            | Type::Array(_)
-            | Type::Arrow(_, _)
-            | Type::Record(_)
-            | Type::Tuple(_) => Ok(Some(ValueType::i32)),
-            Type::Var(_) => Err(IrError::CouldNotInfer {
-                type_: self.clone(),
-            })?,
+fn type_to_value_type(type_: &Arc<Type>) -> Result<Option<ValueType>> {
+    match &**type_ {
+        Type::Unit => Ok(None),
+        Type::Int | Type::Bool | Type::Char => Ok(Some(ValueType::i32)),
+        Type::Float => Ok(Some(ValueType::f32)),
+        Type::String | Type::Array(_) | Type::Arrow(_, _) | Type::Record(_) | Type::Tuple(_) => {
+            Ok(Some(ValueType::i32))
         }
+        Type::Var(_) => Err(WasmError::CouldNotInfer {
+            type_: type_.clone(),
+        })?,
     }
 }
-pub fn generate_function_type(func_type: &Type) -> Result<FunctionType> {
-    if let Type::Arrow(params_type, return_type) = func_type {
+
+pub fn generate_function_type(func_type: &Arc<Type>) -> Result<FunctionType> {
+    if let Type::Arrow(params_type, return_type) = &**func_type {
         let param_types = convert_params_type(params_type);
-        let return_type = Type::into_value_type(return_type)?;
+        let return_type: Result<Option<ValueType>> = type_to_value_type(&return_type);
         Ok(FunctionType {
             param_types,
-            return_type,
+            return_type: return_type?,
         })
     } else {
-        Err(IrError::InvalidFunctionType {
+        Err(WasmError::InvalidFunctionType {
             type_: func_type.clone(),
         })?
     }

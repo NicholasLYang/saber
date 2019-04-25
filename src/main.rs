@@ -20,12 +20,12 @@ use std::io::Write;
 
 mod ast;
 mod emitter;
-mod ir;
 mod lexer;
 mod opcodes;
 mod parser;
 mod typechecker;
 mod types;
+mod wasm;
 
 fn main() -> Result<()> {
     run_repl()?;
