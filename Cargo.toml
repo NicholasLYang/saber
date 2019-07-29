@@ -4,10 +4,10 @@ version = "0.1.0"
 authors = ["Nicholas Yang <ny585@nyu.edu>"]
 
 [build-dependencies]
-lalrpop = "0.16.1"
+# lalrpop = "0.16.1"
 
 [dependencies]
-lalrpop-util = "0.16.1"
+# lalrpop-util = "0.16.1"
 failure = "0.1.5"
 failure_derive = "0.1.5"
 itertools = "0.8.0"

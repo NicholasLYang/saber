@@ -20,26 +20,23 @@ mod typechecker;
 mod types;
 
 fn main() -> std::io::Result<()> {
+    let mut input = String::new();
+
     loop {
         print!("> ");
         io::stdout().flush().unwrap();
-        let mut input = String::new();
+        io::stdin().read_line(&mut input).unwrap();
+        input.pop();
+
         if input == "exit" {
             return Ok(());
         }
-        io::stdin()
-            .read_line(&mut input)
-            .ok()
-            .expect("Couldn't read line");
+
         let lexer = lexer::Lexer::new(&input);
         let mut parser = Parser::new(lexer);
         let parser_out = parser.parse_statement();
         println!("PARSER OUT: {:#?}", parser_out);
-        let mut typechecker = TypeChecker::new();
 
-        if let Ok(stmt) = parser_out {
-            let typed_stmt = typechecker.infer_stmt(stmt);
-            println!("{:#?}", typed_stmt);
-        }
+        input.clear();
     }
 }
