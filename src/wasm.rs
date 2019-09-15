@@ -77,6 +77,15 @@ pub enum PayloadData {
     MemorySection(Vec<MemoryType>),
     GlobalSection(Vec<(GlobalType, Vec<ByteCode>)>),
     CodeSection(Vec<FunctionBody>),
+    DataSection(Vec<DataSegment>),
+}
+
+#[derive(Debug)]
+pub struct DataSegment {
+    index: u32,
+    offset: Vec<ByteCode>,
+    size: u32,
+    data: Vec<u8>,
 }
 
 #[derive(Debug)]

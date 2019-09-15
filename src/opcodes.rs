@@ -1,22 +1,25 @@
 pub enum OpCode {
-    // Preamble codes
-    MagicNum,
+    MagicNumber,
     Version,
-    // Section codes
     SectionId(u8),
-    SectionPayloadLength(u32),
-    SectionNameLength(u32),
-    SectionName(Vec<u8>),
-    // Type section
-    TypesCount(u32),
-    // Function Type Signatures
-    FunctionForm(u8),
-    ParamCount(u32),
-    ValueType(WasmType),
-
-    // Function section
-    FunctionCount(u32),
-    Types(Vec<u32>),
+    Count(u32),
+    Index(u32),
+    Type(WasmType),
+    Name(Vec<u8>),
+    Kind(u8),
+    Code(Vec<u8>),
+    // Block,
+    // Loop,
+    // If,
+    // Else,p
+    // End,
+    // Break,
+    // BreakIf,
+    // BreakTable,
+    // Return,
+    // Call,
+    // CallIndirect,
+    I32Const(i32),
 }
 
 pub enum WasmType {
@@ -30,4 +33,17 @@ pub enum WasmType {
     f64,
     AnyFunction,
     Function,
+}
+
+impl From<WasmType> for u64 {
+    fn from(wasm_type: WasmType) -> Self {
+        match wasm_type {
+            WasmType::i32 => 0x7f,
+            WasmType::i64 => 0x7e,
+            WasmType::f32 => 0x7d,
+            WasmType::f64 => 0x7c,
+            WasmType::AnyFunction => 0x70,
+            WasmType::Function => 0x60,
+        }
+    }
 }

@@ -16,8 +16,8 @@ const buildToWasm = (fileName) => {
     const { buffer } = wasmModule.toBinary({});
     return writeFileSync(`${fileName}.wasm`, Buffer.from(buffer));
 }
-buildToWasm("test");
-instantiate("test")
+
+instantiate("out")
     .then(res => {
 	console.log(res);
     })

@@ -4,6 +4,7 @@ extern crate failure;
 extern crate failure_derive;
 extern crate byteorder;
 extern crate itertools;
+extern crate leb128;
 extern crate strum;
 #[macro_use]
 extern crate strum_macros;
@@ -28,7 +29,13 @@ mod types;
 mod wasm;
 
 fn main() -> Result<()> {
-    run_repl()?;
+    let file = File::create("build/out.wasm")?;
+    let mut emitter = Emitter::new(file);
+    emitter.emit_prelude()?;
+    emitter.emit_types_section(Vec::new())?;
+    emitter.emit_function_section()?;
+    emitter.emit_exports_section()?;
+    emitter.emit_code_section()?;
     Ok(())
 }
 

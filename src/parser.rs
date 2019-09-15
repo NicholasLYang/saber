@@ -454,7 +454,7 @@ impl<'input> Parser<'input> {
 
     fn comma<T: Debug>(
         &mut self,
-        parse_fn: &Fn(&mut Self) -> Result<T>,
+        parse_fn: &dyn Fn(&mut Self) -> Result<T>,
         end_token: Token,
     ) -> Result<Vec<T>> {
         let mut parsed: Vec<T> = Vec::new();
