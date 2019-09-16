@@ -18,7 +18,7 @@ pub enum OpCode {
     // Block,
     // Loop,
     // If,
-    // Else,p
+    // Else,
     // End,
     // Break,
     // BreakIf,

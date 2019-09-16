@@ -148,6 +148,10 @@ impl<'input> Parser<'input> {
         match tok {
             Some((_, Token::Let, _)) => self.parse_let_statement(),
             Some((_, Token::Return, _)) => self.parse_return_statement(),
+            Some(token) => {
+                self.pushback(token);
+                self.parse_expression_statement()
+            }
             _ => Err(ParseError::NotImplemented)?,
         }
     }
@@ -180,6 +184,12 @@ impl<'input> Parser<'input> {
                 Ok(Stmt::Asgn(pat, rhs_expr))
             }
         }
+    }
+
+    fn parse_expression_statement(&mut self) -> Result<Stmt> {
+        let expr = self.parse_expression()?;
+        self.expect(TokenDiscriminants::Semicolon)?;
+        Ok(Stmt::Expr(expr))
     }
 
     fn parse_expression(&mut self) -> Result<Expr> {

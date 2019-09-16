@@ -50,6 +50,10 @@ fn make_code_section() -> Vec<FunctionBody> {
 }
 
 fn main() -> Result<()> {
+    run_repl()
+}
+
+fn test_emitter() -> Result<()> {
     let file = File::create("build/out.wasm")?;
     let mut emitter = Emitter::new(file);
     emitter.emit_prelude()?;
@@ -77,6 +81,5 @@ fn run_repl() -> Result<()> {
         let parser_out = parser.parse_statement()?;
         let mut typechecker = TypeChecker::new();
         let typed_stmt = typechecker.infer_stmt(parser_out)?;
-        println!("{:#?}", typed_stmt);
     }
 }
