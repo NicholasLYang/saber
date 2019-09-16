@@ -1,11 +1,10 @@
 use crate::types::Result;
 use ast::Type;
 use byteorder::{LittleEndian, WriteBytesExt};
-use opcodes::{OpCode, WasmType};
 use std::convert::TryInto;
 use std::fs::File;
 use std::io::prelude::*;
-use wasm::FunctionType;
+use wasm::{ExportEntry, FunctionBody, FunctionType, OpCode, WasmType};
 
 pub struct Emitter {
     file: File,
@@ -21,6 +20,10 @@ pub enum EmitError {
     InvalidFunctionType { type_: Type },
     #[fail(display = "Not implemented yet")]
     NotImplemented,
+    #[fail(
+        display = "INTERNAL: Index is larger than 32 bit integer. Should have been caught earlier"
+    )]
+    IndexTooLarge,
 }
 
 static MAGIC_NUM: u32 = 0x6d736100;
@@ -72,7 +75,7 @@ impl Emitter {
         for opcode in opcodes {
             self.emit_code(opcode)?;
         }
-        leb128::write::unsigned(&mut self.file, self.buffer.len().try_into().unwrap())?;
+        leb128::write::unsigned(&mut self.file, usize_to_u64(self.buffer.len())?)?;
         self.flush_buffer()
     }
 
@@ -81,41 +84,51 @@ impl Emitter {
         self.emit_code(OpCode::Version)
     }
 
-    pub fn emit_types_section(&mut self, _types: Vec<FunctionType>) -> Result<()> {
+    pub fn emit_types_section(&mut self, types: Vec<FunctionType>) -> Result<()> {
         self.emit_code(OpCode::SectionId(1))?;
-        // Number of type entries to come
-        self.write_section(vec![
-            OpCode::Count(1),
-            OpCode::Type(WasmType::Function),
-            // Param counts
-            OpCode::Count(0),
-            // Return counts
-            OpCode::Count(1),
-            OpCode::Type(WasmType::i32),
-        ])
+        // Start with a count for number of type definitions
+        let mut opcodes = vec![OpCode::Count(types.len().try_into().unwrap())];
+        for type_ in types {
+            opcodes.push(OpCode::Type(WasmType::Function));
+            opcodes.push(OpCode::Count(usize_to_u32(type_.param_types.len())?));
+            for param in &type_.param_types {
+                opcodes.push(OpCode::Type(param.clone()));
+            }
+            match type_.return_type {
+                Some(t) => {
+                    opcodes.push(OpCode::Count(1));
+                    opcodes.push(OpCode::Type(t));
+                }
+                None => {
+                    opcodes.push(OpCode::Count(0));
+                }
+            }
+        }
+        self.write_section(opcodes)
     }
 
-    pub fn emit_function_section(&mut self) -> Result<()> {
+    pub fn emit_function_section(&mut self, function_type_indices: Vec<u32>) -> Result<()> {
         self.emit_code(OpCode::SectionId(3))?;
-        // Num of bytes
-        self.write_section(vec![OpCode::Count(1), OpCode::Index(0)])
+        let mut opcodes = vec![OpCode::Count(usize_to_u32(function_type_indices.len())?)];
+        for index in function_type_indices {
+            opcodes.push(OpCode::Index(index));
+        }
+        self.write_section(opcodes)
     }
 
-    pub fn emit_exports_section(&mut self) -> Result<()> {
-        let bytes = "main".to_string().into_bytes();
+    pub fn emit_exports_section(&mut self, exports: Vec<ExportEntry>) -> Result<()> {
         self.emit_code(OpCode::SectionId(7))?;
-        // Num of bytes
-        self.write_section(vec![
-            // Num of exports
-            OpCode::Count(1),
-            OpCode::Count(bytes.len().try_into().unwrap()),
-            OpCode::Name(bytes),
-            OpCode::Kind(0),
-            OpCode::Index(0),
-        ])
+        let mut opcodes = vec![OpCode::Count(usize_to_u32(exports.len())?)];
+        for entry in exports {
+            opcodes.push(OpCode::Count(entry.field_str.len().try_into().unwrap()));
+            opcodes.push(OpCode::Name(entry.field_str));
+            opcodes.push(OpCode::Kind(entry.kind.into()));
+            opcodes.push(OpCode::Index(entry.index));
+        }
+        self.write_section(opcodes)
     }
 
-    pub fn emit_code_section(&mut self) -> Result<()> {
+    pub fn emit_code_section(&mut self, _bodies: Vec<FunctionBody>) -> Result<()> {
         self.emit_code(OpCode::SectionId(10))?;
         self.flush_buffer()?;
         self.emit_code(OpCode::Count(1))?;
@@ -128,5 +141,20 @@ impl Emitter {
         self.emit_code(OpCode::Code(code_body));
         leb128::write::unsigned(&mut self.file, self.buffer.len().try_into().unwrap())?;
         self.flush_buffer()
+    }
+}
+
+// Dumb but it works
+fn usize_to_u64(i: usize) -> Result<u64> {
+    match i.try_into() {
+        Ok(i) => Ok(i),
+        Err(_) => Err(EmitError::IndexTooLarge)?,
+    }
+}
+
+fn usize_to_u32(i: usize) -> Result<u32> {
+    match i.try_into() {
+        Ok(i) => Ok(i),
+        Err(_) => Err(EmitError::IndexTooLarge)?,
     }
 }

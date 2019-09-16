@@ -14,6 +14,7 @@ use crate::opcodes::OpCode;
 use crate::parser::Parser;
 use crate::typechecker::TypeChecker;
 use crate::types::Result;
+use crate::wasm::{ExportEntry, ExternalKind, FunctionType, WasmType};
 use ast::Type;
 use std::fs::File;
 use std::io;
@@ -28,14 +29,29 @@ mod typechecker;
 mod types;
 mod wasm;
 
+fn make_types_section() -> Vec<FunctionType> {
+    vec![FunctionType {
+        param_types: vec![],
+        return_type: Some(WasmType::i32),
+    }]
+}
+
+fn make_exports_section() -> Vec<ExportEntry> {
+    vec![ExportEntry {
+        field_str: "main".to_string().into_bytes(),
+        kind: ExternalKind::Function,
+        index: 0,
+    }]
+}
+
 fn main() -> Result<()> {
     let file = File::create("build/out.wasm")?;
     let mut emitter = Emitter::new(file);
     emitter.emit_prelude()?;
-    emitter.emit_types_section(Vec::new())?;
-    emitter.emit_function_section()?;
-    emitter.emit_exports_section()?;
-    emitter.emit_code_section()?;
+    emitter.emit_types_section(make_types_section())?;
+    emitter.emit_function_section(vec![0])?;
+    emitter.emit_exports_section(make_exports_section())?;
+    emitter.emit_code_section(Vec::new())?;
     Ok(())
 }
 
