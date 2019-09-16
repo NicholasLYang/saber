@@ -10,11 +10,10 @@ extern crate strum;
 extern crate strum_macros;
 
 use crate::emitter::Emitter;
-use crate::opcodes::OpCode;
 use crate::parser::Parser;
 use crate::typechecker::TypeChecker;
 use crate::types::Result;
-use crate::wasm::{ExportEntry, ExternalKind, FunctionType, WasmType};
+use crate::wasm::{ExportEntry, ExternalKind, FunctionBody, FunctionType, OpCode, WasmType};
 use ast::Type;
 use std::fs::File;
 use std::io;
@@ -23,7 +22,6 @@ use std::io::Write;
 mod ast;
 mod emitter;
 mod lexer;
-mod opcodes;
 mod parser;
 mod typechecker;
 mod types;
@@ -44,6 +42,13 @@ fn make_exports_section() -> Vec<ExportEntry> {
     }]
 }
 
+fn make_code_section() -> Vec<FunctionBody> {
+    vec![FunctionBody {
+        locals: Vec::new(),
+        code: vec![OpCode::I32Const(128)],
+    }]
+}
+
 fn main() -> Result<()> {
     let file = File::create("build/out.wasm")?;
     let mut emitter = Emitter::new(file);
@@ -51,7 +56,7 @@ fn main() -> Result<()> {
     emitter.emit_types_section(make_types_section())?;
     emitter.emit_function_section(vec![0])?;
     emitter.emit_exports_section(make_exports_section())?;
-    emitter.emit_code_section(Vec::new())?;
+    emitter.emit_code_section(make_code_section())?;
     Ok(())
 }
 

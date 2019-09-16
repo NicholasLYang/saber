@@ -29,6 +29,34 @@ pub enum EmitError {
 static MAGIC_NUM: u32 = 0x6d736100;
 static VERSION: u32 = 0x1;
 
+pub fn emit_code<T: Write>(mut dest: T, op_code: OpCode) -> Result<()> {
+    let bytecode = match op_code {
+        OpCode::MagicNumber => dest.write_u32::<LittleEndian>(MAGIC_NUM),
+        OpCode::Version => dest.write_u32::<LittleEndian>(VERSION),
+        OpCode::SectionId(code) => {
+            leb128::write::unsigned(&mut dest, code.into())?;
+            Ok(())
+        }
+        OpCode::Count(i) | OpCode::Index(i) => {
+            leb128::write::unsigned(&mut dest, i.into())?;
+            Ok(())
+        }
+        OpCode::Type(type_) => {
+            leb128::write::unsigned(&mut dest, type_.into())?;
+            Ok(())
+        }
+        OpCode::Name(bytes) | OpCode::Code(bytes) => dest.write_all(&bytes),
+        OpCode::Kind(kind) => dest.write_u8(kind),
+        OpCode::I32Const(val) => {
+            dest.write_u8(0x41)?;
+            leb128::write::signed(&mut dest, val.into())?;
+            Ok(())
+        }
+        OpCode::End => dest.write_u8(0x0b),
+    }?;
+    Ok(())
+}
+
 impl Emitter {
     pub fn new(file: File) -> Emitter {
         Emitter {
@@ -38,29 +66,7 @@ impl Emitter {
     }
 
     pub fn emit_code(&mut self, op_code: OpCode) -> Result<()> {
-        let bytecode = match op_code {
-            OpCode::MagicNumber => self.buffer.write_u32::<LittleEndian>(MAGIC_NUM),
-            OpCode::Version => self.buffer.write_u32::<LittleEndian>(VERSION),
-            OpCode::SectionId(code) => {
-                leb128::write::unsigned(&mut self.buffer, code.into())?;
-                Ok(())
-            }
-            OpCode::Count(i) | OpCode::Index(i) => {
-                leb128::write::unsigned(&mut self.buffer, i.into())?;
-                Ok(())
-            }
-            OpCode::Type(type_) => {
-                leb128::write::unsigned(&mut self.buffer, type_.into())?;
-                Ok(())
-            }
-            OpCode::Name(bytes) | OpCode::Code(bytes) => self.buffer.write_all(&bytes),
-            OpCode::Kind(kind) => self.buffer.write_u8(kind),
-            OpCode::I32Const(val) => {
-                self.buffer.write_u8(0x41);
-                self.buffer.write_i32::<LittleEndian>(val)
-            }
-        }?;
-        Ok(())
+        emit_code(&mut self.buffer, op_code)
     }
 
     pub fn flush_buffer(&mut self) -> Result<()> {
@@ -128,19 +134,24 @@ impl Emitter {
         self.write_section(opcodes)
     }
 
-    pub fn emit_code_section(&mut self, _bodies: Vec<FunctionBody>) -> Result<()> {
+    pub fn emit_code_section(&mut self, bodies: Vec<FunctionBody>) -> Result<()> {
         self.emit_code(OpCode::SectionId(10))?;
         self.flush_buffer()?;
-        self.emit_code(OpCode::Count(1))?;
-        let mut code_body = Vec::new();
-        leb128::write::unsigned(&mut code_body, 0)?;
-        code_body.write_u8(0x41)?;
-        leb128::write::signed(&mut code_body, 125)?;
-        code_body.write_u8(0x0b)?;
-        self.emit_code(OpCode::Count(code_body.len().try_into().unwrap()))?;
-        self.emit_code(OpCode::Code(code_body));
-        leb128::write::unsigned(&mut self.file, self.buffer.len().try_into().unwrap())?;
-        self.flush_buffer()
+        let mut opcodes = vec![OpCode::Count(usize_to_u32(bodies.len())?)];
+        for body in bodies {
+            let mut code_body = Vec::new();
+            emit_code(
+                &mut code_body,
+                OpCode::Count(usize_to_u32(body.locals.len())?),
+            );
+            for opcode in body.code {
+                emit_code(&mut code_body, opcode);
+            }
+            emit_code(&mut code_body, OpCode::End);
+            opcodes.push(OpCode::Count(code_body.len().try_into().unwrap()));
+            opcodes.push(OpCode::Code(code_body));
+        }
+        self.write_section(opcodes)
     }
 }
 

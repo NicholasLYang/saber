@@ -3,6 +3,7 @@ use crate::types::Result;
 use std::convert::TryInto;
 use std::sync::Arc;
 
+#[derive(Debug)]
 pub enum OpCode {
     MagicNumber,
     Version,
@@ -13,6 +14,7 @@ pub enum OpCode {
     Name(Vec<u8>),
     Kind(u8),
     Code(Vec<u8>),
+    End,
     // Block,
     // Loop,
     // If,
@@ -155,8 +157,8 @@ pub struct ExportEntry {
 
 #[derive(Debug)]
 pub struct FunctionBody {
-    locals: Vec<LocalEntry>,
-    code: Vec<ByteCode>,
+    pub locals: Vec<LocalEntry>,
+    pub code: Vec<OpCode>,
 }
 
 #[derive(Debug)]
