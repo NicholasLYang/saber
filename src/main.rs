@@ -14,8 +14,8 @@ use crate::parser::Parser;
 use crate::typechecker::TypeChecker;
 use crate::types::Result;
 use crate::wasm::{ExportEntry, ExternalKind, FunctionBody, FunctionType, OpCode, WasmType};
-use ast::{Op, Type, TypedExpr, TypedStmt, Value};
-use code_generator::generate_function;
+use ast::{Op, Pat, Type, TypedExpr, TypedStmt, Value};
+use code_generator::CodeGenerator;
 use std::fs::File;
 use std::io;
 use std::io::Write;
@@ -53,22 +53,27 @@ fn make_code_section() -> Vec<FunctionBody> {
 }
 
 fn main() -> Result<()> {
-    let (type_, body) = test_code_generator()?;
-    test_emitter(vec![type_], vec![body])
+    let (type_, body, entry) = test_code_generator()?;
+    test_emitter(vec![type_], vec![body], vec![entry])
 }
 
-fn test_emitter(types: Vec<FunctionType>, bodies: Vec<FunctionBody>) -> Result<()> {
+fn test_emitter(
+    types: Vec<FunctionType>,
+    bodies: Vec<FunctionBody>,
+    entries: Vec<ExportEntry>,
+) -> Result<()> {
     let file = File::create("build/out.wasm")?;
     let mut emitter = Emitter::new(file);
     emitter.emit_prelude()?;
     emitter.emit_types_section(types)?;
     emitter.emit_function_section(vec![0])?;
-    emitter.emit_exports_section(make_exports_section())?;
+    emitter.emit_exports_section(entries)?;
     emitter.emit_code_section(bodies)?;
     Ok(())
 }
 
-fn test_code_generator() -> Result<(FunctionType, FunctionBody)> {
+fn test_code_generator() -> Result<(FunctionType, FunctionBody, ExportEntry)> {
+    let mut generator = CodeGenerator::new();
     let lhs = Box::new(TypedExpr::Primary {
         value: Value::Integer(10),
         type_: Arc::new(Type::Int),
@@ -80,11 +85,17 @@ fn test_code_generator() -> Result<(FunctionType, FunctionBody)> {
     let body = TypedStmt::Return(TypedExpr::BinOp {
         lhs,
         rhs,
-        op: Op::Plus,
+        op: Op::Minus,
         type_: Arc::new(Type::Int),
     });
     let type_ = Type::Arrow(Arc::new(Type::Unit), Arc::new(Type::Int));
-    generate_function(&Arc::new(type_), &body)
+    let func_expr = TypedExpr::Function {
+        params: Pat::Id("a".into(), None),
+        body: Box::new(body),
+        type_: Arc::new(type_),
+    };
+    let binding = TypedStmt::Asgn(Pat::Id("main".into(), None), func_expr);
+    generator.generate_top_level_stmt(&binding)
 }
 
 fn run_repl() -> Result<()> {
