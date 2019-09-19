@@ -15,18 +15,12 @@ pub enum OpCode {
     Kind(u8),
     Code(Vec<u8>),
     End,
-    // Block,
-    // Loop,
-    // If,
-    // Else,
-    // End,
-    // Break,
-    // BreakIf,
-    // BreakTable,
-    // Return,
-    // Call,
-    // CallIndirect,
+    I32Add,
+    I32Sub,
+    F32Add,
+    F32Sub,
     I32Const(i32),
+    F32Const(f32),
 }
 
 #[derive(Debug, Clone)]
@@ -109,16 +103,16 @@ pub struct GlobalType {
 }
 
 #[derive(Debug)]
-pub enum PayloadData {
-    TypeSection(Vec<FunctionType>),
-    ImportSection(Vec<ImportEntry>),
-    FunctionSection(Vec<u32>),
-    TableSection(Vec<TableType>),
-    MemorySection(Vec<MemoryType>),
-    GlobalSection(Vec<(GlobalType, Vec<ByteCode>)>),
-    ExportSection(Vec<ExportEntry>),
-    CodeSection(Vec<FunctionBody>),
-    DataSection(Vec<DataSegment>),
+pub struct PayloadData {
+    typeSection: Vec<FunctionType>,
+    importSection: Vec<ImportEntry>,
+    functionSection: Vec<u32>,
+    tableSection: Vec<TableType>,
+    memorySection: Vec<MemoryType>,
+    globalSection: Vec<(GlobalType, Vec<ByteCode>)>,
+    exportSection: Vec<ExportEntry>,
+    codeSection: Vec<FunctionBody>,
+    dataSection: Vec<DataSegment>,
 }
 
 #[derive(Debug)]

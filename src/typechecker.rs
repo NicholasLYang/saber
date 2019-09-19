@@ -11,7 +11,7 @@ pub enum TypeError {
     #[fail(display = "Not implemented yet")]
     NotImplemented,
     #[fail(
-        display = "Could not find operation {:?} with arguments of type {:?} and {:?}",
+        display = "Could not find operation {} with arguments of type {} and {}",
         op, lhs_type, rhs_type
     )]
     OpFailure {
@@ -19,11 +19,11 @@ pub enum TypeError {
         lhs_type: Arc<Type>,
         rhs_type: Arc<Type>,
     },
-    #[fail(display = "Could not unify {:?} with {:?}", type1, type2)]
+    #[fail(display = "Could not unify {} with {}", type1, type2)]
     UnificationFailure { type1: Arc<Type>, type2: Arc<Type> },
-    #[fail(display = "Type {:?} does not exit", type_name)]
+    #[fail(display = "Type {} does not exit", type_name)]
     TypeDoesNotExist { type_name: Name },
-    #[fail(display = "Arity mismatch: Expected {:?} but got {:?}", arity1, arity2)]
+    #[fail(display = "Arity mismatch: Expected {} but got {}", arity1, arity2)]
     ArityMismatch { arity1: usize, arity2: usize },
     #[fail(display = "Record contains non indentifier patterns: {:?}", record)]
     RecordContainsNonIds { record: Pat },

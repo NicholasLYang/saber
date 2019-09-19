@@ -374,13 +374,14 @@ impl<'input> Parser<'input> {
     fn parse_pattern(&mut self) -> Result<Pat> {
         let tok = self.bump()?;
         match tok {
-            // If the pattern is singular, i.e. let (a) = 10, then we treat it as a single id
             Some((_, Token::LParen, _)) => {
                 if let Some(_) = self.lookahead_match(TokenDiscriminants::RParen)? {
                     return Ok(Pat::Empty);
                 }
 
                 let mut tuple_patterns = self.comma::<Pat>(&Self::parse_pattern, Token::RParen)?;
+                // If the pattern is singular, i.e. let (a) = 10, then
+                // we treat it as a single id
                 if tuple_patterns.len() == 1 {
                     match tuple_patterns.pop() {
                         Some(pat) => Ok(pat),

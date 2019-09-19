@@ -4,6 +4,7 @@ use byteorder::{LittleEndian, WriteBytesExt};
 use std::convert::TryInto;
 use std::fs::File;
 use std::io::prelude::*;
+use std::mem;
 use wasm::{ExportEntry, FunctionBody, FunctionType, OpCode, WasmType};
 
 pub struct Emitter {
@@ -14,7 +15,7 @@ pub struct Emitter {
 #[derive(Debug, Fail, PartialEq)]
 pub enum EmitError {
     #[fail(
-        display = "INTERNAL: Invalid function type. Type {:?} was not an Arrow",
+        display = "INTERNAL: Invalid function type. Type {} was not an Arrow",
         type_
     )]
     InvalidFunctionType { type_: Type },
@@ -52,6 +53,17 @@ pub fn emit_code<T: Write>(mut dest: T, op_code: OpCode) -> Result<()> {
             leb128::write::signed(&mut dest, val.into())?;
             Ok(())
         }
+        OpCode::F32Const(val) => {
+            dest.write_u8(0x43)?;
+            unsafe {
+                dest.write_u32::<LittleEndian>(mem::transmute(val))?;
+            }
+            Ok(())
+        }
+        OpCode::I32Add => dest.write_u8(0x6a),
+        OpCode::I32Sub => dest.write_u8(0x6b),
+        OpCode::F32Add => dest.write_u8(0x92),
+        OpCode::F32Sub => dest.write_u8(0x93),
         OpCode::End => dest.write_u8(0x0b),
     }?;
     Ok(())

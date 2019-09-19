@@ -14,12 +14,15 @@ use crate::parser::Parser;
 use crate::typechecker::TypeChecker;
 use crate::types::Result;
 use crate::wasm::{ExportEntry, ExternalKind, FunctionBody, FunctionType, OpCode, WasmType};
-use ast::Type;
+use ast::{Op, Type, TypedExpr, TypedStmt, Value};
+use code_generator::generate_function;
 use std::fs::File;
 use std::io;
 use std::io::Write;
+use std::sync::Arc;
 
 mod ast;
+mod code_generator;
 mod emitter;
 mod lexer;
 mod parser;
@@ -30,7 +33,7 @@ mod wasm;
 fn make_types_section() -> Vec<FunctionType> {
     vec![FunctionType {
         param_types: vec![],
-        return_type: Some(WasmType::i32),
+        return_type: Some(WasmType::f32),
     }]
 }
 
@@ -45,23 +48,43 @@ fn make_exports_section() -> Vec<ExportEntry> {
 fn make_code_section() -> Vec<FunctionBody> {
     vec![FunctionBody {
         locals: Vec::new(),
-        code: vec![OpCode::I32Const(128)],
+        code: vec![OpCode::F32Const(1.25)],
     }]
 }
 
 fn main() -> Result<()> {
-    run_repl()
+    let (type_, body) = test_code_generator()?;
+    test_emitter(vec![type_], vec![body])
 }
 
-fn test_emitter() -> Result<()> {
+fn test_emitter(types: Vec<FunctionType>, bodies: Vec<FunctionBody>) -> Result<()> {
     let file = File::create("build/out.wasm")?;
     let mut emitter = Emitter::new(file);
     emitter.emit_prelude()?;
-    emitter.emit_types_section(make_types_section())?;
+    emitter.emit_types_section(types)?;
     emitter.emit_function_section(vec![0])?;
     emitter.emit_exports_section(make_exports_section())?;
-    emitter.emit_code_section(make_code_section())?;
+    emitter.emit_code_section(bodies)?;
     Ok(())
+}
+
+fn test_code_generator() -> Result<(FunctionType, FunctionBody)> {
+    let lhs = Box::new(TypedExpr::Primary {
+        value: Value::Integer(10),
+        type_: Arc::new(Type::Int),
+    });
+    let rhs = Box::new(TypedExpr::Primary {
+        value: Value::Integer(15),
+        type_: Arc::new(Type::Int),
+    });
+    let body = TypedStmt::Return(TypedExpr::BinOp {
+        lhs,
+        rhs,
+        op: Op::Plus,
+        type_: Arc::new(Type::Int),
+    });
+    let type_ = Type::Arrow(Arc::new(Type::Unit), Arc::new(Type::Int));
+    generate_function(&Arc::new(type_), &body)
 }
 
 fn run_repl() -> Result<()> {
@@ -81,5 +104,6 @@ fn run_repl() -> Result<()> {
         let parser_out = parser.parse_statement()?;
         let mut typechecker = TypeChecker::new();
         let typed_stmt = typechecker.infer_stmt(parser_out)?;
+        println!("{:#?}", typed_stmt);
     }
 }

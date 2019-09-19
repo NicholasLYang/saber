@@ -1,3 +1,4 @@
+use std::fmt;
 use std::sync::Arc;
 pub type Name = String;
 
@@ -105,6 +106,28 @@ pub enum Op {
     LessEqual,
 }
 
+impl fmt::Display for Op {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Op::Comma => ",",
+                Op::Plus => "+",
+                Op::Minus => "-",
+                Op::Times => "*",
+                Op::Div => "/",
+                Op::BangEqual => "!=",
+                Op::EqualEqual => "==",
+                Op::Greater => ">",
+                Op::GreaterEqual => ">=",
+                Op::Less => "<",
+                Op::LessEqual => "<=",
+            }
+        )
+    }
+}
+
 // Yeah this is hilariously basic rn.
 #[derive(Debug, PartialEq, Clone)]
 pub enum Type {
@@ -119,6 +142,28 @@ pub enum Type {
     Record(Vec<(Name, Arc<Type>)>),
     Tuple(Vec<Arc<Type>>),
     Arrow(Arc<Type>, Arc<Type>),
+}
+
+impl fmt::Display for Type {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Type::Unit => "()".into(),
+                Type::Float => "float".into(),
+                Type::Int => "int".into(),
+                Type::Bool => "bool".into(),
+                Type::Char => "char".into(),
+                Type::String => "string".into(),
+                Type::Var(Name) => "unknown".into(),
+                Type::Array(t) => format!("[{}]", t),
+                Type::Record(_) => "{ Record }".into(),
+                Type::Tuple(_) => "(Tuple)".into(),
+                Type::Arrow(t1, t2) => format!("{} => {}", t1, t2),
+            }
+        )
+    }
 }
 
 impl Type {
