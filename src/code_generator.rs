@@ -20,21 +20,16 @@ pub enum GenerationError {
     NotImplemented,
 }
 
-fn generate_return_type(return_type: &Arc<Type>) -> Result<Option<WasmType>> {
-    match &**return_type {
-        Type::Unit => Ok(None),
-        Type::Int | Type::Bool | Type::Char => Ok(Some(WasmType::i32)),
-        Type::Float => Ok(Some(WasmType::f32)),
-        Type::String | Type::Array(_) | Type::Arrow(_, _) | Type::Record(_) | Type::Tuple(_) => {
-            Ok(Some(WasmType::i32))
-        }
-        Type::Var(_) => Err(GenerationError::CouldNotInfer {
-            type_: return_type.clone(),
-        })?,
-    }
+pub fn generate_function(
+    type_: &Arc<Type>,
+    body: &TypedStmt,
+) -> Result<(FunctionType, FunctionBody)> {
+    let function_type = generate_function_type(type_)?;
+    let function_body = generate_function_body(body)?;
+    Ok((function_type, function_body))
 }
 
-pub fn generate_function_type(func_type: &Arc<Type>) -> Result<FunctionType> {
+fn generate_function_type(func_type: &Arc<Type>) -> Result<FunctionType> {
     if let Type::Arrow(params_type, return_type) = &**func_type {
         let param_types = convert_params_type(params_type);
         let return_type = generate_return_type(&return_type)?;
@@ -46,6 +41,20 @@ pub fn generate_function_type(func_type: &Arc<Type>) -> Result<FunctionType> {
         Err(GenerationError::InvalidFunctionType {
             type_: func_type.clone(),
         })?
+    }
+}
+
+fn generate_return_type(return_type: &Arc<Type>) -> Result<Option<WasmType>> {
+    match &**return_type {
+        Type::Unit => Ok(None),
+        Type::Int | Type::Bool | Type::Char => Ok(Some(WasmType::i32)),
+        Type::Float => Ok(Some(WasmType::f32)),
+        Type::String | Type::Array(_) | Type::Arrow(_, _) | Type::Record(_) | Type::Tuple(_) => {
+            Ok(Some(WasmType::i32))
+        }
+        Type::Var(_) => Err(GenerationError::CouldNotInfer {
+            type_: return_type.clone(),
+        })?,
     }
 }
 
@@ -67,18 +76,7 @@ fn convert_params_type(params_type: &Type) -> Vec<WasmType> {
     }
 }
 
-pub fn generate_function(
-    type_: &Arc<Type>,
-    body: &TypedStmt,
-) -> Result<(FunctionType, FunctionBody)> {
-    let function_type = generate_function_type(type_)?;
-    let function_body = generate_function_body(body)?;
-    Ok((function_type, function_body))
-}
-
-/// parent_function is the function inside which the current function
-/// is being defined
-pub fn generate_function_body(body: &TypedStmt) -> Result<FunctionBody> {
+fn generate_function_body(body: &TypedStmt) -> Result<FunctionBody> {
     let code = match body {
         TypedStmt::Return(expr) => generate_expr(expr)?,
         _ => Vec::new(),
