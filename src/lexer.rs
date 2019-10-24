@@ -8,6 +8,7 @@ pub enum Token {
     False,
     True,
     Else,
+    Export,
     Fun,
     For,
     If,
@@ -25,6 +26,10 @@ pub enum Token {
     RBracket,
     LParen,
     RParen,
+    // ({
+    LParenBrace,
+    // })
+    RParenBrace,
     Semicolon,
     Colon,
     Comma,
@@ -223,6 +228,7 @@ impl<'input> Lexer<'input> {
             "true" => Ok((start_pos, Token::True, end)),
             "let" => Ok((start_pos, Token::Let, end)),
             "while" => Ok((start_pos, Token::While, end)),
+            "export" => Ok((start_pos, Token::Export, end)),
             id => Ok((start_pos, Token::Ident(id.to_string()), end)),
         }
     }
@@ -236,8 +242,8 @@ impl<'input> Iterator for Lexer<'input> {
         if let Some((location, ch)) = self.bump() {
             match ch {
                 '{' => Some(Ok((location, Token::LBrace, location))),
-                '}' => Some(Ok((location, Token::RBrace, location))),
-                '(' => Some(Ok((location, Token::LParen, location))),
+                '}' => Some(self.lookahead_match(location, Token::RParenBrace, Token::RBrace, ')')),
+                '(' => Some(self.lookahead_match(location, Token::LParenBrace, Token::LParen, '{')),
                 ')' => Some(Ok((location, Token::RParen, location))),
                 '[' => Some(Ok((location, Token::LBracket, location))),
                 ']' => Some(Ok((location, Token::RBracket, location))),

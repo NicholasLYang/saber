@@ -1,3 +1,4 @@
+use im::hashmap::HashMap;
 use std::fmt;
 use std::sync::Arc;
 pub type Name = String;
@@ -9,6 +10,7 @@ pub enum Stmt {
     Return(Expr),
     Block(Vec<Stmt>),
     If(Expr, Box<Stmt>, Option<Box<Stmt>>),
+    Export(Expr),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -18,6 +20,7 @@ pub enum TypedStmt {
     Return(TypedExpr),
     Block(Vec<TypedStmt>),
     If(TypedExpr, Box<TypedStmt>, Option<Box<TypedStmt>>),
+    Export(TypedExpr),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -45,6 +48,9 @@ pub enum Expr {
     Call {
         callee: Box<Expr>,
         arg: Box<Expr>,
+    },
+    Record {
+        entries: Vec<(Name, Expr)>,
     },
     Tuple(Vec<Expr>),
 }
@@ -74,6 +80,7 @@ pub enum TypedExpr {
         params: Pat,
         body: Box<TypedStmt>,
         type_: Arc<Type>,
+        env: HashMap<Name, Type>,
     },
     Call {
         callee: Box<TypedExpr>,
@@ -166,25 +173,25 @@ impl fmt::Display for Type {
     }
 }
 
-impl Type {
-    pub fn get_total_count(&self) -> u32 {
-        let mut count = 0;
-        match self {
-            Type::Tuple(elems) => {
-                for elem in elems {
-                    count += elem.get_total_count();
-                }
-            }
-            Type::Record(elems) => {
-                for (name, type_) in elems {
-                    count += type_.get_total_count();
-                }
-            }
-            _ => count += 1,
-        }
-        count
-    }
-}
+// impl Type {
+//     pub fn get_total_count(&self) -> u32 {
+//         let mut count = 0;
+//         match self {
+//             Type::Tuple(elems) => {
+//                 for elem in elems {
+//                     count += elem.get_total_count();
+//                 }
+//             }
+//             Type::Record(elems) => {
+//                 for (name, type_) in elems {
+//                     count += type_.get_total_count();
+//                 }
+//             }
+//             _ => count += 1,
+//         }
+//         count
+//     }
+// }
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum TypeSig {
@@ -220,6 +227,7 @@ impl TypedExpr {
             TypedExpr::Function {
                 params: _,
                 body: _,
+                env: _,
                 type_,
             } => type_.clone(),
             TypedExpr::Call {

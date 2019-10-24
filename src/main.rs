@@ -3,6 +3,7 @@ extern crate failure;
 #[macro_use]
 extern crate failure_derive;
 extern crate byteorder;
+extern crate im;
 extern crate itertools;
 extern crate leb128;
 extern crate strum;
@@ -16,6 +17,7 @@ use crate::types::Result;
 use crate::wasm::{ExportEntry, ExternalKind, FunctionBody, FunctionType, OpCode, WasmType};
 use ast::{Op, Pat, Type, TypedExpr, TypedStmt, Value};
 use code_generator::CodeGenerator;
+use im::hashmap::HashMap;
 use std::fs::File;
 use std::io;
 use std::io::Write;
@@ -90,6 +92,7 @@ fn test_code_generator() -> Result<(FunctionType, FunctionBody, ExportEntry)> {
     });
     let type_ = Type::Arrow(Arc::new(Type::Unit), Arc::new(Type::Int));
     let func_expr = TypedExpr::Function {
+        env: HashMap::new(),
         params: Pat::Id("a".into(), None),
         body: Box::new(body),
         type_: Arc::new(type_),

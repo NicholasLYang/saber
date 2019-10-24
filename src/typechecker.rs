@@ -1,7 +1,6 @@
 use ast::Value;
 use ast::{Expr, Name, Op, Pat, Stmt, Type, TypeSig, TypedExpr, TypedStmt};
-use itertools::Itertools;
-use std::collections::HashMap;
+use im::hashmap::HashMap;
 use std::sync::Arc;
 
 #[derive(Debug, Fail, PartialEq)]
@@ -60,6 +59,14 @@ impl TypeChecker {
             return_type: None,
             variable_counter: 0,
         }
+    }
+
+    pub fn check_program(&mut self, program: Vec<Stmt>) -> Result<Vec<TypedStmt>, TypeError> {
+        let mut typed_stmts = Vec::new();
+        for stmt in program {
+            typed_stmts.push(self.infer_stmt(stmt)?);
+        }
+        Ok(typed_stmts)
     }
 
     pub fn infer_stmt(&mut self, stmt: Stmt) -> Result<TypedStmt, TypeError> {
@@ -258,6 +265,7 @@ impl TypeChecker {
                     params,
                     body: Box::new(body),
                     type_: Arc::new(function_type),
+                    env: HashMap::new(),
                 })
             }
             _ => Err(TypeError::NotImplemented),

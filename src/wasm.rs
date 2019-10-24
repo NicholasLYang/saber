@@ -1,8 +1,3 @@
-use crate::ast::{Type, TypedExpr};
-use crate::types::Result;
-use std::convert::TryInto;
-use std::sync::Arc;
-
 #[derive(Debug)]
 pub enum OpCode {
     MagicNumber,

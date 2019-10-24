@@ -148,12 +148,19 @@ impl<'input> Parser<'input> {
         match tok {
             Some((_, Token::Let, _)) => self.parse_let_statement(),
             Some((_, Token::Return, _)) => self.parse_return_statement(),
+            Some((_, Token::Export, _)) => self.parse_export_statement(),
             Some(token) => {
                 self.pushback(token);
                 self.parse_expression_statement()
             }
             _ => Err(ParseError::NotImplemented)?,
         }
+    }
+
+    fn parse_export_statement(&mut self) -> Result<Stmt> {
+        let expr = self.parse_expression()?;
+        self.expect(TokenDiscriminants::Semicolon)?;
+        Ok(Stmt::Export(expr))
     }
 
     fn parse_return_statement(&mut self) -> Result<Stmt> {
@@ -333,6 +340,8 @@ impl<'input> Parser<'input> {
             Some((_, Token::String(s), _)) => Ok(Expr::Primary {
                 value: Value::String(s),
             }),
+            Some((_, Token::LParenBrace, _)) => self.parse_record_literal(),
+            // Parsing tuple or grouping
             Some((start, Token::LParen, end)) => {
                 let expr = self.parse_expression()?;
                 if let Some(_) = self.lookahead_match(TokenDiscriminants::Comma)? {
@@ -368,6 +377,35 @@ impl<'input> Parser<'input> {
                     TokenDiscriminants::LParen,
                 ],
             })?,
+        }
+    }
+
+    fn parse_record_literal(&mut self) -> Result<Expr> {
+        let mut entries = Vec::new();
+        loop {
+            match self.bump()? {
+                Some((_, Token::RParenBrace, _)) => {
+                    return Ok(Expr::Record { entries });
+                }
+                Some((_, Token::Ident(name), _)) => {
+                    let field_val = self.parse_expression()?;
+                    entries.push((name, field_val));
+                }
+                Some((start, tok, end)) => Err(ParseError::UnexpectedToken {
+                    token: tok.clone(),
+                    expected_tokens: vec![
+                        TokenDiscriminants::RParenBrace,
+                        TokenDiscriminants::Ident,
+                    ],
+                    location: Location(start, end),
+                })?,
+                None => Err(ParseError::EndOfFile {
+                    expected_tokens: vec![
+                        TokenDiscriminants::RParenBrace,
+                        TokenDiscriminants::Ident,
+                    ],
+                })?,
+            }
         }
     }
 
