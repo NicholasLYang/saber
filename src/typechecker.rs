@@ -29,12 +29,11 @@ pub enum TypeError {
 }
 
 pub struct TypeChecker {
-    // Honestly I don't know. Probably just the types of the existing
-    // variables?
-    ctx: HashMap<Name, Arc<Type>>,
+    // A symbol table of sorts
+    ctx: Arc<HashMap<Name, Arc<Type>>>,
     // Type names. Right now just has the primitives like string,
     // integer, float, char
-    type_names: HashMap<Name, Type>,
+    type_names: HashMap<Name, Arc<Type>>,
     // The return type for the typing context
     return_type: Option<Arc<Type>>,
     variable_counter: usize,
@@ -43,12 +42,12 @@ pub struct TypeChecker {
 impl TypeChecker {
     pub fn new() -> TypeChecker {
         let primitive_types = vec![
-            ("integer".to_string(), Type::Int),
-            ("float".to_string(), Type::Float),
-            ("char".to_string(), Type::Char),
-            ("string".to_string(), Type::String),
+            ("integer".to_string(), Arc::new(Type::Int)),
+            ("float".to_string(), Arc::new(Type::Float)),
+            ("char".to_string(), Arc::new(Type::Char)),
+            ("string".to_string(), Arc::new(Type::String)),
         ];
-        let ctx = HashMap::new();
+        let ctx = Arc::new(HashMap::new());
         let mut type_names = HashMap::new();
         for (name, type_) in primitive_types {
             type_names.insert(name, type_);
@@ -146,11 +145,11 @@ impl TypeChecker {
         }
     }
 
-    fn lookup_type_sig(&self, sig: &TypeSig) -> Result<Type, TypeError> {
+    fn lookup_type_sig(&self, sig: &TypeSig) -> Result<Arc<Type>, TypeError> {
         match sig {
             TypeSig::Array(sig) => {
                 let type_ = self.lookup_type_sig(sig)?;
-                Ok(Type::Array(Arc::new(type_)))
+                Ok(Arc::new(Type::Array(type_)))
             }
             TypeSig::Name(name) => {
                 if let Some(type_) = self.type_names.get(name) {
@@ -164,37 +163,63 @@ impl TypeChecker {
         }
     }
 
-    fn get_fresh_type_var(&mut self) -> Type {
+    fn get_fresh_type_var(&mut self) -> Arc<Type> {
         let type_var = Type::Var(self.variable_counter.to_string());
         self.variable_counter += 1;
-        type_var
+        Arc::new(type_var)
     }
 
-    fn infer_pat(&mut self, pat: &Pat) -> Result<Type, TypeError> {
+    fn pat_to_binding_list<'a>(
+        &mut self,
+        pat: &'a Pat,
+    ) -> Result<Vec<(&'a Name, Arc<Type>)>, TypeError> {
+        match pat {
+            Pat::Id(name, type_sig) => {
+                let type_ = if let Some(type_sig) = type_sig {
+                    self.lookup_type_sig(type_sig)?
+                } else {
+                    self.get_fresh_type_var()
+                };
+                Ok(vec![(name, type_)])
+            }
+            _ => Ok(Vec::new()),
+        }
+    }
+
+    fn infer_pat(&mut self, pat: &Pat) -> Result<Arc<Type>, TypeError> {
         match pat {
             Pat::Id(name, Some(type_sig)) => self.lookup_type_sig(&type_sig),
             Pat::Id(_name, None) => Ok(self.get_fresh_type_var()),
             Pat::Tuple(pats) => {
-                let mut types = Vec::new();
-                for pat in pats {
-                    let type_ = self.infer_pat(pat)?;
-                    types.push(Arc::new(type_));
-                }
-                Ok(Type::Tuple(types))
+                let types: Result<Vec<_>, _> = pats.iter().map(|pat| self.infer_pat(pat)).collect();
+                Ok(Arc::new(Type::Tuple(types?)))
             }
-            Pat::Empty => Ok(Type::Unit),
-            _ => Err(TypeError::NotImplemented),
+            Pat::Record(pats) => {
+                let types: Result<Vec<_>, _> = pats
+                    .iter()
+                    .map(|pat| {
+                        if let Pat::Id(name, _type_sig) = pat {
+                            Ok((name.clone(), self.infer_pat(pat)?))
+                        } else {
+                            Err(TypeError::RecordContainsNonIds {
+                                record: pat.clone(),
+                            })
+                        }
+                    })
+                    .collect();
+                Ok(Arc::new(Type::Record(types?)))
+            }
+            Pat::Empty => Ok(Arc::new(Type::Unit)),
         }
     }
 
     fn infer_asgn(&mut self, pat: &Pat, rhs_type: Arc<Type>) -> Result<Arc<Type>, TypeError> {
         let lhs_type = self.infer_pat(pat)?;
-        let arc_lhs_type = Arc::new(lhs_type);
-        if self.unify(&arc_lhs_type, &rhs_type) {
+        if self.unify(&lhs_type, &rhs_type) {
             Ok(rhs_type)
         } else {
             Err(TypeError::UnificationFailure {
-                type1: arc_lhs_type,
+                type1: lhs_type,
                 type2: rhs_type,
             })
         }
@@ -247,11 +272,11 @@ impl TypeChecker {
                 return_type,
             } => {
                 // Insert params into ctx
-                self.insert_params(&params)?;
+                let param_type = self.infer_pat(&params)?;
                 // Insert return type into typechecker so that
                 // typechecker can verify return statements.
                 if let Some(return_type_sig) = return_type {
-                    self.return_type = Some(Arc::new(self.lookup_type_sig(&return_type_sig)?));
+                    self.return_type = Some(self.lookup_type_sig(&return_type_sig)?);
                 }
                 // Check body
                 let body = self.infer_stmt(*body)?;
@@ -272,6 +297,9 @@ impl TypeChecker {
         }
     }
 
+    /*
+     Retrieves param type from context
+    */
     fn retrieve_params(&mut self, params: &Pat) -> Result<Arc<Type>, TypeError> {
         match params {
             Pat::Id(name, _) => {
@@ -281,7 +309,7 @@ impl TypeChecker {
                         return Ok(type_.clone());
                     }
                 }
-                let type_var = Arc::new(self.get_fresh_type_var());
+                let type_var = self.get_fresh_type_var();
                 self.ctx.insert(name.clone(), type_var.clone());
                 Ok(type_var)
             }
@@ -309,32 +337,6 @@ impl TypeChecker {
             }
             Pat::Empty => Ok(Arc::new(Type::Unit)),
         }
-    }
-
-    // Insert params into context
-    fn insert_params(&mut self, params: &Pat) -> Result<(), TypeError> {
-        match params {
-            Pat::Id(name, Some(type_sig)) => {
-                let type_ = self.lookup_type_sig(type_sig)?;
-                self.ctx.insert(name.clone(), Arc::new(type_));
-            }
-            Pat::Id(name, None) => {
-                let type_ = self.get_fresh_type_var();
-                self.ctx.insert(name.clone(), Arc::new(type_));
-            }
-            Pat::Tuple(pats) => {
-                for pat in pats {
-                    self.insert_params(pat)?;
-                }
-            }
-            Pat::Record(pats) => {
-                for pat in pats {
-                    self.insert_params(pat)?;
-                }
-            }
-            _ => (),
-        };
-        Ok(())
     }
 
     fn infer_op(&mut self, op: &Op, lhs_type: Arc<Type>, rhs_type: Arc<Type>) -> Option<Type> {
