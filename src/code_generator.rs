@@ -34,6 +34,17 @@ impl CodeGenerator {
         CodeGenerator { function_index: 0 }
     }
 
+    pub fn generate_program(
+        &mut self,
+        program: Vec<TypedStmt>,
+    ) -> Result<Vec<(FunctionType, FunctionBody, ExportEntry)>> {
+        let mut out = Vec::new();
+        for stmt in program {
+            out.push(self.generate_top_level_stmt(&stmt)?);
+        }
+        Ok(out)
+    }
+
     pub fn generate_top_level_stmt(
         &mut self,
         stmt: &TypedStmt,

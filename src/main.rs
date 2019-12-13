@@ -21,8 +21,8 @@ use im::hashmap::HashMap;
 use std::env;
 use std::fs::File;
 use std::io;
+use std::io::Read;
 use std::io::Write;
-use std::sync::Arc;
 
 mod ast;
 mod code_generator;
@@ -61,7 +61,7 @@ fn main() -> Result<()> {
     if args.len() < 2 {
         run_repl()
     } else {
-        read_file()
+        read_file(&args[1])
     }
 }
 
@@ -109,8 +109,18 @@ fn test_code_generator() -> Result<(FunctionType, FunctionBody, ExportEntry)> {
     generator.generate_top_level_stmt(&binding)
 }
 
-fn read_file() -> Result<()> {
-    println!("READ FILE");
+fn read_file(file_name: &String) -> Result<()> {
+    let mut file = File::open(file_name)?;
+    let mut contents = String::new();
+    file.read_to_string(&mut contents)?;
+    let lexer = lexer::Lexer::new(&contents);
+    let mut parser = Parser::new(lexer);
+    let parser_out = parser.parse_stmts()?;
+    let mut typechecker = TypeChecker::new();
+    let typed_program = typechecker.check_program(parser_out)?;
+    let mut code_generator = CodeGenerator::new();
+    let out = code_generator.generate_program(typed_program);
+    println!("OUT: {:?}", out);
     Ok(())
 }
 
@@ -128,7 +138,7 @@ fn run_repl() -> Result<()> {
             .expect("Couldn't read line");
         let lexer = lexer::Lexer::new(&input);
         let mut parser = Parser::new(lexer);
-        let parser_out = parser.parse_statement()?;
+        let parser_out = parser.parse_stmt()?;
         let mut typechecker = TypeChecker::new();
         let typed_stmt = typechecker.infer_stmt(parser_out)?;
         println!("{:#?}", typed_stmt);

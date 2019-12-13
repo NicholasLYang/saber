@@ -1,6 +1,5 @@
 use crate::ast::{Expr, Op, Pat, Stmt, TypeSig, Value};
-use crate::lexer::{Lexer, Token, TokenDiscriminants};
-use crate::types::Result;
+use crate::lexer::{Lexer, LexicalError, Token, TokenDiscriminants};
 use std::fmt;
 use std::fmt::{Debug, Display, Formatter};
 
@@ -38,8 +37,16 @@ pub enum ParseError {
     },
     #[fail(display = "Not implemented yet")]
     NotImplemented,
+    #[fail(display = "Lexer error: {}", err)]
+    LexicalError { err: LexicalError },
     #[fail(display = "Should not be reachable")]
     NotReachable,
+}
+
+impl From<LexicalError> for ParseError {
+    fn from(err: LexicalError) -> Self {
+        ParseError::LexicalError { err }
+    }
 }
 
 impl<'input> Parser<'input> {
@@ -50,7 +57,10 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn expect(&mut self, expected: TokenDiscriminants) -> Result<(usize, Token, usize)> {
+    fn expect(
+        &mut self,
+        expected: TokenDiscriminants,
+    ) -> Result<(usize, Token, usize), ParseError> {
         let token = self.bump()?;
         if let Some((start, token, end)) = token {
             let token_discriminant: TokenDiscriminants = (&token).into();
@@ -74,7 +84,10 @@ impl<'input> Parser<'input> {
         self.pushedback_tokens.push(token);
     }
 
-    fn lookahead_match(&mut self, lookahead: TokenDiscriminants) -> Result<Option<Token>> {
+    fn lookahead_match(
+        &mut self,
+        lookahead: TokenDiscriminants,
+    ) -> Result<Option<Token>, ParseError> {
         let token = self.bump()?;
         if let Some((start, token, end)) = token {
             let token_discriminant: TokenDiscriminants = (&token).into();
@@ -91,7 +104,7 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn match_multiple(&mut self, tokens: Vec<Token>) -> Result<Option<Token>> {
+    fn match_multiple(&mut self, tokens: Vec<Token>) -> Result<Option<Token>, ParseError> {
         for token in tokens {
             if let Some(token) = self.lookahead_match((&token).into())? {
                 return Ok(Some(token));
@@ -100,7 +113,7 @@ impl<'input> Parser<'input> {
         Ok(None)
     }
 
-    fn bump(&mut self) -> Result<Option<(usize, Token, usize)>> {
+    fn bump(&mut self) -> Result<Option<(usize, Token, usize)>, ParseError> {
         match self.pushedback_tokens.pop() {
             Some(tok) => Ok(Some(tok)),
             None => match self.lexer.next() {
@@ -110,16 +123,15 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn peek(&mut self) -> Result<()> {
+    fn peek(&mut self) -> Result<(), ParseError> {
         let tok = self.bump()?;
-        println!("PEEK: {:?}", tok);
         if let Some((start, token, end)) = tok {
             self.pushback((start, token, end));
         }
         Ok(())
     }
 
-    fn lookup_op_token(&mut self, token: Token) -> Result<Op> {
+    fn lookup_op_token(&mut self, token: Token) -> Result<Op, ParseError> {
         match token {
             Token::EqualEqual => Ok(Op::EqualEqual),
             Token::BangEqual => Ok(Op::BangEqual),
@@ -135,41 +147,58 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn parse_block(&mut self) -> Result<Stmt> {
+    fn parse_block(&mut self) -> Result<Stmt, ParseError> {
         let mut stmts = Vec::new();
         while let None = self.lookahead_match(TokenDiscriminants::RBrace)? {
-            stmts.push(self.parse_statement()?);
+            stmts.push(self.parse_stmt()?);
         }
         Ok(Stmt::Block(stmts))
     }
 
-    pub fn parse_statement(&mut self) -> Result<Stmt> {
-        let tok = self.bump()?;
-        match tok {
-            Some((_, Token::Let, _)) => self.parse_let_statement(),
-            Some((_, Token::Return, _)) => self.parse_return_statement(),
-            Some((_, Token::Export, _)) => self.parse_export_statement(),
-            Some(token) => {
-                self.pushback(token);
-                self.parse_expression_statement()
+    pub fn parse_stmts(&mut self) -> Result<Vec<Stmt>, ParseError> {
+        let mut stmts = Vec::new();
+        loop {
+            match self.parse_stmt() {
+                Ok(stmt) => stmts.push(stmt),
+                Err(ParseError::EndOfFile { expected_tokens }) => return Ok(stmts),
+                Err(err) => return Err(err),
             }
-            _ => Err(ParseError::NotImplemented)?,
         }
     }
 
-    fn parse_export_statement(&mut self) -> Result<Stmt> {
+    pub fn parse_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let tok = self.bump()?;
+        match tok {
+            Some((_, Token::Let, _)) => self.parse_let_stmt(),
+            Some((_, Token::Return, _)) => self.parse_return_stmt(),
+            Some((_, Token::Export, _)) => self.parse_export_stmt(),
+            Some(token) => {
+                self.pushback(token);
+                self.parse_expression_stmt()
+            }
+            None => Err(ParseError::EndOfFile {
+                expected_tokens: vec![
+                    TokenDiscriminants::Let,
+                    TokenDiscriminants::Return,
+                    TokenDiscriminants::Export,
+                ],
+            })?,
+        }
+    }
+
+    fn parse_export_stmt(&mut self) -> Result<Stmt, ParseError> {
         let expr = self.parse_expression()?;
         self.expect(TokenDiscriminants::Semicolon)?;
         Ok(Stmt::Export(expr))
     }
 
-    fn parse_return_statement(&mut self) -> Result<Stmt> {
+    fn parse_return_stmt(&mut self) -> Result<Stmt, ParseError> {
         let expr = self.parse_expression()?;
         self.expect(TokenDiscriminants::Semicolon)?;
         Ok(Stmt::Return(expr))
     }
 
-    fn parse_let_statement(&mut self) -> Result<Stmt> {
+    fn parse_let_stmt(&mut self) -> Result<Stmt, ParseError> {
         let pat = self.parse_pattern()?;
         self.expect(TokenDiscriminants::Equal)?;
         let rhs_expr = self.parse_expression()?;
@@ -193,20 +222,20 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn parse_expression_statement(&mut self) -> Result<Stmt> {
+    fn parse_expression_stmt(&mut self) -> Result<Stmt, ParseError> {
         let expr = self.parse_expression()?;
         self.expect(TokenDiscriminants::Semicolon)?;
         Ok(Stmt::Expr(expr))
     }
 
-    fn parse_expression(&mut self) -> Result<Expr> {
+    fn parse_expression(&mut self) -> Result<Expr, ParseError> {
         if let Some(_) = self.lookahead_match(TokenDiscriminants::Slash)? {
             self.parse_function()
         } else {
             self.parse_equality()
         }
     }
-    fn parse_function(&mut self) -> Result<Expr> {
+    fn parse_function(&mut self) -> Result<Expr, ParseError> {
         let params = self.parse_pattern()?;
         let return_type = self.parse_type_sig()?;
 
@@ -214,7 +243,11 @@ impl<'input> Parser<'input> {
         let token = self.bump()?;
         let body = match token {
             Some((_, Token::LBrace, _)) => self.parse_block()?,
-            Some((_, Token::LParen, _)) => Stmt::Return(self.parse_expression()?),
+            Some((_, Token::LParen, _)) => {
+                let expr = self.parse_expression()?;
+                self.expect(TokenDiscriminants::RParen)?;
+                Stmt::Return(expr)
+            }
             Some((start, token, end)) => {
                 self.pushback((start, token, end));
                 Stmt::Return(self.parse_expression()?)
@@ -245,7 +278,7 @@ impl<'input> Parser<'input> {
         })
     }
 
-    fn parse_equality(&mut self) -> Result<Expr> {
+    fn parse_equality(&mut self) -> Result<Expr, ParseError> {
         let lhs = self.parse_comparison()?;
         if let Some(token) = self.match_multiple(vec![Token::EqualEqual, Token::BangEqual])? {
             let op = self.lookup_op_token(token)?;
@@ -259,9 +292,8 @@ impl<'input> Parser<'input> {
             Ok(lhs)
         }
     }
-    // Super repetative and objectively terrible code but I want to
-    // get this working before I revise it and macro-ify it.
-    fn parse_comparison(&mut self) -> Result<Expr> {
+
+    fn parse_comparison(&mut self) -> Result<Expr, ParseError> {
         let lhs = self.parse_addition()?;
         if let Some(token) = self.match_multiple(vec![
             Token::GreaterEqual,
@@ -281,7 +313,7 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn parse_addition(&mut self) -> Result<Expr> {
+    fn parse_addition(&mut self) -> Result<Expr, ParseError> {
         let mut expr = self.parse_multiplication()?;
         while let Some(token) = self.match_multiple(vec![Token::Plus, Token::Minus])? {
             let op = self.lookup_op_token(token)?;
@@ -295,7 +327,7 @@ impl<'input> Parser<'input> {
         Ok(expr)
     }
 
-    fn parse_multiplication(&mut self) -> Result<Expr> {
+    fn parse_multiplication(&mut self) -> Result<Expr, ParseError> {
         let mut expr = self.parse_unary()?;
         while let Some(token) = self.match_multiple(vec![Token::Times, Token::Div])? {
             let op = self.lookup_op_token(token)?;
@@ -309,7 +341,7 @@ impl<'input> Parser<'input> {
         Ok(expr)
     }
 
-    fn parse_unary(&mut self) -> Result<Expr> {
+    fn parse_unary(&mut self) -> Result<Expr, ParseError> {
         if let Some(token) = self.match_multiple(vec![Token::Bang, Token::Minus])? {
             let op = self.lookup_op_token(token)?;
             let rhs = self.parse_unary()?;
@@ -322,7 +354,7 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn parse_primary(&mut self) -> Result<Expr> {
+    fn parse_primary(&mut self) -> Result<Expr, ParseError> {
         let token = self.bump()?;
         match token {
             Some((_, Token::True, _)) => Ok(Expr::Primary {
@@ -380,7 +412,7 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn parse_record_literal(&mut self) -> Result<Expr> {
+    fn parse_record_literal(&mut self) -> Result<Expr, ParseError> {
         let mut entries = Vec::new();
         loop {
             match self.bump()? {
@@ -409,7 +441,7 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn parse_pattern(&mut self) -> Result<Pat> {
+    fn parse_pattern(&mut self) -> Result<Pat, ParseError> {
         let tok = self.bump()?;
         match tok {
             Some((_, Token::LParen, _)) => {
@@ -455,7 +487,7 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn parse_record_pattern(&mut self) -> Result<Pat> {
+    fn parse_record_pattern(&mut self) -> Result<Pat, ParseError> {
         let token = self.bump()?;
         match token {
             Some((_start, Token::Ident(name), _end)) => {
@@ -473,7 +505,7 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn parse_type_sig(&mut self) -> Result<Option<TypeSig>> {
+    fn parse_type_sig(&mut self) -> Result<Option<TypeSig>, ParseError> {
         if let Some(_) = self.lookahead_match(TokenDiscriminants::Colon)? {
             Ok(Some(self.parse_type()?))
         } else {
@@ -481,7 +513,7 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn parse_type(&mut self) -> Result<TypeSig> {
+    fn parse_type(&mut self) -> Result<TypeSig, ParseError> {
         let token = self.bump()?;
         match token {
             Some((_, Token::Ident(name), _)) => Ok(TypeSig::Name(name)),
@@ -503,9 +535,9 @@ impl<'input> Parser<'input> {
 
     fn comma<T: Debug>(
         &mut self,
-        parse_fn: &dyn Fn(&mut Self) -> Result<T>,
+        parse_fn: &dyn Fn(&mut Self) -> Result<T, ParseError>,
         end_token: Token,
-    ) -> Result<Vec<T>> {
+    ) -> Result<Vec<T>, ParseError> {
         let mut parsed: Vec<T> = Vec::new();
         loop {
             parsed.push(parse_fn(self)?);
