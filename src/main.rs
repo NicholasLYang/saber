@@ -18,6 +18,7 @@ use crate::wasm::{ExportEntry, ExternalKind, FunctionBody, FunctionType, OpCode,
 use ast::{Op, Pat, Type, TypedExpr, TypedStmt, Value};
 use code_generator::CodeGenerator;
 use im::hashmap::HashMap;
+use std::env;
 use std::fs::File;
 use std::io;
 use std::io::Write;
@@ -55,10 +56,16 @@ fn make_code_section() -> Vec<FunctionBody> {
 }
 
 fn main() -> Result<()> {
-    let (type_, body, entry) = test_code_generator()?;
-    test_emitter(vec![type_], vec![body], vec![entry])
+    let args: Vec<String> = env::args().collect();
+
+    if args.len() < 2 {
+        run_repl()
+    } else {
+        read_file()
+    }
 }
 
+#[test]
 fn test_emitter(
     types: Vec<FunctionType>,
     bodies: Vec<FunctionBody>,
@@ -74,6 +81,7 @@ fn test_emitter(
     Ok(())
 }
 
+#[test]
 fn test_code_generator() -> Result<(FunctionType, FunctionBody, ExportEntry)> {
     let mut generator = CodeGenerator::new();
     let lhs = Box::new(TypedExpr::Primary {
@@ -99,6 +107,11 @@ fn test_code_generator() -> Result<(FunctionType, FunctionBody, ExportEntry)> {
     };
     let binding = TypedStmt::Asgn(Pat::Id("main".into(), None), func_expr);
     generator.generate_top_level_stmt(&binding)
+}
+
+fn read_file() -> Result<()> {
+    println!("READ FILE");
+    Ok(())
 }
 
 fn run_repl() -> Result<()> {

@@ -30,7 +30,7 @@ pub enum TypeError {
 
 pub struct TypeChecker {
     // A symbol table of sorts
-    ctx: Arc<HashMap<Name, Arc<Type>>>,
+    ctx: HashMap<Name, Arc<Type>>,
     // Type names. Right now just has the primitives like string,
     // integer, float, char
     type_names: HashMap<Name, Arc<Type>>,
@@ -42,12 +42,12 @@ pub struct TypeChecker {
 impl TypeChecker {
     pub fn new() -> TypeChecker {
         let primitive_types = vec![
-            ("integer".to_string(), Arc::new(Type::Int)),
+            ("int".to_string(), Arc::new(Type::Int)),
             ("float".to_string(), Arc::new(Type::Float)),
             ("char".to_string(), Arc::new(Type::Char)),
             ("string".to_string(), Arc::new(Type::String)),
         ];
-        let ctx = Arc::new(HashMap::new());
+        let ctx = HashMap::new();
         let mut type_names = HashMap::new();
         for (name, type_) in primitive_types {
             type_names.insert(name, type_);
@@ -188,8 +188,16 @@ impl TypeChecker {
 
     fn infer_pat(&mut self, pat: &Pat) -> Result<Arc<Type>, TypeError> {
         match pat {
-            Pat::Id(name, Some(type_sig)) => self.lookup_type_sig(&type_sig),
-            Pat::Id(_name, None) => Ok(self.get_fresh_type_var()),
+            Pat::Id(name, Some(type_sig)) => {
+                let type_ = self.lookup_type_sig(&type_sig)?;
+                self.ctx.insert(name.to_string(), type_.clone());
+                Ok(type_)
+            }
+            Pat::Id(name, None) => {
+                let type_ = self.get_fresh_type_var();
+                self.ctx.insert(name.to_string(), type_.clone());
+                Ok(type_)
+            }
             Pat::Tuple(pats) => {
                 let types: Result<Vec<_>, _> = pats.iter().map(|pat| self.infer_pat(pat)).collect();
                 Ok(Arc::new(Type::Tuple(types?)))
@@ -283,7 +291,7 @@ impl TypeChecker {
 
                 let mut return_type = None;
                 std::mem::swap(&mut return_type, &mut self.return_type);
-                let params_type = self.retrieve_params(&params);
+                let params_type = self.retrieve_type_from_params(&params);
                 let return_type = return_type.unwrap_or(Arc::new(Type::Unit));
                 let function_type = Type::Arrow(Arc::new(Type::Unit), return_type);
                 Ok(TypedExpr::Function {
@@ -300,7 +308,7 @@ impl TypeChecker {
     /*
      Retrieves param type from context
     */
-    fn retrieve_params(&mut self, params: &Pat) -> Result<Arc<Type>, TypeError> {
+    fn retrieve_type_from_params(&mut self, params: &Pat) -> Result<Arc<Type>, TypeError> {
         match params {
             Pat::Id(name, _) => {
                 {
@@ -310,13 +318,13 @@ impl TypeChecker {
                     }
                 }
                 let type_var = self.get_fresh_type_var();
-                self.ctx.insert(name.clone(), type_var.clone());
+                self.ctx = self.ctx.update(name.clone(), type_var.clone());
                 Ok(type_var)
             }
             Pat::Tuple(pats) => {
                 let mut param_types = Vec::new();
                 for pat in pats {
-                    let type_ = self.retrieve_params(pat)?;
+                    let type_ = self.retrieve_type_from_params(pat)?;
                     param_types.push(type_);
                 }
                 Ok(Arc::new(Type::Tuple(param_types)))
@@ -324,7 +332,7 @@ impl TypeChecker {
             Pat::Record(pats) => {
                 let mut param_types = Vec::new();
                 for pat in pats {
-                    let type_ = self.retrieve_params(pat)?;
+                    let type_ = self.retrieve_type_from_params(pat)?;
                     if let Pat::Id(name, _) = pat {
                         param_types.push((name.clone(), type_));
                     } else {
@@ -397,15 +405,17 @@ impl TypeChecker {
             }
             (Type::Int, Type::Bool) | (Type::Bool, Type::Int) => true,
             (Type::Var(name), t2) | (t2, Type::Var(name)) => {
-                let var_type = self.ctx.remove(name);
-                if let Some(t1) = var_type {
+                let ctx = self.ctx.clone();
+                let var_type = ctx.get(name);
+                let is_unified = if let Some(t1) = var_type {
                     let is_unified = self.unify(&t1, &Arc::new(t2.clone()));
-                    self.ctx.insert(name.to_string(), t1);
+                    self.ctx = self.ctx.update(name.to_string(), t1.clone());
                     is_unified
                 } else {
-                    self.ctx.insert(name.clone(), Arc::new(t2.clone()));
+                    self.ctx = self.ctx.update(name.clone(), Arc::new(t2.clone()));
                     true
-                }
+                };
+                is_unified
             }
             _ => false,
         }
