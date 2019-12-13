@@ -10,7 +10,7 @@ pub enum Stmt {
     Return(Expr),
     Block(Vec<Stmt>),
     If(Expr, Box<Stmt>, Option<Box<Stmt>>),
-    Export(Expr),
+    Export(Name),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -20,7 +20,7 @@ pub enum TypedStmt {
     Return(TypedExpr),
     Block(Vec<TypedStmt>),
     If(TypedExpr, Box<TypedStmt>, Option<Box<TypedStmt>>),
-    Export(TypedExpr),
+    Export(Name),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -96,6 +96,22 @@ pub enum Value {
     Integer(i32),
     Bool(bool),
     String(String),
+}
+
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Value::Float(f) => format!("float: {}", f),
+                Value::Integer(i) => format!("int: {}", i),
+                Value::Bool(b) => format!("bool: {}", b),
+                // TODO: Have this truncate the string
+                Value::String(s) => format!("string: {}", s),
+            }
+        )
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]

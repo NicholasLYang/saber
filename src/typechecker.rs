@@ -352,9 +352,9 @@ impl TypeChecker {
             Op::Comma => Some(Type::Tuple(vec![lhs_type, rhs_type])),
             Op::Plus | Op::Minus | Op::Times | Op::Div => match (&*lhs_type, &*rhs_type) {
                 (Type::Float, Type::Float)
-                | (Type::Int, Type::Int)
                 | (Type::Bool, Type::Float)
                 | (Type::Float, Type::Bool) => Some(Type::Float),
+                (Type::Int, Type::Int) => Some(Type::Int),
                 _ => None,
             },
             Op::BangEqual | Op::EqualEqual => {

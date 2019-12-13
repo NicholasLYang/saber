@@ -187,9 +187,24 @@ impl<'input> Parser<'input> {
     }
 
     fn parse_export_stmt(&mut self) -> Result<Stmt, ParseError> {
-        let expr = self.parse_expression()?;
-        self.expect(TokenDiscriminants::Semicolon)?;
-        Ok(Stmt::Export(expr))
+        let tok = self.bump()?;
+        match tok {
+            Some((_, Token::Ident(name), _)) => {
+                self.expect(TokenDiscriminants::Semicolon)?;
+                Ok(Stmt::Export(name))
+            }
+            Some((start, tok, end)) => {
+                self.pushback((start, tok.clone(), end));
+                Err(ParseError::UnexpectedToken {
+                    token: tok,
+                    expected_tokens: vec![TokenDiscriminants::Ident],
+                    location: Location(start, end),
+                })
+            }
+            None => Err(ParseError::EndOfFile {
+                expected_tokens: vec![TokenDiscriminants::Ident],
+            }),
+        }
     }
 
     fn parse_return_stmt(&mut self) -> Result<Stmt, ParseError> {

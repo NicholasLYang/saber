@@ -119,8 +119,24 @@ fn read_file(file_name: &String) -> Result<()> {
     let mut typechecker = TypeChecker::new();
     let typed_program = typechecker.check_program(parser_out)?;
     let mut code_generator = CodeGenerator::new();
-    let out = code_generator.generate_program(typed_program);
-    println!("OUT: {:?}", out);
+    let functions = code_generator.generate_program(typed_program)?;
+    let out_file = File::create("build/out.wasm")?;
+    let mut emitter = Emitter::new(out_file);
+    let mut types = Vec::new();
+    let mut bodies = Vec::new();
+    let mut exports = Vec::new();
+    let mut indices = Vec::new();
+    for (type_, body, export, index) in functions {
+        types.push(type_);
+        bodies.push(body);
+        exports.push(export);
+        indices.push(index);
+    }
+    emitter.emit_prelude()?;
+    emitter.emit_types_section(types)?;
+    emitter.emit_function_section(indices)?;
+    emitter.emit_exports_section(exports)?;
+    emitter.emit_code_section(bodies)?;
     Ok(())
 }
 

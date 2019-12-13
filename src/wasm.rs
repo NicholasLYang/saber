@@ -12,8 +12,12 @@ pub enum OpCode {
     End,
     I32Add,
     I32Sub,
+    I32Mul,
+    I32Div,
     F32Add,
     F32Sub,
+    F32Mul,
+    F32Div,
     I32Const(i32),
     F32Const(f32),
 }

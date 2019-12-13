@@ -37,7 +37,7 @@ impl CodeGenerator {
     pub fn generate_program(
         &mut self,
         program: Vec<TypedStmt>,
-    ) -> Result<Vec<(FunctionType, FunctionBody, ExportEntry)>> {
+    ) -> Result<Vec<(FunctionType, FunctionBody, ExportEntry, u32)>> {
         let mut out = Vec::new();
         for stmt in program {
             out.push(self.generate_top_level_stmt(&stmt)?);
@@ -48,7 +48,7 @@ impl CodeGenerator {
     pub fn generate_top_level_stmt(
         &mut self,
         stmt: &TypedStmt,
-    ) -> Result<(FunctionType, FunctionBody, ExportEntry)> {
+    ) -> Result<(FunctionType, FunctionBody, ExportEntry, u32)> {
         match stmt {
             TypedStmt::Asgn(pat, expr) => {
                 // If the rhs is a function, we want to generate a
@@ -75,7 +75,7 @@ impl CodeGenerator {
         pat: &Pat,
         type_: &Arc<Type>,
         body: &TypedStmt,
-    ) -> Result<(FunctionType, FunctionBody, ExportEntry)> {
+    ) -> Result<(FunctionType, FunctionBody, ExportEntry, u32)> {
         let (type_, body, index) = self.generate_function(type_, body)?;
         if let Pat::Id(name, _) = pat {
             let entry = ExportEntry {
@@ -83,7 +83,7 @@ impl CodeGenerator {
                 kind: ExternalKind::Function,
                 index,
             };
-            Ok((type_, body, entry))
+            Ok((type_, body, entry, index))
         } else {
             Err(GenerationError::DestructureFunctionBinding)?
         }
@@ -194,6 +194,10 @@ impl CodeGenerator {
             (Op::Minus, Type::Int) => Ok(OpCode::I32Sub),
             (Op::Plus, Type::Float) => Ok(OpCode::F32Add),
             (Op::Minus, Type::Float) => Ok(OpCode::F32Sub),
+            (Op::Times, Type::Int) => Ok(OpCode::I32Mul),
+            (Op::Div, Type::Int) => Ok(OpCode::I32Div),
+            (Op::Times, Type::Float) => Ok(OpCode::F32Mul),
+            (Op::Div, Type::Float) => Ok(OpCode::F32Div),
             _ => Err(GenerationError::InvalidOperator {
                 op: op.clone(),
                 type_: type_.clone(),
