@@ -1,3 +1,5 @@
+use std::fmt;
+
 #[derive(Debug)]
 pub enum OpCode {
     MagicNumber,
@@ -20,9 +22,10 @@ pub enum OpCode {
     F32Div,
     I32Const(i32),
     F32Const(f32),
+    GetLocal(u32),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum WasmType {
     #[allow(non_camel_case_types)]
     i32,
@@ -34,6 +37,23 @@ pub enum WasmType {
     f64,
     AnyFunction,
     Function,
+}
+
+impl fmt::Display for WasmType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                WasmType::i32 => "Wasm i32",
+                WasmType::i64 => "Wasm i64",
+                WasmType::f32 => "Wasm f32",
+                WasmType::f64 => "Wasm f64",
+                WasmType::AnyFunction => "Wasm AnyFunction",
+                WasmType::Function => "Wasm Function",
+            }
+        )
+    }
 }
 
 impl From<WasmType> for u64 {
@@ -156,6 +176,6 @@ pub struct FunctionBody {
 
 #[derive(Debug)]
 pub struct LocalEntry {
-    count: u32,
-    type_: WasmType,
+    pub count: u32,
+    pub type_: WasmType,
 }

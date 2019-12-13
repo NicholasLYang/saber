@@ -214,6 +214,7 @@ pub enum TypeSig {
     Array(Box<TypeSig>),
     Name(Name),
 }
+
 #[derive(Debug, PartialEq, Clone)]
 pub enum Pat {
     Id(Name, Option<TypeSig>),

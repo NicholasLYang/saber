@@ -280,7 +280,7 @@ impl TypeChecker {
                 return_type,
             } => {
                 // Insert params into ctx
-                let param_type = self.infer_pat(&params)?;
+                self.infer_pat(&params)?;
                 // Insert return type into typechecker so that
                 // typechecker can verify return statements.
                 if let Some(return_type_sig) = return_type {
@@ -291,9 +291,9 @@ impl TypeChecker {
 
                 let mut return_type = None;
                 std::mem::swap(&mut return_type, &mut self.return_type);
-                let params_type = self.retrieve_type_from_params(&params);
+                let params_type = self.retrieve_type_from_params(&params)?;
                 let return_type = return_type.unwrap_or(Arc::new(Type::Unit));
-                let function_type = Type::Arrow(Arc::new(Type::Unit), return_type);
+                let function_type = Type::Arrow(params_type.clone(), return_type);
                 Ok(TypedExpr::Function {
                     params,
                     body: Box::new(body),

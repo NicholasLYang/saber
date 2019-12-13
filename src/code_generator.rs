@@ -1,12 +1,15 @@
-use ast::{Op, Pat, Type, TypedExpr, TypedStmt, Value};
+use ast::{Name, Op, Pat, Type, TypedExpr, TypedStmt, Value};
+use std::convert::TryInto;
 use std::sync::Arc;
 use types::Result;
-use wasm::{ExportEntry, ExternalKind, FunctionBody, FunctionType, OpCode, WasmType};
+use wasm::{ExportEntry, ExternalKind, FunctionBody, FunctionType, LocalEntry, OpCode, WasmType};
 
 #[derive(Debug, Fail, PartialEq)]
 pub enum GenerationError {
     #[fail(display = "Operator '{}' is not valid for type {}", op, type_)]
     InvalidOperator { op: Op, type_: Type },
+    #[fail(display = "Local variable cannot have type: {}", type_)]
+    InvalidLocal { type_: WasmType },
     #[fail(display = "Unsupported value, probably string")]
     UnsupportedValue,
     #[fail(
@@ -22,16 +25,32 @@ pub enum GenerationError {
     TopLevelReturn,
     #[fail(display = "Cannot destructure function binding")]
     DestructureFunctionBinding,
+    #[fail(display = "Cannot find variable with name '{}'", name)]
+    UndefinedVar { name: Name },
 }
 
 pub struct CodeGenerator {
     /// Counter for function generation
     function_index: u32,
+    function_params: Vec<Name>,
+}
+
+pub fn flatten_params(params: &Pat) -> Vec<Name> {
+    match params {
+        Pat::Id(name, _) => vec![name.clone()],
+        Pat::Record(pats) | Pat::Tuple(pats) => {
+            pats.iter().flat_map(|pat| flatten_params(pat)).collect()
+        }
+        Pat::Empty => Vec::new(),
+    }
 }
 
 impl CodeGenerator {
     pub fn new() -> Self {
-        CodeGenerator { function_index: 0 }
+        CodeGenerator {
+            function_index: 0,
+            function_params: Vec::new(),
+        }
     }
 
     pub fn generate_program(
@@ -61,7 +80,7 @@ impl CodeGenerator {
                     type_,
                 } = expr
                 {
-                    return self.generate_function_binding(pat, type_, body);
+                    return self.generate_function_binding(pat, params, type_, body);
                 }
                 Err(GenerationError::NotImplemented)?
             }
@@ -73,9 +92,11 @@ impl CodeGenerator {
     pub fn generate_function_binding(
         &mut self,
         pat: &Pat,
+        params: &Pat,
         type_: &Arc<Type>,
         body: &TypedStmt,
     ) -> Result<(FunctionType, FunctionBody, ExportEntry, u32)> {
+        self.function_params = flatten_params(params);
         let (type_, body, index) = self.generate_function(type_, body)?;
         if let Pat::Id(name, _) = pat {
             let entry = ExportEntry {
@@ -95,7 +116,7 @@ impl CodeGenerator {
         body: &TypedStmt,
     ) -> Result<(FunctionType, FunctionBody, u32)> {
         let function_type = self.generate_function_type(type_)?;
-        let function_body = self.generate_function_body(body)?;
+        let function_body = self.generate_function_body(body, &function_type)?;
         let function_index = self.function_index;
         self.function_index += 1;
         Ok((function_type, function_body, function_index))
@@ -103,10 +124,10 @@ impl CodeGenerator {
 
     fn generate_function_type(&self, func_type: &Arc<Type>) -> Result<FunctionType> {
         if let Type::Arrow(params_type, return_type) = &**func_type {
-            let param_types = self.convert_params_type(params_type);
+            let wasm_param_types = self.convert_params_type(params_type);
             let return_type = self.generate_return_type(&return_type)?;
             Ok(FunctionType {
-                param_types,
+                param_types: wasm_param_types,
                 return_type,
             })
         } else {
@@ -150,20 +171,68 @@ impl CodeGenerator {
         }
     }
 
-    fn generate_function_body(&self, body: &TypedStmt) -> Result<FunctionBody> {
+    fn get_params_index(&mut self, var: &Name) -> Result<Option<u32>> {
+        match self.function_params.iter().position(|name| name == var) {
+            Some(pos) => Ok(Some(pos.try_into()?)),
+            None => Ok(None),
+        }
+    }
+
+    fn generate_function_body(
+        &mut self,
+        body: &TypedStmt,
+        func_type: &FunctionType,
+    ) -> Result<FunctionBody> {
         let code = match body {
             TypedStmt::Return(expr) => self.generate_expr(expr)?,
             _ => Vec::new(),
         };
-        Ok(FunctionBody {
-            locals: Vec::new(),
-            code,
-        })
+        let mut locals = vec![
+            LocalEntry {
+                count: 0,
+                type_: WasmType::i32,
+            },
+            LocalEntry {
+                count: 0,
+                type_: WasmType::i64,
+            },
+            LocalEntry {
+                count: 0,
+                type_: WasmType::f32,
+            },
+            LocalEntry {
+                count: 0,
+                type_: WasmType::f64,
+            },
+        ];
+        for param in &func_type.param_types {
+            let index = match param {
+                WasmType::i32 => 0,
+                WasmType::i64 => 1,
+                WasmType::f32 => 2,
+                WasmType::f64 => 3,
+                type_ => {
+                    return Err((GenerationError::InvalidLocal {
+                        type_: type_.clone(),
+                    })
+                    .into())
+                }
+            };
+            locals[index].count += 1;
+        }
+        Ok(FunctionBody { locals, code })
     }
 
-    fn generate_expr(&self, expr: &TypedExpr) -> Result<Vec<OpCode>> {
+    fn generate_expr(&mut self, expr: &TypedExpr) -> Result<Vec<OpCode>> {
         match expr {
-            TypedExpr::Primary { value, type_ } => Ok(vec![self.generate_primary(value)?]),
+            TypedExpr::Primary { value, type_: _ } => Ok(vec![self.generate_primary(value)?]),
+            TypedExpr::Var { name, type_: _ } => {
+                let index = self.get_params_index(&name)?;
+                match index {
+                    Some(i) => Ok(vec![OpCode::GetLocal(i)]),
+                    None => Err((GenerationError::UndefinedVar { name: name.clone() }).into()),
+                }
+            }
             TypedExpr::BinOp {
                 op,
                 lhs,

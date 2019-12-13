@@ -68,6 +68,11 @@ pub fn emit_code<T: Write>(mut dest: T, op_code: OpCode) -> Result<()> {
         OpCode::F32Sub => dest.write_u8(0x93),
         OpCode::F32Mul => dest.write_u8(0x94),
         OpCode::F32Div => dest.write_u8(0x95),
+        OpCode::GetLocal(i) => {
+            dest.write_u8(0x20)?;
+            leb128::write::unsigned(&mut dest, i.into())?;
+            Ok(())
+        }
         OpCode::End => dest.write_u8(0x0b),
     }?;
     Ok(())
@@ -159,7 +164,11 @@ impl Emitter {
             emit_code(
                 &mut code_body,
                 OpCode::Count(usize_to_u32(body.locals.len())?),
-            );
+            )?;
+            for local in body.locals {
+                emit_code(&mut code_body, OpCode::Count(local.count))?;
+                emit_code(&mut code_body, OpCode::Type(local.type_))?;
+            }
             for opcode in body.code {
                 emit_code(&mut code_body, opcode);
             }
