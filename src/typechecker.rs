@@ -120,6 +120,13 @@ impl TypeChecker {
                 }
                 Ok(TypedStmt::Block(typed_stmts))
             }
+            Stmt::Export(name) => {
+                if !self.ctx.contains_key(&name) {
+                    let type_ = self.get_fresh_type_var();
+                    self.ctx.insert(name.clone(), type_);
+                }
+                Ok(TypedStmt::Export(name))
+            }
             _ => Err(TypeError::NotImplemented),
         }
     }

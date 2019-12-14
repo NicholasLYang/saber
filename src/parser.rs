@@ -9,7 +9,7 @@ pub struct Parser<'input> {
 }
 
 #[derive(Debug, PartialEq)]
-struct Location(usize, usize);
+pub struct Location(usize, usize);
 
 impl Display for Location {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
@@ -160,7 +160,7 @@ impl<'input> Parser<'input> {
         loop {
             match self.parse_stmt() {
                 Ok(stmt) => stmts.push(stmt),
-                Err(ParseError::EndOfFile { expected_tokens }) => return Ok(stmts),
+                Err(ParseError::EndOfFile { expected_tokens: _ }) => return Ok(stmts),
                 Err(err) => return Err(err),
             }
         }
@@ -389,7 +389,7 @@ impl<'input> Parser<'input> {
             }),
             Some((_, Token::LParenBrace, _)) => self.parse_record_literal(),
             // Parsing tuple or grouping
-            Some((start, Token::LParen, end)) => {
+            Some((_, Token::LParen, _)) => {
                 let expr = self.parse_expression()?;
                 if let Some(_) = self.lookahead_match(TokenDiscriminants::Comma)? {
                     let mut elems = vec![expr];
@@ -401,7 +401,7 @@ impl<'input> Parser<'input> {
                     Ok(expr)
                 }
             }
-            Some((start, Token::Ident(name), end)) => Ok(Expr::Var { name }),
+            Some((_, Token::Ident(name), _)) => Ok(Expr::Var { name }),
             Some((start, token, end)) => Err(ParseError::UnexpectedToken {
                 token,
                 location: Location(start, end),

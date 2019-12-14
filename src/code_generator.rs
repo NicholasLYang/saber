@@ -74,7 +74,7 @@ impl CodeGenerator {
                 // function binding (FunctionType, FunctionBody, and
                 // ExportEntry)
                 if let TypedExpr::Function {
-                    env,
+                    env: _,
                     params,
                     body,
                     type_,

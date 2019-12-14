@@ -179,7 +179,7 @@ impl fmt::Display for Type {
                 Type::Bool => "bool".into(),
                 Type::Char => "char".into(),
                 Type::String => "string".into(),
-                Type::Var(Name) => "unknown".into(),
+                Type::Var(name) => format!("var({})", name).into(),
                 Type::Array(t) => format!("[{}]", t),
                 Type::Record(_) => "{ Record }".into(),
                 Type::Tuple(_) => "(Tuple)".into(),
@@ -188,26 +188,6 @@ impl fmt::Display for Type {
         )
     }
 }
-
-// impl Type {
-//     pub fn get_total_count(&self) -> u32 {
-//         let mut count = 0;
-//         match self {
-//             Type::Tuple(elems) => {
-//                 for elem in elems {
-//                     count += elem.get_total_count();
-//                 }
-//             }
-//             Type::Record(elems) => {
-//                 for (name, type_) in elems {
-//                     count += type_.get_total_count();
-//                 }
-//             }
-//             _ => count += 1,
-//         }
-//         count
-//     }
-// }
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum TypeSig {
