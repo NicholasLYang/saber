@@ -11,12 +11,17 @@ hopefully I'll be able to port it to other platforms.
   - ~~Fix all the damn copies and bad, non idiomatic Rust.~~
   - ~~Probably add a ref count for types (really no need to copy them
     since they're relatively immutable)~~
+- Parsing
+  - Convert to expression based syntax
 - Typechecking
   - Typecheck functions
   - Typecheck records
   - Add named types
+- Lexical Analysis
+  - Get closures working
 - Code gen
   - ~~Get something working.~~ (Kinda accomplished?)
+  - Add local variables
 
 ## Design
 
