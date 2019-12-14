@@ -2,7 +2,10 @@ use ast::{Name, Op, Pat, Type, TypedExpr, TypedStmt, Value};
 use std::convert::TryInto;
 use std::sync::Arc;
 use types::Result;
-use wasm::{ExportEntry, ExternalKind, FunctionBody, FunctionType, LocalEntry, OpCode, WasmType};
+use wasm::{
+    ExportEntry, ExternalKind, FunctionBody, FunctionType, LocalEntry, OpCode, ProgramData,
+    WasmType,
+};
 
 #[derive(Debug, Fail, PartialEq)]
 pub enum GenerationError {
@@ -53,15 +56,16 @@ impl CodeGenerator {
         }
     }
 
-    pub fn generate_program(
-        &mut self,
-        program: Vec<TypedStmt>,
-    ) -> Result<Vec<(FunctionType, FunctionBody, ExportEntry, u32)>> {
-        let mut out = Vec::new();
+    pub fn generate_program(&mut self, program: Vec<TypedStmt>) -> Result<ProgramData> {
+        let mut program_data = ProgramData::new();
         for stmt in program {
-            out.push(self.generate_top_level_stmt(&stmt)?);
+            let (type_, body, entry, index) = self.generate_top_level_stmt(&stmt)?;
+            program_data.type_section.push(type_);
+            program_data.code_section.push(body);
+            program_data.exports_section.push(entry);
+            program_data.function_section.push(index);
         }
-        Ok(out)
+        Ok(program_data)
     }
 
     pub fn generate_top_level_stmt(

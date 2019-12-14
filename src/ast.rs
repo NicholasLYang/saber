@@ -47,7 +47,7 @@ pub enum Expr {
     },
     Call {
         callee: Box<Expr>,
-        arg: Box<Expr>,
+        args: Vec<Expr>,
     },
     Record {
         entries: Vec<(Name, Expr)>,
@@ -84,7 +84,7 @@ pub enum TypedExpr {
     },
     Call {
         callee: Box<TypedExpr>,
-        arg: Box<TypedExpr>,
+        arg: Vec<TypedExpr>,
         type_: Arc<Type>,
     },
     Tuple(Vec<TypedExpr>, Arc<Type>),

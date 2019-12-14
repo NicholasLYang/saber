@@ -123,14 +123,6 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn peek(&mut self) -> Result<(), ParseError> {
-        let tok = self.bump()?;
-        if let Some((start, token, end)) = tok {
-            self.pushback((start, token, end));
-        }
-        Ok(())
-    }
-
     fn lookup_op_token(&mut self, token: Token) -> Result<Op, ParseError> {
         match token {
             Token::EqualEqual => Ok(Op::EqualEqual),
@@ -365,8 +357,29 @@ impl<'input> Parser<'input> {
                 rhs: Box::new(rhs),
             })
         } else {
-            Ok(self.parse_primary()?)
+            Ok(self.parse_call()?)
         }
+    }
+
+    fn parse_call(&mut self) -> Result<Expr, ParseError> {
+        let mut expr = self.parse_primary()?;
+
+        loop {
+            if let Some(_) = self.lookahead_match(TokenDiscriminants::LParen)? {
+                expr = self.finish_call(expr)?;
+            } else {
+                break;
+            }
+        }
+        Ok(expr)
+    }
+
+    fn finish_call(&mut self, callee: Expr) -> Result<Expr, ParseError> {
+        let args = self.comma::<Expr>(&Self::parse_expression, Token::RParen)?;
+        Ok(Expr::Call {
+            callee: Box::new(callee),
+            args,
+        })
     }
 
     fn parse_primary(&mut self) -> Result<Expr, ParseError> {

@@ -70,15 +70,6 @@ impl From<WasmType> for u64 {
 }
 
 #[derive(Debug)]
-pub struct Section {
-    id: u8,
-    payload_len: u32,
-    name_len: Option<u32>,
-    name: Option<String>,
-    payload_data: PayloadData,
-}
-
-#[derive(Debug)]
 pub struct FunctionType {
     pub param_types: Vec<WasmType>,
     pub return_type: Option<WasmType>,
@@ -122,16 +113,32 @@ pub struct GlobalType {
 }
 
 #[derive(Debug)]
-pub struct PayloadData {
-    typeSection: Vec<FunctionType>,
-    importSection: Vec<ImportEntry>,
-    functionSection: Vec<u32>,
-    tableSection: Vec<TableType>,
-    memorySection: Vec<MemoryType>,
-    globalSection: Vec<(GlobalType, Vec<OpCode>)>,
-    exportSection: Vec<ExportEntry>,
-    codeSection: Vec<FunctionBody>,
-    dataSection: Vec<DataSegment>,
+pub struct ProgramData {
+    pub type_section: Vec<FunctionType>,
+    pub import_section: Vec<ImportEntry>,
+    pub function_section: Vec<u32>,
+    pub table_section: Vec<TableType>,
+    pub memory_section: Vec<MemoryType>,
+    pub global_section: Vec<(GlobalType, Vec<OpCode>)>,
+    pub exports_section: Vec<ExportEntry>,
+    pub code_section: Vec<FunctionBody>,
+    pub data_section: Vec<DataSegment>,
+}
+
+impl ProgramData {
+    pub fn new() -> Self {
+        ProgramData {
+            type_section: Vec::new(),
+            import_section: Vec::new(),
+            function_section: Vec::new(),
+            table_section: Vec::new(),
+            memory_section: Vec::new(),
+            global_section: Vec::new(),
+            exports_section: Vec::new(),
+            code_section: Vec::new(),
+            data_section: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug)]

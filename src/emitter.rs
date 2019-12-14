@@ -92,7 +92,7 @@ impl Emitter {
 
     pub fn flush_buffer(&mut self) -> Result<()> {
         // Flush buffer
-        self.file.write_all(&self.buffer);
+        self.file.write_all(&self.buffer)?;
         self.buffer = Vec::new();
         Ok(())
     }
@@ -134,7 +134,7 @@ impl Emitter {
         self.write_section(opcodes)
     }
 
-    pub fn emit_function_section(&mut self, function_type_indices: Vec<u32>) -> Result<()> {
+    pub fn emit_functions_section(&mut self, function_type_indices: Vec<u32>) -> Result<()> {
         self.emit_code(OpCode::SectionId(3))?;
         let mut opcodes = vec![OpCode::Count(usize_to_u32(function_type_indices.len())?)];
         for index in function_type_indices {
@@ -170,9 +170,9 @@ impl Emitter {
                 emit_code(&mut code_body, OpCode::Type(local.type_))?;
             }
             for opcode in body.code {
-                emit_code(&mut code_body, opcode);
+                emit_code(&mut code_body, opcode)?;
             }
-            emit_code(&mut code_body, OpCode::End);
+            emit_code(&mut code_body, OpCode::End)?;
             opcodes.push(OpCode::Count(code_body.len().try_into().unwrap()));
             opcodes.push(OpCode::Code(code_body));
         }

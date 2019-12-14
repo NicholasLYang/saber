@@ -26,6 +26,10 @@ pub enum TypeError {
     ArityMismatch { arity1: usize, arity2: usize },
     #[fail(display = "Record contains non indentifier patterns: {:?}", record)]
     RecordContainsNonIds { record: Pat },
+    #[fail(display = "Invalid unary operator: {}", op)]
+    InvalidUnaryOp { op: Op },
+    #[fail(display = "Cannot apply unary operator to {:?}", expr)]
+    InvalidUnaryExpr { expr: TypedExpr },
 }
 
 pub struct TypeChecker {
@@ -127,7 +131,6 @@ impl TypeChecker {
                 }
                 Ok(TypedStmt::Export(name))
             }
-            _ => Err(TypeError::NotImplemented),
         }
     }
 
@@ -174,23 +177,6 @@ impl TypeChecker {
         let type_var = Type::Var(self.variable_counter.to_string());
         self.variable_counter += 1;
         Arc::new(type_var)
-    }
-
-    fn pat_to_binding_list<'a>(
-        &mut self,
-        pat: &'a Pat,
-    ) -> Result<Vec<(&'a Name, Arc<Type>)>, TypeError> {
-        match pat {
-            Pat::Id(name, type_sig) => {
-                let type_ = if let Some(type_sig) = type_sig {
-                    self.lookup_type_sig(type_sig)?
-                } else {
-                    self.get_fresh_type_var()
-                };
-                Ok(vec![(name, type_)])
-            }
-            _ => Ok(Vec::new()),
-        }
     }
 
     fn infer_pat(&mut self, pat: &Pat) -> Result<Arc<Type>, TypeError> {
@@ -308,6 +294,26 @@ impl TypeChecker {
                     env: HashMap::new(),
                 })
             }
+            Expr::UnaryOp { op, rhs } => match op {
+                Op::Minus | Op::Plus => {
+                    let typed_rhs = self.infer_expr(*rhs)?;
+                    if self.unify(&typed_rhs.get_type(), &Arc::new(Type::Int))
+                        || self.unify(&typed_rhs.get_type(), &Arc::new(Type::Float))
+                    {
+                        let type_ = typed_rhs.get_type();
+                        Ok(TypedExpr::UnaryOp {
+                            op,
+                            rhs: Box::new(typed_rhs),
+                            type_,
+                        })
+                    } else {
+                        Err(TypeError::InvalidUnaryExpr {
+                            expr: typed_rhs.clone(),
+                        })
+                    }
+                }
+                op => Err(TypeError::InvalidUnaryOp { op }),
+            },
             _ => Err(TypeError::NotImplemented),
         }
     }

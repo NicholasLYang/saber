@@ -14,7 +14,6 @@ use crate::emitter::Emitter;
 use crate::parser::Parser;
 use crate::typechecker::TypeChecker;
 use crate::types::Result;
-use crate::wasm::{ExportEntry, ExternalKind, FunctionBody, FunctionType, OpCode, WasmType};
 use code_generator::CodeGenerator;
 use std::env;
 use std::fs::File;
@@ -30,28 +29,6 @@ mod parser;
 mod typechecker;
 mod types;
 mod wasm;
-
-fn make_types_section() -> Vec<FunctionType> {
-    vec![FunctionType {
-        param_types: vec![],
-        return_type: Some(WasmType::f32),
-    }]
-}
-
-fn make_exports_section() -> Vec<ExportEntry> {
-    vec![ExportEntry {
-        field_str: "main".to_string().into_bytes(),
-        kind: ExternalKind::Function,
-        index: 0,
-    }]
-}
-
-fn make_code_section() -> Vec<FunctionBody> {
-    vec![FunctionBody {
-        locals: Vec::new(),
-        code: vec![OpCode::F32Const(1.25)],
-    }]
-}
 
 fn main() -> Result<()> {
     let args: Vec<String> = env::args().collect();
@@ -73,24 +50,14 @@ fn read_file(file_name: &String) -> Result<()> {
     let mut typechecker = TypeChecker::new();
     let typed_program = typechecker.check_program(parser_out)?;
     let mut code_generator = CodeGenerator::new();
-    let functions = code_generator.generate_program(typed_program)?;
+    let program = code_generator.generate_program(typed_program)?;
     let out_file = File::create("build/out.wasm")?;
     let mut emitter = Emitter::new(out_file);
-    let mut types = Vec::new();
-    let mut bodies = Vec::new();
-    let mut exports = Vec::new();
-    let mut indices = Vec::new();
-    for (type_, body, export, index) in functions {
-        types.push(type_);
-        bodies.push(body);
-        exports.push(export);
-        indices.push(index);
-    }
     emitter.emit_prelude()?;
-    emitter.emit_types_section(types)?;
-    emitter.emit_function_section(indices)?;
-    emitter.emit_exports_section(exports)?;
-    emitter.emit_code_section(bodies)?;
+    emitter.emit_types_section(program.type_section)?;
+    emitter.emit_functions_section(program.function_section)?;
+    emitter.emit_exports_section(program.exports_section)?;
+    emitter.emit_code_section(program.code_section)?;
     Ok(())
 }
 
