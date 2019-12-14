@@ -6,3 +6,4 @@
 *.wasm
 *.wat
 \.#*
+test.sbr
