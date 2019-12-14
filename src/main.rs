@@ -46,7 +46,7 @@ fn read_file(file_name: &String) -> Result<()> {
     file.read_to_string(&mut contents)?;
     let lexer = lexer::Lexer::new(&contents);
     let mut parser = Parser::new(lexer);
-    let parser_out = parser.parse_stmts()?;
+    let parser_out = parser.stmts()?;
     let mut typechecker = TypeChecker::new();
     let typed_program = typechecker.check_program(parser_out)?;
     let mut code_generator = CodeGenerator::new();
@@ -75,7 +75,7 @@ fn run_repl() -> Result<()> {
             .expect("Couldn't read line");
         let lexer = lexer::Lexer::new(&input);
         let mut parser = Parser::new(lexer);
-        let parser_out = parser.parse_stmt()?;
+        let parser_out = parser.stmt()?;
         let mut typechecker = TypeChecker::new();
         let typed_stmt = typechecker.infer_stmt(parser_out)?;
         println!("{:#?}", typed_stmt);
