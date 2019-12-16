@@ -120,6 +120,15 @@ impl<'input> Parser<'input> {
         }
     }
 
+    fn peek(&mut self) -> Result<(), ParseError> {
+        let tok = self.bump()?;
+        println!("TOK: {:?}", tok);
+        if let Some(tok) = tok {
+            self.pushback(tok);
+        }
+        Ok(())
+    }
+
     fn lookup_op_token(&mut self, token: Token) -> Result<Op, ParseError> {
         match token {
             Token::EqualEqual => Ok(Op::EqualEqual),
@@ -360,7 +369,6 @@ impl<'input> Parser<'input> {
 
     fn call(&mut self) -> Result<Expr, ParseError> {
         let mut expr = self.primary()?;
-
         loop {
             if let Some(_) = self.match_one(TokenDiscriminants::LParen)? {
                 expr = self.finish_call(expr)?;
@@ -564,6 +572,9 @@ impl<'input> Parser<'input> {
         end_token: Token,
     ) -> Result<Vec<T>, ParseError> {
         let mut parsed: Vec<T> = Vec::new();
+        if let Some(_) = self.match_one((&end_token).into())? {
+            return Ok(parsed);
+        }
         loop {
             parsed.push(parse_fn(self)?);
             if let Some(_) = self.match_one((&end_token).into())? {

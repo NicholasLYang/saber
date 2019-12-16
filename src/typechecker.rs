@@ -30,6 +30,8 @@ pub enum TypeError {
     InvalidUnaryOp { op: Op },
     #[fail(display = "Cannot apply unary operator to {:?}", expr)]
     InvalidUnaryExpr { expr: TypedExpr },
+    #[fail(display = "Callee is not a function")]
+    CalleeNotFunction,
 }
 
 pub struct TypeChecker {
@@ -217,6 +219,9 @@ impl TypeChecker {
     fn asgn(&mut self, pat: &Pat, rhs_type: Arc<Type>) -> Result<Arc<Type>, TypeError> {
         let lhs_type = self.pat(pat)?;
         if self.unify(&lhs_type, &rhs_type) {
+            if let Pat::Id(name, _) = pat {
+                self.ctx.insert(name.clone(), rhs_type.clone());
+            }
             Ok(rhs_type)
         } else {
             Err(TypeError::UnificationFailure {
@@ -314,6 +319,23 @@ impl TypeChecker {
                 }
                 op => Err(TypeError::InvalidUnaryOp { op }),
             },
+            Expr::Call { callee, args } => {
+                let typed_callee = self.expr(*callee)?;
+                let mut typed_args = Vec::new();
+                for arg in args {
+                    typed_args.push(self.expr(arg)?);
+                }
+                let callee_type = typed_callee.get_type();
+                if let Type::Arrow(args_type, return_type) = &(*callee_type) {
+                    Ok(TypedExpr::Call {
+                        callee: Box::new(typed_callee),
+                        args: typed_args,
+                        type_: args_type.clone(),
+                    })
+                } else {
+                    Err(TypeError::CalleeNotFunction)
+                }
+            }
             _ => Err(TypeError::NotImplemented),
         }
     }

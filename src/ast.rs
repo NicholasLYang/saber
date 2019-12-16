@@ -84,7 +84,7 @@ pub enum TypedExpr {
     },
     Call {
         callee: Box<TypedExpr>,
-        arg: Vec<TypedExpr>,
+        args: Vec<TypedExpr>,
         type_: Arc<Type>,
     },
     Tuple(Vec<TypedExpr>, Arc<Type>),
@@ -229,7 +229,7 @@ impl TypedExpr {
             } => type_.clone(),
             TypedExpr::Call {
                 callee: _,
-                arg: _,
+                args: _,
                 type_,
             } => type_.clone(),
         }
