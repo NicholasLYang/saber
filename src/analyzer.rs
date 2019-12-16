@@ -1,4 +1,4 @@
-// Not a permanent name but hey it's a fun pun.
+
 pub fn get_closure_from_block(block: &Vec<TypedStmt>) -> Vec<Closure> {
     let mut closures = Vec::new();
     for (stmt in body) {

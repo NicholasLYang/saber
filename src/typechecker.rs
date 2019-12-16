@@ -67,39 +67,39 @@ impl TypeChecker {
     pub fn check_program(&mut self, program: Vec<Stmt>) -> Result<Vec<TypedStmt>, TypeError> {
         let mut typed_stmts = Vec::new();
         for stmt in program {
-            typed_stmts.push(self.infer_stmt(stmt)?);
+            typed_stmts.push(self.stmt(stmt)?);
         }
         Ok(typed_stmts)
     }
 
-    pub fn infer_stmt(&mut self, stmt: Stmt) -> Result<TypedStmt, TypeError> {
+    pub fn stmt(&mut self, stmt: Stmt) -> Result<TypedStmt, TypeError> {
         match stmt {
             Stmt::Expr(expr) => {
-                let typed_expr = self.infer_expr(expr)?;
+                let typed_expr = self.expr(expr)?;
                 Ok(TypedStmt::Expr(typed_expr))
             }
             Stmt::Asgn(pat, expr) => {
-                let typed_rhs = self.infer_expr(expr)?;
-                self.infer_asgn(&pat, typed_rhs.get_type())?;
+                let typed_rhs = self.expr(expr)?;
+                self.asgn(&pat, typed_rhs.get_type())?;
                 Ok(TypedStmt::Asgn(pat, typed_rhs))
             }
             Stmt::If(cond, then_stmt, else_stmt) => {
-                let typed_cond = self.infer_expr(cond)?;
+                let typed_cond = self.expr(cond)?;
                 if !self.unify(&typed_cond.get_type(), &Arc::new(Type::Bool)) {
                     return Err(TypeError::UnificationFailure {
                         type1: typed_cond.get_type(),
                         type2: Arc::new(Type::Bool),
                     });
                 }
-                let typed_then = self.infer_stmt(*then_stmt)?;
+                let typed_then = self.stmt(*then_stmt)?;
                 let typed_else = match else_stmt {
-                    Some(else_stmt) => Some(Box::new(self.infer_stmt(*else_stmt)?)),
+                    Some(else_stmt) => Some(Box::new(self.stmt(*else_stmt)?)),
                     None => None,
                 };
                 Ok(TypedStmt::If(typed_cond, Box::new(typed_then), typed_else))
             }
             Stmt::Return(expr) => {
-                let typed_exp = self.infer_expr(expr)?;
+                let typed_exp = self.expr(expr)?;
                 match self.return_type.clone() {
                     Some(ref return_type) => {
                         if self.unify(&typed_exp.get_type(), return_type) {
@@ -120,7 +120,7 @@ impl TypeChecker {
             Stmt::Block(stmts) => {
                 let mut typed_stmts = Vec::new();
                 for stmt in stmts {
-                    typed_stmts.push(self.infer_stmt(stmt)?);
+                    typed_stmts.push(self.stmt(stmt)?);
                 }
                 Ok(TypedStmt::Block(typed_stmts))
             }
@@ -134,7 +134,7 @@ impl TypeChecker {
         }
     }
 
-    fn infer_value(&self, value: Value) -> TypedExpr {
+    fn value(&self, value: Value) -> TypedExpr {
         match value {
             Value::Integer(_i) => TypedExpr::Primary {
                 value,
@@ -179,7 +179,7 @@ impl TypeChecker {
         Arc::new(type_var)
     }
 
-    fn infer_pat(&mut self, pat: &Pat) -> Result<Arc<Type>, TypeError> {
+    fn pat(&mut self, pat: &Pat) -> Result<Arc<Type>, TypeError> {
         match pat {
             Pat::Id(name, Some(type_sig)) => {
                 let type_ = self.lookup_type_sig(&type_sig)?;
@@ -192,7 +192,7 @@ impl TypeChecker {
                 Ok(type_)
             }
             Pat::Tuple(pats) => {
-                let types: Result<Vec<_>, _> = pats.iter().map(|pat| self.infer_pat(pat)).collect();
+                let types: Result<Vec<_>, _> = pats.iter().map(|pat| self.pat(pat)).collect();
                 Ok(Arc::new(Type::Tuple(types?)))
             }
             Pat::Record(pats) => {
@@ -200,7 +200,7 @@ impl TypeChecker {
                     .iter()
                     .map(|pat| {
                         if let Pat::Id(name, _type_sig) = pat {
-                            Ok((name.clone(), self.infer_pat(pat)?))
+                            Ok((name.clone(), self.pat(pat)?))
                         } else {
                             Err(TypeError::RecordContainsNonIds {
                                 record: pat.clone(),
@@ -214,8 +214,8 @@ impl TypeChecker {
         }
     }
 
-    fn infer_asgn(&mut self, pat: &Pat, rhs_type: Arc<Type>) -> Result<Arc<Type>, TypeError> {
-        let lhs_type = self.infer_pat(pat)?;
+    fn asgn(&mut self, pat: &Pat, rhs_type: Arc<Type>) -> Result<Arc<Type>, TypeError> {
+        let lhs_type = self.pat(pat)?;
         if self.unify(&lhs_type, &rhs_type) {
             Ok(rhs_type)
         } else {
@@ -226,9 +226,9 @@ impl TypeChecker {
         }
     }
 
-    fn infer_expr(&mut self, expr: Expr) -> Result<TypedExpr, TypeError> {
+    fn expr(&mut self, expr: Expr) -> Result<TypedExpr, TypeError> {
         match expr {
-            Expr::Primary { value } => Ok(self.infer_value(value)),
+            Expr::Primary { value } => Ok(self.value(value)),
             Expr::Var { name } => match self.ctx.get(&name) {
                 Some(type_) => Ok(TypedExpr::Var {
                     name,
@@ -239,11 +239,11 @@ impl TypeChecker {
                 }),
             },
             Expr::BinOp { op, lhs, rhs } => {
-                let typed_lhs = self.infer_expr(*lhs)?;
-                let typed_rhs = self.infer_expr(*rhs)?;
+                let typed_lhs = self.expr(*lhs)?;
+                let typed_rhs = self.expr(*rhs)?;
                 let lhs_type = typed_lhs.get_type();
                 let rhs_type = typed_rhs.get_type();
-                match self.infer_op(&op, lhs_type, rhs_type) {
+                match self.op(&op, lhs_type, rhs_type) {
                     Some(op_type) => Ok(TypedExpr::BinOp {
                         op,
                         lhs: Box::new(typed_lhs),
@@ -261,7 +261,7 @@ impl TypeChecker {
                 let mut typed_elems = Vec::new();
                 let mut types = Vec::new();
                 for elem in elems {
-                    let typed_elem = self.infer_expr(elem)?;
+                    let typed_elem = self.expr(elem)?;
                     types.push(typed_elem.get_type());
                     typed_elems.push(typed_elem);
                 }
@@ -273,14 +273,14 @@ impl TypeChecker {
                 return_type,
             } => {
                 // Insert params into ctx
-                self.infer_pat(&params)?;
+                self.pat(&params)?;
                 // Insert return type into typechecker so that
                 // typechecker can verify return statements.
                 if let Some(return_type_sig) = return_type {
                     self.return_type = Some(self.lookup_type_sig(&return_type_sig)?);
                 }
                 // Check body
-                let body = self.infer_stmt(*body)?;
+                let body = self.stmt(*body)?;
 
                 let mut return_type = None;
                 std::mem::swap(&mut return_type, &mut self.return_type);
@@ -296,7 +296,7 @@ impl TypeChecker {
             }
             Expr::UnaryOp { op, rhs } => match op {
                 Op::Minus | Op::Plus => {
-                    let typed_rhs = self.infer_expr(*rhs)?;
+                    let typed_rhs = self.expr(*rhs)?;
                     if self.unify(&typed_rhs.get_type(), &Arc::new(Type::Int))
                         || self.unify(&typed_rhs.get_type(), &Arc::new(Type::Float))
                     {
@@ -360,7 +360,7 @@ impl TypeChecker {
         }
     }
 
-    fn infer_op(&mut self, op: &Op, lhs_type: Arc<Type>, rhs_type: Arc<Type>) -> Option<Type> {
+    fn op(&mut self, op: &Op, lhs_type: Arc<Type>, rhs_type: Arc<Type>) -> Option<Type> {
         match op {
             Op::Comma => Some(Type::Tuple(vec![lhs_type, rhs_type])),
             Op::Plus | Op::Minus | Op::Times | Op::Div => match (&*lhs_type, &*rhs_type) {

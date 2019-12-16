@@ -1,2 +1,2 @@
-let a = \(arg: int) => (arg + 5)
+let a = \(arg: float): float => (arg - 10.2)
 let b = \() => (12 * 3 - 2)
