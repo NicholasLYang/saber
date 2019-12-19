@@ -41,9 +41,8 @@ pub struct CodeGenerator {
 pub fn flatten_params(params: &Pat) -> Vec<Name> {
     match params {
         Pat::Id(name, _) => vec![name.clone()],
-        Pat::Record(pats) | Pat::Tuple(pats) => {
-            pats.iter().flat_map(|pat| flatten_params(pat)).collect()
-        }
+        Pat::Record(pats) => pats.clone(),
+        Pat::Tuple(pats) => pats.iter().flat_map(|pat| flatten_params(pat)).collect(),
         Pat::Empty => Vec::new(),
     }
 }
@@ -73,7 +72,7 @@ impl CodeGenerator {
         stmt: &TypedStmt,
     ) -> Result<(FunctionType, FunctionBody, ExportEntry, u32)> {
         match stmt {
-            TypedStmt::Asgn(pat, expr) => {
+            TypedStmt::Asgn(name, expr) => {
                 // If the rhs is a function, we want to generate a
                 // function binding (FunctionType, FunctionBody, and
                 // ExportEntry)
@@ -84,7 +83,7 @@ impl CodeGenerator {
                     type_,
                 } = expr
                 {
-                    return self.generate_function_binding(pat, params, type_, body);
+                    return self.generate_function_binding(name, params, type_, body);
                 }
                 Err(GenerationError::NotImplemented)?
             }
@@ -95,23 +94,19 @@ impl CodeGenerator {
 
     pub fn generate_function_binding(
         &mut self,
-        pat: &Pat,
+        name: &str,
         params: &Pat,
         type_: &Arc<Type>,
         body: &TypedStmt,
     ) -> Result<(FunctionType, FunctionBody, ExportEntry, u32)> {
         self.function_params = flatten_params(params);
         let (type_, body, index) = self.generate_function(type_, body)?;
-        if let Pat::Id(name, _) = pat {
-            let entry = ExportEntry {
-                field_str: name.as_bytes().to_vec(),
-                kind: ExternalKind::Function,
-                index,
-            };
-            Ok((type_, body, entry, index))
-        } else {
-            Err(GenerationError::DestructureFunctionBinding)?
-        }
+        let entry = ExportEntry {
+            field_str: name.as_bytes().to_vec(),
+            kind: ExternalKind::Function,
+            index,
+        };
+        Ok((type_, body, entry, index))
     }
 
     pub fn generate_function(

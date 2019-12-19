@@ -5,7 +5,21 @@ pub type Name = String;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Stmt {
-    Asgn(Pat, Expr),
+    Asgn(Name, Option<TypeSig>, Expr),
+    // We need to desugar complicated bindings like:
+    //   let { a, b, c } = f();
+    // into:
+    //   let res = f();
+    //   let a = res.a;
+    //   let b = res.b;
+    //   let c = res.c;
+    // However we want to make sure res doesn't shadow anything
+    // and don't want to do scope analysis before desugaring.
+    // The hacky solution we're pulling out of our ass?
+    // HiddenVars! Basically compiler internal vars that
+    // don't shadow. We have HiddenAsgn to assign to
+    // a hidden var and HiddenVar to use it.
+    HiddenAsgn(Name, Option<TypeSig>, Expr),
     Expr(Expr),
     Return(Expr),
     Block(Vec<Stmt>),
@@ -15,7 +29,8 @@ pub enum Stmt {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum TypedStmt {
-    Asgn(Pat, TypedExpr),
+    HiddenAsgn(Name, TypedExpr),
+    Asgn(Name, TypedExpr),
     Expr(TypedExpr),
     Return(TypedExpr),
     Block(Vec<TypedStmt>),
@@ -29,6 +44,9 @@ pub enum Expr {
         value: Value,
     },
     Var {
+        name: Name,
+    },
+    HiddenVar {
         name: Name,
     },
     BinOp {
@@ -49,6 +67,7 @@ pub enum Expr {
         callee: Box<Expr>,
         args: Vec<Expr>,
     },
+    Field(Box<Expr>, String),
     Record {
         entries: Vec<(Name, Expr)>,
     },
@@ -63,6 +82,10 @@ pub enum TypedExpr {
     },
     Var {
         name: Name,
+        type_: Arc<Type>,
+    },
+    HiddenVar {
+        name: u64,
         type_: Arc<Type>,
     },
     BinOp {
@@ -82,6 +105,7 @@ pub enum TypedExpr {
         type_: Arc<Type>,
         env: HashMap<Name, Type>,
     },
+    Field(Box<Expr>, String, Arc<Type>),
     Call {
         callee: Box<TypedExpr>,
         args: Vec<TypedExpr>,
@@ -198,7 +222,7 @@ pub enum TypeSig {
 #[derive(Debug, PartialEq, Clone)]
 pub enum Pat {
     Id(Name, Option<TypeSig>),
-    Record(Vec<Pat>),
+    Record(Vec<Name>),
     Tuple(Vec<Pat>),
     Empty,
 }
@@ -210,6 +234,7 @@ impl TypedExpr {
             TypedExpr::Primary { value: _, type_ } => type_.clone(),
             TypedExpr::Var { name: _, type_ } => type_.clone(),
             TypedExpr::Tuple(_elems, type_) => type_.clone(),
+            TypedExpr::HiddenVar { name: _, type_ } => type_.clone(),
             TypedExpr::BinOp {
                 op: _,
                 lhs: _,
@@ -227,6 +252,7 @@ impl TypedExpr {
                 env: _,
                 type_,
             } => type_.clone(),
+            TypedExpr::Field(_, _, type_) => type_.clone(),
             TypedExpr::Call {
                 callee: _,
                 args: _,

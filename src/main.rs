@@ -77,7 +77,7 @@ fn run_repl() -> Result<()> {
         let mut parser = Parser::new(lexer);
         let parser_out = parser.stmt()?;
         let mut typechecker = TypeChecker::new();
-        let typed_stmt = typechecker.stmt(parser_out)?;
+        let typed_stmt = typechecker.check_program(parser_out)?;
         println!("{:#?}", typed_stmt);
     }
 }

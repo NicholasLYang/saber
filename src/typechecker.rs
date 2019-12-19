@@ -80,10 +80,15 @@ impl TypeChecker {
                 let typed_expr = self.expr(expr)?;
                 Ok(TypedStmt::Expr(typed_expr))
             }
-            Stmt::Asgn(pat, expr) => {
+            Stmt::HiddenAsgn(name, type_sig, expr) => {
                 let typed_rhs = self.expr(expr)?;
-                self.asgn(&pat, typed_rhs.get_type())?;
-                Ok(TypedStmt::Asgn(pat, typed_rhs))
+                self.asgn(&name, &type_sig, typed_rhs.get_type())?;
+                Ok(TypedStmt::HiddenAsgn(name, typed_rhs))
+            }
+            Stmt::Asgn(name, type_sig, expr) => {
+                let typed_rhs = self.expr(expr)?;
+                self.asgn(&name, &type_sig, typed_rhs.get_type())?;
+                Ok(TypedStmt::Asgn(name, typed_rhs))
             }
             Stmt::If(cond, then_stmt, else_stmt) => {
                 let typed_cond = self.expr(cond)?;
@@ -200,15 +205,7 @@ impl TypeChecker {
             Pat::Record(pats) => {
                 let types: Result<Vec<_>, _> = pats
                     .iter()
-                    .map(|pat| {
-                        if let Pat::Id(name, _type_sig) = pat {
-                            Ok((name.clone(), self.pat(pat)?))
-                        } else {
-                            Err(TypeError::RecordContainsNonIds {
-                                record: pat.clone(),
-                            })
-                        }
-                    })
+                    .map(|name| Ok((name.clone(), self.pat(pat)?)))
                     .collect();
                 Ok(Arc::new(Type::Record(types?)))
             }
@@ -216,12 +213,19 @@ impl TypeChecker {
         }
     }
 
-    fn asgn(&mut self, pat: &Pat, rhs_type: Arc<Type>) -> Result<Arc<Type>, TypeError> {
-        let lhs_type = self.pat(pat)?;
+    fn asgn(
+        &mut self,
+        name: &str,
+        type_sig: &Option<TypeSig>,
+        rhs_type: Arc<Type>,
+    ) -> Result<Arc<Type>, TypeError> {
+        let lhs_type = if let Some(type_sig) = type_sig {
+            self.lookup_type_sig(type_sig)?
+        } else {
+            self.get_fresh_type_var()
+        };
         if self.unify(&lhs_type, &rhs_type) {
-            if let Pat::Id(name, _) = pat {
-                self.ctx.insert(name.clone(), rhs_type.clone());
-            }
+            self.ctx.insert(name.to_string(), rhs_type.clone());
             Ok(rhs_type)
         } else {
             Err(TypeError::UnificationFailure {
@@ -364,17 +368,11 @@ impl TypeChecker {
                 }
                 Ok(Arc::new(Type::Tuple(param_types)))
             }
-            Pat::Record(pats) => {
+            Pat::Record(names) => {
                 let mut param_types = Vec::new();
-                for pat in pats {
-                    let type_ = self.retrieve_type_from_params(pat)?;
-                    if let Pat::Id(name, _) = pat {
-                        param_types.push((name.clone(), type_));
-                    } else {
-                        return Err(TypeError::RecordContainsNonIds {
-                            record: params.clone(),
-                        });
-                    }
+                for name in names {
+                    let type_ = self.get_fresh_type_var();
+                    param_types.push((name.clone(), type_));
                 }
                 Ok(Arc::new(Type::Record(param_types)))
             }
