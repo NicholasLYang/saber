@@ -35,7 +35,7 @@ pub enum GenerationError {
 pub struct CodeGenerator {
     /// Counter for function generation
     function_index: u32,
-    function_params: Vec<Name>,
+    function_param: Option<Name>,
 }
 
 pub fn flatten_params(params: &Pat) -> Vec<Name> {
@@ -51,7 +51,7 @@ impl CodeGenerator {
     pub fn new() -> Self {
         CodeGenerator {
             function_index: 0,
-            function_params: Vec::new(),
+            function_param: None,
         }
     }
 
@@ -78,12 +78,12 @@ impl CodeGenerator {
                 // ExportEntry)
                 if let TypedExpr::Function {
                     env: _,
-                    params,
+                    param,
                     body,
                     type_,
                 } = expr
                 {
-                    return self.generate_function_binding(name, params, type_, body);
+                    return self.generate_function_binding(name, param, type_, body);
                 }
                 Err(GenerationError::NotImplemented)?
             }
@@ -95,11 +95,11 @@ impl CodeGenerator {
     pub fn generate_function_binding(
         &mut self,
         name: &str,
-        params: &Pat,
+        param: &Name,
         type_: &Arc<Type>,
         body: &TypedStmt,
     ) -> Result<(FunctionType, FunctionBody, ExportEntry, u32)> {
-        self.function_params = flatten_params(params);
+        self.function_param = Some(param.to_string());
         let (type_, body, index) = self.generate_function(type_, body)?;
         let entry = ExportEntry {
             field_str: name.as_bytes().to_vec(),
@@ -171,10 +171,7 @@ impl CodeGenerator {
     }
 
     fn get_params_index(&mut self, var: &Name) -> Result<Option<u32>> {
-        match self.function_params.iter().position(|name| name == var) {
-            Some(pos) => Ok(Some(pos.try_into()?)),
-            None => Ok(None),
-        }
+        Ok(Some(0))
     }
 
     fn generate_function_body(

@@ -277,12 +277,18 @@ impl TypeChecker {
                 Ok(TypedExpr::Tuple(typed_elems, Arc::new(Type::Tuple(types))))
             }
             Expr::Function {
-                params,
+                param,
+                param_type,
                 body,
                 return_type,
             } => {
-                // Insert params into ctx
-                self.pat(&params)?;
+                if let Some(param_type) = param_type {
+                    self.ctx
+                        .insert(param.clone(), self.lookup_type_sig(&param_type)?);
+                } else {
+                    let type_var = self.get_fresh_type_var();
+                    self.ctx.insert(param.clone(), type_var);
+                }
                 // Insert return type into typechecker so that
                 // typechecker can verify return statements.
                 if let Some(return_type_sig) = return_type {
@@ -293,11 +299,11 @@ impl TypeChecker {
 
                 let mut return_type = None;
                 std::mem::swap(&mut return_type, &mut self.return_type);
-                let params_type = self.retrieve_type_from_params(&params)?;
+                let param_type = self.ctx.get(&param).unwrap();
                 let return_type = return_type.unwrap_or(Arc::new(Type::Unit));
-                let function_type = Type::Arrow(params_type.clone(), return_type);
+                let function_type = Type::Arrow(param_type.clone(), return_type);
                 Ok(TypedExpr::Function {
-                    params,
+                    param,
                     body: Box::new(body),
                     type_: Arc::new(function_type),
                     env: HashMap::new(),

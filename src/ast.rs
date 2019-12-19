@@ -59,7 +59,8 @@ pub enum Expr {
         rhs: Box<Expr>,
     },
     Function {
-        params: Pat,
+        param: Name,
+        param_type: Option<TypeSig>,
         return_type: Option<TypeSig>,
         body: Box<Stmt>,
     },
@@ -100,7 +101,7 @@ pub enum TypedExpr {
         type_: Arc<Type>,
     },
     Function {
-        params: Pat,
+        param: Name,
         body: Box<TypedStmt>,
         type_: Arc<Type>,
         env: HashMap<Name, Type>,
@@ -247,7 +248,7 @@ impl TypedExpr {
                 type_,
             } => type_.clone(),
             TypedExpr::Function {
-                params: _,
+                param: _,
                 body: _,
                 env: _,
                 type_,

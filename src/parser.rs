@@ -59,10 +59,10 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn get_fresh_hidden_var(&mut self) -> u64 {
+    fn get_fresh_hidden_var(&mut self) -> String {
         let hidden_var_index = self.hidden_var_index;
         self.hidden_var_index += 1;
-        hidden_var_index
+        hidden_var_index.to_string()
     }
 
     fn expect(
@@ -271,7 +271,8 @@ impl<'input> Parser<'input> {
         };
         let mut bindings = self.make_hidden_var_bindings(hidden_var, pat)?;
         let mut stmts = if let Expr::Function {
-            params,
+            param,
+            param_type,
             return_type,
             body,
         } = rhs_expr
@@ -280,7 +281,8 @@ impl<'input> Parser<'input> {
                 hidden_var_name.to_string(),
                 None,
                 Expr::Function {
-                    params,
+                    param,
+                    param_type,
                     return_type,
                     body,
                 },
@@ -314,7 +316,6 @@ impl<'input> Parser<'input> {
     fn function(&mut self) -> Result<Expr, ParseError> {
         let params = self.pattern()?;
         let return_type = self.type_sig()?;
-
         self.expect(TokenDiscriminants::FatArrow)?;
         let token = self.bump()?;
         let body = match token {
@@ -347,11 +348,29 @@ impl<'input> Parser<'input> {
                 })?;
             }
         };
-        Ok(Expr::Function {
-            params,
-            return_type,
-            body: Box::new(body),
-        })
+        if let Pat::Id(name, type_sig) = params {
+            Ok(Expr::Function {
+                param: name,
+                param_type: type_sig,
+                return_type,
+                body: Box::new(body),
+            })
+        } else {
+            let hidden_var_name = self.get_fresh_hidden_var();
+            let mut bindings = self.make_hidden_var_bindings(
+                Expr::HiddenVar {
+                    name: hidden_var_name.clone(),
+                },
+                params,
+            )?;
+            bindings.push(body);
+            Ok(Expr::Function {
+                param: hidden_var_name,
+                param_type: None,
+                return_type,
+                body: Box::new(Stmt::Block(bindings)),
+            })
+        }
     }
 
     fn equality(&mut self) -> Result<Expr, ParseError> {
