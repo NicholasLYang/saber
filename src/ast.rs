@@ -5,7 +5,16 @@ pub type Name = String;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Stmt {
-    Asgn(Name, Option<TypeSig>, Expr),
+    Asgn(Pat, Expr),
+    Expr(Expr),
+    Return(Expr),
+    Block(Vec<Stmt>),
+    If(Expr, Box<Stmt>, Option<Box<Stmt>>),
+    Export(Name),
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum TypedStmt {
     // We need to desugar complicated bindings like:
     //   let { a, b, c } = f();
     // into:
@@ -19,17 +28,7 @@ pub enum Stmt {
     // HiddenVars! Basically compiler internal vars that
     // don't shadow. We have HiddenAsgn to assign to
     // a hidden var and HiddenVar to use it.
-    HiddenAsgn(Name, Option<TypeSig>, Expr),
-    Expr(Expr),
-    Return(Expr),
-    Block(Vec<Stmt>),
-    If(Expr, Box<Stmt>, Option<Box<Stmt>>),
-    Export(Name),
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub enum TypedStmt {
-    HiddenAsgn(Name, TypedExpr),
+    // HiddenAsgn(Name, TypedExpr),
     Asgn(Name, TypedExpr),
     Expr(TypedExpr),
     Return(TypedExpr),
@@ -46,9 +45,6 @@ pub enum Expr {
     Var {
         name: Name,
     },
-    HiddenVar {
-        name: Name,
-    },
     BinOp {
         op: Op,
         lhs: Box<Expr>,
@@ -59,8 +55,7 @@ pub enum Expr {
         rhs: Box<Expr>,
     },
     Function {
-        param: Name,
-        param_type: Option<TypeSig>,
+        params: Pat,
         return_type: Option<TypeSig>,
         body: Box<Stmt>,
     },
@@ -102,11 +97,12 @@ pub enum TypedExpr {
     },
     Function {
         param: Name,
+        param_type: Arc<Type>,
+        return_type: Arc<Type>,
         body: Box<TypedStmt>,
-        type_: Arc<Type>,
         env: HashMap<Name, Type>,
     },
-    Field(Box<Expr>, String, Arc<Type>),
+    Field(Box<TypedExpr>, String, Arc<Type>),
     Call {
         callee: Box<TypedExpr>,
         args: Vec<TypedExpr>,
@@ -141,7 +137,6 @@ impl fmt::Display for Value {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Op {
-    Comma,
     Plus,
     Minus,
     Times,
@@ -160,7 +155,6 @@ impl fmt::Display for Op {
             f,
             "{}",
             match self {
-                Op::Comma => ",",
                 Op::Plus => "+",
                 Op::Minus => "-",
                 Op::Times => "*",
@@ -218,6 +212,8 @@ impl fmt::Display for Type {
 pub enum TypeSig {
     Array(Box<TypeSig>),
     Name(Name),
+    Record(Vec<(Name, TypeSig)>),
+    Tuple(Vec<TypeSig>),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -251,8 +247,9 @@ impl TypedExpr {
                 param: _,
                 body: _,
                 env: _,
-                type_,
-            } => type_.clone(),
+                param_type,
+                return_type,
+            } => Arc::new(Type::Arrow(param_type.clone(), return_type.clone())),
             TypedExpr::Field(_, _, type_) => type_.clone(),
             TypedExpr::Call {
                 callee: _,

@@ -6,7 +6,6 @@ use std::fmt::{Debug, Display, Formatter};
 pub struct Parser<'input> {
     lexer: Lexer<'input>,
     pushedback_tokens: Vec<(usize, Token, usize)>,
-    hidden_var_index: u64,
 }
 
 #[derive(Debug, PartialEq)]
@@ -55,14 +54,7 @@ impl<'input> Parser<'input> {
         Parser {
             lexer,
             pushedback_tokens: Vec::new(),
-            hidden_var_index: 0,
         }
-    }
-
-    fn get_fresh_hidden_var(&mut self) -> String {
-        let hidden_var_index = self.hidden_var_index;
-        self.hidden_var_index += 1;
-        hidden_var_index.to_string()
     }
 
     fn expect(
@@ -158,7 +150,7 @@ impl<'input> Parser<'input> {
         while let None = self.match_one(TokenDiscriminants::RBrace)? {
             stmts.push(self.stmt()?);
         }
-        Ok(Stmt::Block(stmts.into_iter().flatten().collect()))
+        Ok(Stmt::Block(stmts))
     }
 
     pub fn stmts(&mut self) -> Result<Vec<Stmt>, ParseError> {
@@ -166,24 +158,22 @@ impl<'input> Parser<'input> {
         loop {
             match self.stmt() {
                 Ok(stmt) => stmts.push(stmt),
-                Err(ParseError::EndOfFile { expected_tokens: _ }) => {
-                    return Ok(stmts.into_iter().flatten().collect())
-                }
+                Err(ParseError::EndOfFile { expected_tokens: _ }) => return Ok(stmts),
                 Err(err) => return Err(err),
             }
         }
     }
 
     // Returns multiple stmts because of desugaring.
-    pub fn stmt(&mut self) -> Result<Vec<Stmt>, ParseError> {
+    pub fn stmt(&mut self) -> Result<Stmt, ParseError> {
         let tok = self.bump()?;
         match tok {
             Some((_, Token::Let, _)) => self.let_stmt(),
-            Some((_, Token::Return, _)) => Ok(vec![self.return_stmt()?]),
-            Some((_, Token::Export, _)) => Ok(vec![self.export_stmt()?]),
+            Some((_, Token::Return, _)) => Ok(self.return_stmt()?),
+            Some((_, Token::Export, _)) => Ok(self.export_stmt()?),
             Some(token) => {
                 self.pushback(token);
-                Ok(vec![self.expression_stmt()?])
+                Ok(self.expression_stmt()?)
             }
             None => Err(ParseError::EndOfFile {
                 expected_tokens: vec![
@@ -222,81 +212,70 @@ impl<'input> Parser<'input> {
         Ok(Stmt::Return(expr))
     }
 
-    fn make_hidden_var_bindings(&mut self, owner: Expr, pat: Pat) -> Result<Vec<Stmt>, ParseError> {
-        let mut bindings = Vec::new();
-        match pat {
-            Pat::Record(names) => {
-                for name in names {
-                    bindings.push(Stmt::Asgn(
-                        name.clone(),
-                        None,
-                        Expr::Field(Box::new(owner.clone()), name),
-                    ));
-                }
-            }
-            Pat::Tuple(pats) => {
-                for (i, pat) in pats.iter().enumerate() {
-                    let owner = Expr::Field(Box::new(owner.clone()), i.to_string());
-                    match pat {
-                        Pat::Id(name, type_sig) => {
-                            bindings.push(Stmt::Asgn(name.clone(), type_sig.clone(), owner))
-                        }
-                        pat @ Pat::Record(_) => {
-                            bindings.append(&mut self.make_hidden_var_bindings(owner, pat.clone())?)
-                        }
-                        pat @ Pat::Tuple(_) => {
-                            bindings.append(&mut self.make_hidden_var_bindings(owner, pat.clone())?)
-                        }
-                        Pat::Empty => {}
-                    }
-                }
-            }
-            Pat::Id(name, type_sig) => bindings.push(Stmt::Asgn(name, type_sig, owner)),
-            Pat::Empty => {}
-        };
-        Ok(bindings)
-    }
+    // fn make_hidden_var_bindings(&mut self, owner: Expr, pat: Pat) -> Result<Vec<Stmt>, ParseError> {
+    //     let mut bindings = Vec::new();
+    //     match pat {
+    //         Pat::Record(names) => {
+    //             for name in names {
+    //                 bindings.push(Stmt::Asgn(
+    //                     name.clone(),
+    //                     None,
+    //                     Expr::Field(Box::new(owner.clone()), name),
+    //                 ));
+    //             }
+    //         }
+    //         Pat::Tuple(pats) => {
+    //             for (i, pat) in pats.iter().enumerate() {
+    //                 let owner = Expr::Field(Box::new(owner.clone()), i.to_string());
+    //                 match pat {
+    //                     Pat::Id(name, type_sig) => {
+    //                         bindings.push(Stmt::Asgn(name.clone(), type_sig.clone(), owner))
+    //                     }
+    //                     pat @ Pat::Record(_) => {
+    //                         bindings.append(&mut self.make_hidden_var_bindings(owner, pat.clone())?)
+    //                     }
+    //                     pat @ Pat::Tuple(_) => {
+    //                         bindings.append(&mut self.make_hidden_var_bindings(owner, pat.clone())?)
+    //                     }
+    //                     Pat::Empty => {}
+    //                 }
+    //             }
+    //         }
+    //         Pat::Id(name, type_sig) => bindings.push(Stmt::Asgn(name, type_sig, owner)),
+    //         Pat::Empty => {}
+    //     };
+    //     Ok(bindings)
+    // }
 
-    fn let_stmt(&mut self) -> Result<Vec<Stmt>, ParseError> {
+    fn let_stmt(&mut self) -> Result<Stmt, ParseError> {
         let pat = self.pattern()?;
         self.expect(TokenDiscriminants::Equal)?;
         let rhs_expr = self.expr()?;
         if let Pat::Id(name, type_sig) = pat {
-            return Ok(vec![Stmt::Asgn(name, type_sig, rhs_expr)]);
+            return Ok(Stmt::Asgn(Pat::Id(name, type_sig), rhs_expr));
         }
 
-        let hidden_var_name = self.get_fresh_hidden_var();
-        let hidden_var = Expr::HiddenVar {
-            name: hidden_var_name.to_string(),
-        };
-        let mut bindings = self.make_hidden_var_bindings(hidden_var, pat)?;
-        let mut stmts = if let Expr::Function {
-            param,
-            param_type,
+        // NOTE: Maybe function asgn's should be a separate type?
+        // FuncAsgn or something. That way we can validate the pattern
+        // is just an Id at parse-time
+        if let Expr::Function {
+            params,
             return_type,
             body,
         } = rhs_expr
         {
-            vec![Stmt::HiddenAsgn(
-                hidden_var_name.to_string(),
-                None,
+            Ok(Stmt::Asgn(
+                pat,
                 Expr::Function {
-                    param,
-                    param_type,
+                    params,
                     return_type,
                     body,
                 },
-            )]
+            ))
         } else {
             self.expect(TokenDiscriminants::Semicolon)?;
-            vec![Stmt::HiddenAsgn(
-                hidden_var_name.to_string(),
-                None,
-                rhs_expr,
-            )]
-        };
-        stmts.append(&mut bindings);
-        Ok(stmts)
+            Ok(Stmt::Asgn(pat, rhs_expr))
+        }
     }
 
     fn expression_stmt(&mut self) -> Result<Stmt, ParseError> {
@@ -348,29 +327,11 @@ impl<'input> Parser<'input> {
                 })?;
             }
         };
-        if let Pat::Id(name, type_sig) = params {
-            Ok(Expr::Function {
-                param: name,
-                param_type: type_sig,
-                return_type,
-                body: Box::new(body),
-            })
-        } else {
-            let hidden_var_name = self.get_fresh_hidden_var();
-            let mut bindings = self.make_hidden_var_bindings(
-                Expr::HiddenVar {
-                    name: hidden_var_name.clone(),
-                },
-                params,
-            )?;
-            bindings.push(body);
-            Ok(Expr::Function {
-                param: hidden_var_name,
-                param_type: None,
-                return_type,
-                body: Box::new(Stmt::Block(bindings)),
-            })
-        }
+        Ok(Expr::Function {
+            params,
+            return_type,
+            body: Box::new(body),
+        })
     }
 
     fn equality(&mut self) -> Result<Expr, ParseError> {
@@ -571,16 +532,13 @@ impl<'input> Parser<'input> {
                     return Ok(Pat::Empty);
                 }
 
-                let mut tuple_patterns = self.comma::<Pat>(&Self::pattern, Token::RParen)?;
+                let mut pats = self.comma::<Pat>(&Self::pattern, Token::RParen)?;
                 // If the pattern is singular, i.e. let (a) = 10, then
                 // we treat it as a single id
-                if tuple_patterns.len() == 1 {
-                    match tuple_patterns.pop() {
-                        Some(pat) => Ok(pat),
-                        None => Err(ParseError::NotReachable)?,
-                    }
+                if pats.len() == 1 {
+                    Ok(pats.pop().unwrap())
                 } else {
-                    Ok(Pat::Tuple(tuple_patterns))
+                    Ok(Pat::Tuple(pats))
                 }
             }
             Some((_, Token::LBrace, _)) => Ok(Pat::Record(
