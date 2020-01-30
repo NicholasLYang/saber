@@ -1,4 +1,3 @@
-let a = \(arg: float): float => (arg - 10.2)
+let a = \arg: float: float => (arg - 10.2)
 let b = \() => (12 * 3 - 2)
-let c = a(10);
 

@@ -35,3 +35,4 @@ Goals:
     runtime checks (performance penalty?)
 - Lightweight syntax. Avoid using keywords when possible (however,
   will affect syntax highlighting)
+

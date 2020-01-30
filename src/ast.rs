@@ -15,7 +15,21 @@ pub enum Stmt {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum TypedStmt {
-    Asgn(Pat, TypedExpr),
+    // We need to desugar complicated bindings like:
+    //   let { a, b, c } = f();
+    // into:
+    //   let res = f();
+    //   let a = res.a;
+    //   let b = res.b;
+    //   let c = res.c;
+    // However we want to make sure res doesn't shadow anything
+    // and don't want to do scope analysis before desugaring.
+    // The hacky solution we're pulling out of our ass?
+    // HiddenVars! Basically compiler internal vars that
+    // don't shadow. We have HiddenAsgn to assign to
+    // a hidden var and HiddenVar to use it.
+    // HiddenAsgn(Name, TypedExpr),
+    Asgn(Name, TypedExpr),
     Expr(TypedExpr),
     Return(TypedExpr),
     Block(Vec<TypedStmt>),
@@ -49,6 +63,7 @@ pub enum Expr {
         callee: Box<Expr>,
         args: Vec<Expr>,
     },
+    Field(Box<Expr>, String),
     Record {
         entries: Vec<(Name, Expr)>,
     },
@@ -65,6 +80,10 @@ pub enum TypedExpr {
         name: Name,
         type_: Arc<Type>,
     },
+    HiddenVar {
+        name: u64,
+        type_: Arc<Type>,
+    },
     BinOp {
         op: Op,
         lhs: Box<TypedExpr>,
@@ -77,11 +96,13 @@ pub enum TypedExpr {
         type_: Arc<Type>,
     },
     Function {
-        params: Pat,
+        param: Name,
+        param_type: Arc<Type>,
+        return_type: Arc<Type>,
         body: Box<TypedStmt>,
-        type_: Arc<Type>,
         env: HashMap<Name, Type>,
     },
+    Field(Box<TypedExpr>, String, Arc<Type>),
     Call {
         callee: Box<TypedExpr>,
         args: Vec<TypedExpr>,
@@ -116,7 +137,6 @@ impl fmt::Display for Value {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Op {
-    Comma,
     Plus,
     Minus,
     Times,
@@ -135,7 +155,6 @@ impl fmt::Display for Op {
             f,
             "{}",
             match self {
-                Op::Comma => ",",
                 Op::Plus => "+",
                 Op::Minus => "-",
                 Op::Times => "*",
@@ -193,12 +212,14 @@ impl fmt::Display for Type {
 pub enum TypeSig {
     Array(Box<TypeSig>),
     Name(Name),
+    Record(Vec<(Name, TypeSig)>),
+    Tuple(Vec<TypeSig>),
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Pat {
     Id(Name, Option<TypeSig>),
-    Record(Vec<Pat>),
+    Record(Vec<Name>),
     Tuple(Vec<Pat>),
     Empty,
 }
@@ -210,6 +231,7 @@ impl TypedExpr {
             TypedExpr::Primary { value: _, type_ } => type_.clone(),
             TypedExpr::Var { name: _, type_ } => type_.clone(),
             TypedExpr::Tuple(_elems, type_) => type_.clone(),
+            TypedExpr::HiddenVar { name: _, type_ } => type_.clone(),
             TypedExpr::BinOp {
                 op: _,
                 lhs: _,
@@ -222,11 +244,13 @@ impl TypedExpr {
                 type_,
             } => type_.clone(),
             TypedExpr::Function {
-                params: _,
+                param: _,
                 body: _,
                 env: _,
-                type_,
-            } => type_.clone(),
+                param_type,
+                return_type,
+            } => Arc::new(Type::Arrow(param_type.clone(), return_type.clone())),
+            TypedExpr::Field(_, _, type_) => type_.clone(),
             TypedExpr::Call {
                 callee: _,
                 args: _,

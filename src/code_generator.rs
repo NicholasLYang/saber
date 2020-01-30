@@ -35,15 +35,14 @@ pub enum GenerationError {
 pub struct CodeGenerator {
     /// Counter for function generation
     function_index: u32,
-    function_params: Vec<Name>,
+    function_param: Option<Name>,
 }
 
 pub fn flatten_params(params: &Pat) -> Vec<Name> {
     match params {
         Pat::Id(name, _) => vec![name.clone()],
-        Pat::Record(pats) | Pat::Tuple(pats) => {
-            pats.iter().flat_map(|pat| flatten_params(pat)).collect()
-        }
+        Pat::Record(pats) => pats.clone(),
+        Pat::Tuple(pats) => pats.iter().flat_map(|pat| flatten_params(pat)).collect(),
         Pat::Empty => Vec::new(),
     }
 }
@@ -52,7 +51,7 @@ impl CodeGenerator {
     pub fn new() -> Self {
         CodeGenerator {
             function_index: 0,
-            function_params: Vec::new(),
+            function_param: None,
         }
     }
 
@@ -73,18 +72,25 @@ impl CodeGenerator {
         stmt: &TypedStmt,
     ) -> Result<(FunctionType, FunctionBody, ExportEntry, u32)> {
         match stmt {
-            TypedStmt::Asgn(pat, expr) => {
+            TypedStmt::Asgn(name, expr) => {
                 // If the rhs is a function, we want to generate a
                 // function binding (FunctionType, FunctionBody, and
                 // ExportEntry)
                 if let TypedExpr::Function {
                     env: _,
-                    params,
+                    param,
                     body,
-                    type_,
+                    param_type,
+                    return_type,
                 } = expr
                 {
-                    return self.generate_function_binding(pat, params, type_, body);
+                    return self.generate_function_binding(
+                        name,
+                        param,
+                        param_type,
+                        return_type,
+                        body,
+                    );
                 }
                 Err(GenerationError::NotImplemented)?
             }
@@ -95,50 +101,46 @@ impl CodeGenerator {
 
     pub fn generate_function_binding(
         &mut self,
-        pat: &Pat,
-        params: &Pat,
-        type_: &Arc<Type>,
+        name: &str,
+        param: &Name,
+        return_type: &Arc<Type>,
+        param_type: &Arc<Type>,
         body: &TypedStmt,
     ) -> Result<(FunctionType, FunctionBody, ExportEntry, u32)> {
-        self.function_params = flatten_params(params);
-        let (type_, body, index) = self.generate_function(type_, body)?;
-        if let Pat::Id(name, _) = pat {
-            let entry = ExportEntry {
-                field_str: name.as_bytes().to_vec(),
-                kind: ExternalKind::Function,
-                index,
-            };
-            Ok((type_, body, entry, index))
-        } else {
-            Err(GenerationError::DestructureFunctionBinding)?
-        }
+        self.function_param = Some(param.to_string());
+        let (type_, body, index) = self.generate_function(return_type, param_type, body)?;
+        let entry = ExportEntry {
+            field_str: name.as_bytes().to_vec(),
+            kind: ExternalKind::Function,
+            index,
+        };
+        Ok((type_, body, entry, index))
     }
 
     pub fn generate_function(
         &mut self,
-        type_: &Arc<Type>,
+        return_type: &Arc<Type>,
+        param_type: &Arc<Type>,
         body: &TypedStmt,
     ) -> Result<(FunctionType, FunctionBody, u32)> {
-        let function_type = self.generate_function_type(type_)?;
+        let function_type = self.generate_function_type(return_type, param_type)?;
         let function_body = self.generate_function_body(body, &function_type)?;
         let function_index = self.function_index;
         self.function_index += 1;
         Ok((function_type, function_body, function_index))
     }
 
-    fn generate_function_type(&self, func_type: &Arc<Type>) -> Result<FunctionType> {
-        if let Type::Arrow(params_type, return_type) = &**func_type {
-            let wasm_param_types = self.convert_params_type(params_type);
-            let return_type = self.generate_return_type(&return_type)?;
-            Ok(FunctionType {
-                param_types: wasm_param_types,
-                return_type,
-            })
-        } else {
-            Err(GenerationError::InvalidFunctionType {
-                type_: func_type.clone(),
-            })?
-        }
+    fn generate_function_type(
+        &self,
+        return_type: &Arc<Type>,
+        param_type: &Arc<Type>,
+    ) -> Result<FunctionType> {
+        let wasm_param_types = self.convert_params_type(param_type);
+        let return_type = self.generate_return_type(&return_type)?;
+        Ok(FunctionType {
+            param_types: wasm_param_types,
+            return_type,
+        })
     }
 
     fn generate_return_type(&self, return_type: &Arc<Type>) -> Result<Option<WasmType>> {
@@ -176,10 +178,7 @@ impl CodeGenerator {
     }
 
     fn get_params_index(&mut self, var: &Name) -> Result<Option<u32>> {
-        match self.function_params.iter().position(|name| name == var) {
-            Some(pos) => Ok(Some(pos.try_into()?)),
-            None => Ok(None),
-        }
+        Ok(Some(0))
     }
 
     fn generate_function_body(
