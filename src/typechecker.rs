@@ -24,8 +24,12 @@ pub enum TypeError {
     TypeDoesNotExist { type_name: Name },
     #[fail(display = "Arity mismatch: Expected {} but got {}", arity1, arity2)]
     ArityMismatch { arity1: usize, arity2: usize },
-    #[fail(display = "Record contains non indentifier patterns: {:?}", record)]
-    RecordContainsNonIds { record: Pat },
+    //    #[fail(display = "Record contains non indentifier patterns: {:?}", record)]
+    //    RecordContainsNonIds { record: Pat },
+    #[fail(display = "Field {} does not exist in record", name)]
+    FieldDoesNotExist { name: String },
+    #[fail(display = "Type {} is not a record", type_)]
+    NotARecord { type_: Arc<Type> },
     #[fail(display = "Invalid unary operator: {}", op)]
     InvalidUnaryOp { op: Op },
     #[fail(display = "Cannot apply unary operator to {:?}", expr)]
@@ -261,58 +265,83 @@ impl TypeChecker {
         }
     }
 
+    fn get_field_type(
+        &mut self,
+        record_type: &Arc<Type>,
+        field_name: &String,
+    ) -> Result<Arc<Type>, TypeError> {
+        if let Type::Record(fields) = &**record_type {
+            if let Some((name, type_)) = fields.iter().find(|(name, _)| name == field_name) {
+                Ok(type_.clone())
+            } else {
+                Err(TypeError::FieldDoesNotExist {
+                    name: field_name.clone(),
+                })
+            }
+        } else {
+            Err(TypeError::NotARecord {
+                type_: record_type.clone(),
+            })
+        }
+    }
+
+    fn generate_pattern_bindings(
+        &mut self,
+        pat: &Pat,
+        owner_name: &String,
+        rhs_type: &Arc<Type>,
+    ) -> Result<Vec<TypedStmt>, TypeError> {
+        let mut bindings = Vec::new();
+        match pat {
+            Pat::Id(_, _) | Pat::Empty => Ok(Vec::new()),
+            Pat::Record(names) => {
+                for name in names {
+                    bindings.push(TypedStmt::Asgn(
+                        name.clone(),
+                        TypedExpr::Field(
+                            Box::new(TypedExpr::Var {
+                                name: owner_name.clone(),
+                                type_: rhs_type.clone(),
+                            }),
+                            name.clone(),
+                            self.get_field_type(rhs_type, &name)?,
+                        ),
+                    ));
+                }
+                Ok(bindings)
+            }
+            Pat::Tuple(pats) => {
+                // TODO: Make this recursive so that we can
+                // flatten bindings
+                for (i, pat) in pats.iter().enumerate() {
+                    let name = self.get_fresh_var_name();
+                    bindings.push(TypedStmt::Asgn(
+                        name.clone(),
+                        TypedExpr::Field(
+                            Box::new(TypedExpr::Var {
+                                name: owner_name.clone(),
+                                type_: rhs_type.clone(),
+                            }),
+                            i.to_string(),
+                            self.get_fresh_type_var(),
+                        ),
+                    ));
+                    let type_ = self.get_fresh_type_var();
+                    bindings.append(&mut self.generate_pattern_bindings(pat, &name, &type_)?)
+                }
+                Ok(bindings)
+            }
+        }
+    }
+
     fn asgn(&mut self, pat: Pat, expr: TypedExpr) -> Result<Vec<TypedStmt>, TypeError> {
         let pat_type = self.pat(&pat)?;
         if self.unify(&pat_type, &expr.get_type()) {
-            let mut bindings = Vec::new();
-            match pat {
-                Pat::Id(name, type_sig) => return Ok(vec![TypedStmt::Asgn(name, expr)]),
-                Pat::Empty => {
-                    return Err(TypeError::UnificationFailure {
-                        type1: pat_type,
-                        type2: Arc::new(Type::Unit),
-                    })
-                }
-                Pat::Record(names) => {
-                    let owner = self.get_fresh_var_name();
-                    let expr_type = expr.get_type();
-                    bindings.push(TypedStmt::Asgn(owner.clone(), expr));
-                    for name in names {
-                        bindings.push(TypedStmt::Asgn(
-                            name.clone(),
-                            TypedExpr::Field(
-                                Box::new(TypedExpr::Var {
-                                    name: owner.clone(),
-                                    type_: expr_type.clone(),
-                                }),
-                                name,
-                                self.get_fresh_type_var(),
-                            ),
-                        ));
-                    }
-                    Ok(bindings)
-                }
-                Pat::Tuple(names) => {
-                    let owner = self.get_fresh_var_name();
-                    bindings.push(TypedStmt::Asgn(owner, expr));
-                    // TODO: Make this recursive so that we can
-                    // flatten bindings
-                    // for (i, name) in names.iter().enumerate() {
-                    //     bindings.push(TypedStmt::Asgn(
-                    //         name.clone(),
-                    //         TypedExpr::Field(
-                    //             Box::new(TypedExpr::Var {
-                    //                 name: owner.clone(),
-                    //                 type_: expr.get_type().clone(),
-                    //             }),
-                    //             i.to_string(),
-                    //             self.get_fresh_type_var(),
-                    //         ),
-                    //     ));
-                    // }
-                    Ok(bindings)
-                }
-            }
+            let name = self.get_fresh_var_name();
+            let mut pat_bindings = self.generate_pattern_bindings(&pat, &name, &expr.get_type())?;
+            let mut bindings = vec![TypedStmt::Asgn(name.clone(), expr)];
+            bindings.append(&mut pat_bindings);
+            Ok(bindings)
         } else {
             Err(TypeError::UnificationFailure {
                 type1: pat_type,

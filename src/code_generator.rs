@@ -1,5 +1,4 @@
 use ast::{Name, Op, Pat, Type, TypedExpr, TypedStmt, Value};
-use std::convert::TryInto;
 use std::sync::Arc;
 use types::Result;
 use wasm::{
@@ -36,15 +35,6 @@ pub struct CodeGenerator {
     /// Counter for function generation
     function_index: u32,
     function_param: Option<Name>,
-}
-
-pub fn flatten_params(params: &Pat) -> Vec<Name> {
-    match params {
-        Pat::Id(name, _) => vec![name.clone()],
-        Pat::Record(pats) => pats.clone(),
-        Pat::Tuple(pats) => pats.iter().flat_map(|pat| flatten_params(pat)).collect(),
-        Pat::Empty => Vec::new(),
-    }
 }
 
 impl CodeGenerator {
