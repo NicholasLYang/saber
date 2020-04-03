@@ -2,6 +2,7 @@ use crate::ast::{Expr, Name, Op, Pat, Stmt, TypeSig, Value};
 use crate::lexer::{Lexer, LexicalError, Token, TokenDiscriminants};
 use std::fmt;
 use std::fmt::{Debug, Display, Formatter};
+use utils::SymbolTable;
 
 pub struct Parser<'input> {
     lexer: Lexer<'input>,
@@ -55,6 +56,11 @@ impl<'input> Parser<'input> {
             lexer,
             pushedback_tokens: Vec::new(),
         }
+    }
+
+    // Gets the symbol table. Drops the parser though
+    pub fn get_symbol_table(self) -> SymbolTable {
+        self.lexer.get_symbol_table()
     }
 
     fn expect(
@@ -211,41 +217,6 @@ impl<'input> Parser<'input> {
         self.expect(TokenDiscriminants::Semicolon)?;
         Ok(Stmt::Return(expr))
     }
-
-    // fn make_hidden_var_bindings(&mut self, owner: Expr, pat: Pat) -> Result<Vec<Stmt>, ParseError> {
-    //     let mut bindings = Vec::new();
-    //     match pat {
-    //         Pat::Record(names) => {
-    //             for name in names {
-    //                 bindings.push(Stmt::Asgn(
-    //                     name.clone(),
-    //                     None,
-    //                     Expr::Field(Box::new(owner.clone()), name),
-    //                 ));
-    //             }
-    //         }
-    //         Pat::Tuple(pats) => {
-    //             for (i, pat) in pats.iter().enumerate() {
-    //                 let owner = Expr::Field(Box::new(owner.clone()), i.to_string());
-    //                 match pat {
-    //                     Pat::Id(name, type_sig) => {
-    //                         bindings.push(Stmt::Asgn(name.clone(), type_sig.clone(), owner))
-    //                     }
-    //                     pat @ Pat::Record(_) => {
-    //                         bindings.append(&mut self.make_hidden_var_bindings(owner, pat.clone())?)
-    //                     }
-    //                     pat @ Pat::Tuple(_) => {
-    //                         bindings.append(&mut self.make_hidden_var_bindings(owner, pat.clone())?)
-    //                     }
-    //                     Pat::Empty => {}
-    //                 }
-    //             }
-    //         }
-    //         Pat::Id(name, type_sig) => bindings.push(Stmt::Asgn(name, type_sig, owner)),
-    //         Pat::Empty => {}
-    //     };
-    //     Ok(bindings)
-    // }
 
     fn let_stmt(&mut self) -> Result<Stmt, ParseError> {
         let pat = self.pattern()?;
@@ -418,7 +389,7 @@ impl<'input> Parser<'input> {
             } else if let Some(_) = self.match_one(TokenDiscriminants::Dot)? {
                 let tok = self.bump()?;
                 if let Some((_, Token::Ident(name), _)) = tok {
-                    expr = Expr::Field(Box::new(expr), name.clone());
+                    expr = Expr::Field(Box::new(expr), name);
                 } else {
                     tok.map(|tok| self.pushback(tok));
                 }

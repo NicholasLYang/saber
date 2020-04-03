@@ -1,3 +1,4 @@
+use crate::utils::SymbolTable;
 use std::str::CharIndices;
 
 #[derive(Clone, Debug, PartialEq, EnumDiscriminants)]
@@ -8,7 +9,6 @@ pub enum Token {
     True,
     Else,
     Export,
-    Fun,
     For,
     If,
     Print,
@@ -16,7 +16,7 @@ pub enum Token {
     This,
     Let,
     While,
-    Ident(String),
+    Ident(usize),
     Float(f32),
     Integer(i32),
     LBrace,
@@ -82,6 +82,7 @@ pub enum LexicalError {
 pub struct Lexer<'input> {
     source: &'input str,
     chars: CharIndices<'input>,
+    symbol_table: SymbolTable,
     lookahead: Option<(usize, char)>,
     lookahead2: Option<(usize, char)>,
 }
@@ -95,9 +96,14 @@ impl<'input> Lexer<'input> {
         Lexer {
             source,
             chars,
+            symbol_table: SymbolTable::new(),
             lookahead,
             lookahead2,
         }
+    }
+
+    pub fn get_symbol_table(self) -> SymbolTable {
+        self.symbol_table
     }
 
     fn bump(&mut self) -> Option<(usize, char)> {
@@ -211,24 +217,31 @@ impl<'input> Lexer<'input> {
         }
     }
 
-    fn read_identifier(&mut self, start_pos: usize) -> <Lexer<'input> as Iterator>::Item {
+    fn read_identifier(&mut self, start: usize) -> <Lexer<'input> as Iterator>::Item {
         let end = self
             .take_while(|ch| is_id_start(ch) || is_id_body(ch))
             .unwrap_or_else(|| self.source.len());
-        match &self.source[start_pos..end] {
-            "else" => Ok((start_pos, Token::Else, end)),
-            "false" => Ok((start_pos, Token::False, end)),
-            "fun" => Ok((start_pos, Token::Fun, end)),
-            "for" => Ok((start_pos, Token::For, end)),
-            "if" => Ok((start_pos, Token::If, end)),
-            "print" => Ok((start_pos, Token::Print, end)),
-            "return" => Ok((start_pos, Token::Return, end)),
-            "this" => Ok((start_pos, Token::This, end)),
-            "true" => Ok((start_pos, Token::True, end)),
-            "let" => Ok((start_pos, Token::Let, end)),
-            "while" => Ok((start_pos, Token::While, end)),
-            "export" => Ok((start_pos, Token::Export, end)),
-            id => Ok((start_pos, Token::Ident(id.to_string()), end)),
+        match &self.source[start..end] {
+            "else" => Ok((start, Token::Else, end)),
+            "false" => Ok((start, Token::False, end)),
+            "for" => Ok((start, Token::For, end)),
+            "if" => Ok((start, Token::If, end)),
+            "print" => Ok((start, Token::Print, end)),
+            "return" => Ok((start, Token::Return, end)),
+            "this" => Ok((start, Token::This, end)),
+            "true" => Ok((start, Token::True, end)),
+            "let" => Ok((start, Token::Let, end)),
+            "while" => Ok((start, Token::While, end)),
+            "export" => Ok((start, Token::Export, end)),
+            ident => {
+                let ident = ident.to_string();
+                if let Some(id) = self.symbol_table.get_id(&ident) {
+                    Ok((start, Token::Ident(*id), end))
+                } else {
+                    let id = self.symbol_table.insert(ident);
+                    Ok((start, Token::Ident(id), end))
+                }
+            }
         }
     }
 }

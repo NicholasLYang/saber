@@ -1,12 +1,13 @@
 use ast::Value;
-use ast::{Expr, Name, Op, Pat, Stmt, Type, TypeSig, TypedExpr, TypedStmt};
+use ast::{Expr, Name, Op, Pat, Scope, Stmt, Type, TypeSig, TypedExpr, TypedStmt};
 use im::hashmap::HashMap;
 use std::sync::Arc;
+use utils::SymbolTable;
 
 #[derive(Debug, Fail, PartialEq)]
 pub enum TypeError {
     #[fail(display = "Could not determine type of '{}'", name)]
-    InferFailure { name: Name },
+    InferFailure { name: String },
     #[fail(display = "Not implemented yet")]
     NotImplemented,
     #[fail(
@@ -40,7 +41,8 @@ pub enum TypeError {
 
 pub struct TypeChecker {
     // A symbol table of sorts
-    ctx: Vec<HashMap<Name, Arc<Type>>>,
+    scopes: Vec<Scope>,
+    current_scope: usize,
     // Type names. Right now just has the primitives like string,
     // integer, float, char
     type_names: HashMap<Name, Arc<Type>>,
@@ -48,64 +50,67 @@ pub struct TypeChecker {
     return_type: Option<Arc<Type>>,
     // Index for type variable names
     type_var_index: usize,
-    // Index for hidden variable names
-    var_index: usize,
+    // Symbol table
+    symbol_table: SymbolTable,
+}
+
+fn build_type_names(symbol_table: &mut SymbolTable) -> HashMap<Name, Arc<Type>> {
+    let primitive_types = vec![
+        ("int", Arc::new(Type::Int)),
+        ("float", Arc::new(Type::Float)),
+        ("char", Arc::new(Type::Char)),
+        ("string", Arc::new(Type::String)),
+    ];
+    let mut type_names = HashMap::new();
+    for (name, type_) in primitive_types {
+        let id = symbol_table.insert(name.to_string());
+        println!("name: {}, id: {}", name, id);
+        println!("id: {:?}", symbol_table.get_id(&name.to_string()));
+        type_names.insert(id, type_);
+    }
+    type_names
 }
 
 impl TypeChecker {
-    pub fn new() -> TypeChecker {
-        let primitive_types = vec![
-            ("int".to_string(), Arc::new(Type::Int)),
-            ("float".to_string(), Arc::new(Type::Float)),
-            ("char".to_string(), Arc::new(Type::Char)),
-            ("string".to_string(), Arc::new(Type::String)),
-        ];
-        let ctx = vec![HashMap::new()];
-        let mut type_names = HashMap::new();
-        for (name, type_) in primitive_types {
-            type_names.insert(name, type_);
-        }
+    pub fn new(mut symbol_table: SymbolTable) -> TypeChecker {
+        let scopes = vec![Scope {
+            names: HashMap::new(),
+            parent: None,
+        }];
         TypeChecker {
-            ctx,
-            type_names,
+            scopes,
+            current_scope: 0,
+            type_names: build_type_names(&mut symbol_table),
             return_type: None,
             type_var_index: 0,
-            var_index: 0,
+            symbol_table,
         }
     }
 
+    pub fn get_symbol_table(self) -> SymbolTable {
+        self.symbol_table
+    }
+
     fn get_fresh_type_var(&mut self) -> Arc<Type> {
-        let type_var = Type::Var(self.type_var_index.to_string());
+        let type_var = Type::Var(self.type_var_index);
         self.type_var_index += 1;
         Arc::new(type_var)
     }
 
-    fn lookup_var(&self, name: &String) -> Option<Arc<Type>> {
-        for table in self.ctx.iter().rev() {
-            if let Some(type_) = table.get(name) {
+    fn lookup_var(&self, name: &usize) -> Option<Arc<Type>> {
+        let mut index = Some(self.current_scope);
+        while let Some(i) = index {
+            if let Some(type_) = self.scopes[i].names.get(name) {
                 return Some(type_.clone());
             }
+            index = self.scopes[i].parent;
         }
         None
     }
 
-    fn insert_var(&mut self, name: String, type_: Arc<Type>) {
-        let last_index = self.ctx.len() - 1;
-        self.ctx[last_index].insert(name, type_);
-    }
-
-    fn get_fresh_var_name(&mut self) -> String {
-        loop {
-            let var_index = self.var_index;
-            self.var_index += 1;
-            let var_name = var_index.to_string();
-            if let None = self.lookup_var(&var_name) {
-                return var_name;
-            }
-        }
-        // If we actually panic due to running out of var names, I'll
-        // eat my hat. Eventually we should replace this with a hash
-        // of sorts for better distribution
+    fn insert_var(&mut self, name: usize, type_: Arc<Type>) {
+        let current_scope = self.current_scope;
+        self.scopes[current_scope].names.insert(name, type_);
     }
 
     pub fn check_program(&mut self, program: Vec<Stmt>) -> Result<Vec<TypedStmt>, TypeError> {
@@ -242,12 +247,12 @@ impl TypeChecker {
         match pat {
             Pat::Id(name, Some(type_sig)) => {
                 let type_ = self.lookup_type_sig(&type_sig)?;
-                self.insert_var(name.to_string(), type_.clone());
+                self.insert_var(*name, type_.clone());
                 Ok(type_)
             }
             Pat::Id(name, None) => {
                 let type_ = self.get_fresh_type_var();
-                self.insert_var(name.to_string(), type_.clone());
+                self.insert_var(*name, type_.clone());
                 Ok(type_)
             }
             Pat::Tuple(pats) => {
@@ -268,14 +273,14 @@ impl TypeChecker {
     fn get_field_type(
         &mut self,
         record_type: &Arc<Type>,
-        field_name: &String,
+        field_name: &usize,
     ) -> Result<Arc<Type>, TypeError> {
         if let Type::Record(fields) = &**record_type {
             if let Some((name, type_)) = fields.iter().find(|(name, _)| name == field_name) {
                 Ok(type_.clone())
             } else {
                 Err(TypeError::FieldDoesNotExist {
-                    name: field_name.clone(),
+                    name: self.symbol_table.get_str(field_name).to_string(),
                 })
             }
         } else {
@@ -288,7 +293,7 @@ impl TypeChecker {
     fn generate_pattern_bindings(
         &mut self,
         pat: &Pat,
-        owner_name: &String,
+        owner_name: &usize,
         rhs_type: &Arc<Type>,
     ) -> Result<Vec<TypedStmt>, TypeError> {
         let mut bindings = Vec::new();
@@ -314,7 +319,7 @@ impl TypeChecker {
                 // TODO: Make this recursive so that we can
                 // flatten bindings
                 for (i, pat) in pats.iter().enumerate() {
-                    let name = self.get_fresh_var_name();
+                    let name = self.symbol_table.get_fresh_name();
                     bindings.push(TypedStmt::Asgn(
                         name.clone(),
                         TypedExpr::Field(
@@ -322,7 +327,7 @@ impl TypeChecker {
                                 name: owner_name.clone(),
                                 type_: rhs_type.clone(),
                             }),
-                            i.to_string(),
+                            i,
                             self.get_fresh_type_var(),
                         ),
                     ));
@@ -337,7 +342,7 @@ impl TypeChecker {
     fn asgn(&mut self, pat: Pat, expr: TypedExpr) -> Result<Vec<TypedStmt>, TypeError> {
         let pat_type = self.pat(&pat)?;
         if self.unify(&pat_type, &expr.get_type()) {
-            let name = self.get_fresh_var_name();
+            let name = self.symbol_table.get_fresh_name();
             let mut pat_bindings = self.generate_pattern_bindings(&pat, &name, &expr.get_type())?;
             let mut bindings = vec![TypedStmt::Asgn(name.clone(), expr)];
             bindings.append(&mut pat_bindings);
@@ -359,7 +364,7 @@ impl TypeChecker {
                     type_: type_.clone(),
                 }),
                 None => Err(TypeError::InferFailure {
-                    name: name.to_string(),
+                    name: self.symbol_table.get_str(&name).to_string(),
                 }),
             },
             Expr::BinOp { op, lhs, rhs } => {
@@ -396,16 +401,29 @@ impl TypeChecker {
                 body,
                 return_type,
             } => {
-                let param_name = self.get_fresh_var_name();
+                let param_name = self.symbol_table.get_fresh_name();
                 let param_type = self.pat(&params)?;
                 // Insert return type into typechecker so that
                 // typechecker can verify return statements.
                 if let Some(return_type_sig) = return_type {
                     self.return_type = Some(self.lookup_type_sig(&return_type_sig)?);
                 }
+                let func_scope = {
+                    let mut names = HashMap::new();
+                    names.insert(param_name.clone(), param_type.clone());
+                    Scope {
+                        names,
+                        parent: Some(self.current_scope),
+                    }
+                };
+                self.scopes.push(func_scope);
+                let previous_scope = self.current_scope;
+                self.current_scope = self.scopes.len() - 1;
                 // Check body
                 let body = self.stmt(*body)?;
 
+                let func_scope = self.current_scope;
+                self.current_scope = previous_scope;
                 let mut return_type = None;
                 std::mem::swap(&mut return_type, &mut self.return_type);
                 let return_type = return_type.unwrap_or(Arc::new(Type::Unit));
@@ -414,7 +432,7 @@ impl TypeChecker {
                     body: Box::new(TypedStmt::Block(body)),
                     param_type: param_type.clone(),
                     return_type,
-                    env: HashMap::new(),
+                    scope_index: func_scope,
                 })
             }
             Expr::UnaryOp { op, rhs } => match op {

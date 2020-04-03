@@ -1,7 +1,7 @@
 use im::hashmap::HashMap;
 use std::fmt;
 use std::sync::Arc;
-pub type Name = String;
+pub type Name = usize;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Stmt {
@@ -63,11 +63,17 @@ pub enum Expr {
         callee: Box<Expr>,
         args: Vec<Expr>,
     },
-    Field(Box<Expr>, String),
+    Field(Box<Expr>, Name),
     Record {
         entries: Vec<(Name, Expr)>,
     },
     Tuple(Vec<Expr>),
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct Scope {
+    pub names: HashMap<Name, Arc<Type>>,
+    pub parent: Option<usize>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -100,9 +106,9 @@ pub enum TypedExpr {
         param_type: Arc<Type>,
         return_type: Arc<Type>,
         body: Box<TypedStmt>,
-        env: HashMap<Name, Type>,
+        scope_index: usize,
     },
-    Field(Box<TypedExpr>, String, Arc<Type>),
+    Field(Box<TypedExpr>, Name, Arc<Type>),
     Call {
         callee: Box<TypedExpr>,
         args: Vec<TypedExpr>,
@@ -246,7 +252,7 @@ impl TypedExpr {
             TypedExpr::Function {
                 param: _,
                 body: _,
-                env: _,
+                scope_index: _,
                 param_type,
                 return_type,
             } => Arc::new(Type::Arrow(param_type.clone(), return_type.clone())),

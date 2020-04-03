@@ -1,8 +1,8 @@
+extern crate bimap;
+extern crate byteorder;
 extern crate failure;
-
 #[macro_use]
 extern crate failure_derive;
-extern crate byteorder;
 extern crate im;
 extern crate itertools;
 extern crate leb128;
@@ -28,6 +28,7 @@ mod lexer;
 mod parser;
 mod typechecker;
 mod types;
+mod utils;
 mod wasm;
 
 fn main() -> Result<()> {
@@ -47,9 +48,9 @@ fn read_file(file_name: &String) -> Result<()> {
     let lexer = lexer::Lexer::new(&contents);
     let mut parser = Parser::new(lexer);
     let parser_out = parser.stmts()?;
-    let mut typechecker = TypeChecker::new();
+    let mut typechecker = TypeChecker::new(parser.get_symbol_table());
     let typed_program = typechecker.check_program(parser_out)?;
-    let mut code_generator = CodeGenerator::new();
+    let mut code_generator = CodeGenerator::new(typechecker.get_symbol_table());
     let program = code_generator.generate_program(typed_program)?;
     let out_file = File::create("build/out.wasm")?;
     let mut emitter = Emitter::new(out_file);
@@ -76,7 +77,8 @@ fn run_repl() -> Result<()> {
         let lexer = lexer::Lexer::new(&input);
         let mut parser = Parser::new(lexer);
         let parser_out = parser.stmt()?;
-        let mut typechecker = TypeChecker::new();
+        let symbol_table = parser.get_symbol_table();
+        let mut typechecker = TypeChecker::new(symbol_table);
         let typed_stmt = typechecker.stmt(parser_out)?;
         println!("{:#?}", typed_stmt);
     }

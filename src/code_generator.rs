@@ -1,6 +1,7 @@
-use ast::{Name, Op, Pat, Type, TypedExpr, TypedStmt, Value};
+use ast::{Name, Op, Type, TypedExpr, TypedStmt, Value};
 use std::sync::Arc;
 use types::Result;
+use utils::SymbolTable;
 use wasm::{
     ExportEntry, ExternalKind, FunctionBody, FunctionType, LocalEntry, OpCode, ProgramData,
     WasmType,
@@ -35,13 +36,15 @@ pub struct CodeGenerator {
     /// Counter for function generation
     function_index: u32,
     function_param: Option<Name>,
+    symbol_table: SymbolTable,
 }
 
 impl CodeGenerator {
-    pub fn new() -> Self {
+    pub fn new(symbol_table: SymbolTable) -> Self {
         CodeGenerator {
             function_index: 0,
             function_param: None,
+            symbol_table,
         }
     }
 
@@ -67,7 +70,7 @@ impl CodeGenerator {
                 // function binding (FunctionType, FunctionBody, and
                 // ExportEntry)
                 if let TypedExpr::Function {
-                    env: _,
+                    scope_index: _,
                     param,
                     body,
                     param_type,
@@ -91,14 +94,15 @@ impl CodeGenerator {
 
     pub fn generate_function_binding(
         &mut self,
-        name: &str,
+        name: &usize,
         param: &Name,
         return_type: &Arc<Type>,
         param_type: &Arc<Type>,
         body: &TypedStmt,
     ) -> Result<(FunctionType, FunctionBody, ExportEntry, u32)> {
-        self.function_param = Some(param.to_string());
+        self.function_param = Some(*param);
         let (type_, body, index) = self.generate_function(return_type, param_type, body)?;
+        let name = self.symbol_table.get_str(name);
         let entry = ExportEntry {
             field_str: name.as_bytes().to_vec(),
             kind: ExternalKind::Function,
