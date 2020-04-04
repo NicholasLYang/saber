@@ -102,7 +102,7 @@ pub enum TypedExpr {
         type_: Arc<Type>,
     },
     Function {
-        param: Name,
+        params: Vec<(Name, Arc<Type>)>,
         param_type: Arc<Type>,
         return_type: Arc<Type>,
         body: Box<TypedStmt>,
@@ -225,7 +225,7 @@ pub enum TypeSig {
 #[derive(Debug, PartialEq, Clone)]
 pub enum Pat {
     Id(Name, Option<TypeSig>),
-    Record(Vec<Name>),
+    Record(Vec<Name>, Option<TypeSig>),
     Tuple(Vec<Pat>),
     Empty,
 }
@@ -250,7 +250,7 @@ impl TypedExpr {
                 type_,
             } => type_.clone(),
             TypedExpr::Function {
-                param: _,
+                params: _,
                 body: _,
                 scope_index: _,
                 param_type,

@@ -222,10 +222,6 @@ impl<'input> Parser<'input> {
         let pat = self.pattern()?;
         self.expect(TokenDiscriminants::Equal)?;
         let rhs_expr = self.expr()?;
-        if let Pat::Id(name, type_sig) = pat {
-            return Ok(Stmt::Asgn(Pat::Id(name, type_sig), rhs_expr));
-        }
-
         // NOTE: Maybe function asgn's should be a separate type?
         // FuncAsgn or something. That way we can validate the pattern
         // is just an Id at parse-time
@@ -512,9 +508,11 @@ impl<'input> Parser<'input> {
                     Ok(Pat::Tuple(pats))
                 }
             }
-            Some((_, Token::LBrace, _)) => Ok(Pat::Record(
-                self.comma::<Name>(&Self::record_pattern, Token::RBrace)?,
-            )),
+            Some((_, Token::LBrace, _)) => {
+                let fields = self.comma::<Name>(&Self::record_pattern, Token::RBrace)?;
+                let type_sig = self.type_sig()?;
+                Ok(Pat::Record(fields, type_sig))
+            }
             Some((_, Token::Ident(name), _)) => {
                 let type_sig = self.type_sig()?;
                 Ok(Pat::Id(name, type_sig))

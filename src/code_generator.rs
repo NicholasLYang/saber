@@ -1,6 +1,7 @@
 use ast::{Name, Op, Type, TypedExpr, TypedStmt, Value};
+use im::hashmap::HashMap;
+use std::convert::TryInto;
 use std::sync::Arc;
-use types::Result;
 use utils::SymbolTable;
 use wasm::{
     ExportEntry, ExternalKind, FunctionBody, FunctionType, LocalEntry, OpCode, ProgramData,
@@ -20,6 +21,8 @@ pub enum GenerationError {
         type_
     )]
     InvalidFunctionType { type_: Arc<Type> },
+    #[fail(display = "Cannot have () as param type")]
+    EmptyParamType,
     #[fail(display = "Could not infer type var {:?}", type_)]
     CouldNotInfer { type_: Arc<Type> },
     #[fail(display = "Not implemented yet!")]
@@ -29,22 +32,32 @@ pub enum GenerationError {
     #[fail(display = "Cannot destructure function binding")]
     DestructureFunctionBinding,
     #[fail(display = "Cannot find variable with name '{}'", name)]
-    UndefinedVar { name: Name },
+    UndefinedVar { name: String },
+    #[fail(display = "Somehow you have 2^32 args...")]
+    TooManyArgs,
+    #[fail(display = "Cannot convert type {} to type {}", t1, t2)]
+    CannotConvert { t1: Type, t2: Type },
 }
 
 pub struct CodeGenerator {
     /// Counter for function generation
     function_index: u32,
-    function_param: Option<Name>,
     symbol_table: SymbolTable,
+    // Map from var name to index in local_variables
+    var_indices: HashMap<Name, usize>,
+    // The local variables for current function.
+    local_variables: Vec<WasmType>,
 }
+
+type Result<T> = std::result::Result<T, GenerationError>;
 
 impl CodeGenerator {
     pub fn new(symbol_table: SymbolTable) -> Self {
         CodeGenerator {
             function_index: 0,
-            function_param: None,
             symbol_table,
+            var_indices: HashMap::new(),
+            local_variables: Vec::new(),
         }
     }
 
@@ -71,7 +84,7 @@ impl CodeGenerator {
                 // ExportEntry)
                 if let TypedExpr::Function {
                     scope_index: _,
-                    param,
+                    params,
                     body,
                     param_type,
                     return_type,
@@ -79,9 +92,9 @@ impl CodeGenerator {
                 {
                     return self.generate_function_binding(
                         name,
-                        param,
-                        param_type,
+                        params,
                         return_type,
+                        param_type,
                         body,
                     );
                 }
@@ -94,51 +107,65 @@ impl CodeGenerator {
 
     pub fn generate_function_binding(
         &mut self,
-        name: &usize,
-        param: &Name,
+        name: &Name,
+        params: &Vec<(Name, Arc<Type>)>,
         return_type: &Arc<Type>,
         param_type: &Arc<Type>,
         body: &TypedStmt,
     ) -> Result<(FunctionType, FunctionBody, ExportEntry, u32)> {
-        self.function_param = Some(*param);
-        let (type_, body, index) = self.generate_function(return_type, param_type, body)?;
+        let (type_, body, index) = self.generate_function(return_type, params, body)?;
         let name = self.symbol_table.get_str(name);
         let entry = ExportEntry {
             field_str: name.as_bytes().to_vec(),
             kind: ExternalKind::Function,
             index,
         };
+        self.var_indices = HashMap::new();
+        self.local_variables = Vec::new();
         Ok((type_, body, entry, index))
     }
 
     pub fn generate_function(
         &mut self,
         return_type: &Arc<Type>,
-        param_type: &Arc<Type>,
+        params: &Vec<(Name, Arc<Type>)>,
         body: &TypedStmt,
     ) -> Result<(FunctionType, FunctionBody, u32)> {
-        let function_type = self.generate_function_type(return_type, param_type)?;
+        let function_type = self.generate_function_type(return_type, params)?;
         let function_body = self.generate_function_body(body, &function_type)?;
         let function_index = self.function_index;
         self.function_index += 1;
         Ok((function_type, function_body, function_index))
     }
 
+    // Generates function type. Also inserts params into local_variables.
+    // Not sure it should do both but w/e it's here.
     fn generate_function_type(
-        &self,
+        &mut self,
         return_type: &Arc<Type>,
-        param_type: &Arc<Type>,
+        params: &Vec<(Name, Arc<Type>)>,
     ) -> Result<FunctionType> {
-        let wasm_param_types = self.convert_params_type(param_type);
-        let return_type = self.generate_return_type(&return_type)?;
+        let mut wasm_param_types = Vec::new();
+        for (param_name, param_type) in params {
+            let wasm_type = self
+                .generate_wasm_type(param_type)?
+                .ok_or(GenerationError::EmptyParamType)?;
+            self.local_variables.push(wasm_type.clone());
+            self.var_indices
+                .insert(*param_name, self.local_variables.len() - 1);
+            wasm_param_types.push(wasm_type);
+        }
+        println!("RETURN: {:?}", return_type);
+        let return_type = self.generate_wasm_type(&return_type)?;
+        println!("WASM RETURN: {:?}", return_type);
         Ok(FunctionType {
             param_types: wasm_param_types,
             return_type,
         })
     }
 
-    fn generate_return_type(&self, return_type: &Arc<Type>) -> Result<Option<WasmType>> {
-        match &**return_type {
+    fn generate_wasm_type(&self, sbr_type: &Arc<Type>) -> Result<Option<WasmType>> {
+        match &**sbr_type {
             Type::Unit => Ok(None),
             Type::Int | Type::Bool | Type::Char => Ok(Some(WasmType::i32)),
             Type::Float => Ok(Some(WasmType::f32)),
@@ -148,31 +175,32 @@ impl CodeGenerator {
             | Type::Record(_)
             | Type::Tuple(_) => Ok(Some(WasmType::i32)),
             Type::Var(_) => Err(GenerationError::CouldNotInfer {
-                type_: return_type.clone(),
+                type_: sbr_type.clone(),
             })?,
         }
     }
 
-    fn convert_params_type(&self, params_type: &Type) -> Vec<WasmType> {
-        match params_type {
-            Type::Unit => Vec::new(),
-            Type::Int | Type::Bool | Type::Char => vec![WasmType::i32],
-            Type::Float => vec![WasmType::f32],
-            // Boxed types get converted to pointers
-            Type::String | Type::Var(_) | Type::Array(_) | Type::Arrow(_, _) => vec![WasmType::i32],
-            Type::Record(entries) => entries
-                .iter()
-                .flat_map(|(_name, type_)| self.convert_params_type(type_))
-                .collect::<Vec<WasmType>>(),
-            Type::Tuple(params) => params
-                .iter()
-                .flat_map(|param| self.convert_params_type(param))
-                .collect::<Vec<WasmType>>(),
-        }
+    fn get_params_index(&mut self, var: &Name) -> Result<usize> {
+        Ok(*self
+            .var_indices
+            .get(var)
+            .ok_or(GenerationError::UndefinedVar {
+                name: self.symbol_table.get_str(var).to_string(),
+            })?)
     }
 
-    fn get_params_index(&mut self, var: &Name) -> Result<Option<u32>> {
-        Ok(Some(0))
+    fn generate_stmt(&mut self, stmt: &TypedStmt) -> Result<Vec<OpCode>> {
+        match stmt {
+            TypedStmt::Return(expr) => self.generate_expr(expr),
+            TypedStmt::Block(stmts) => {
+                let mut opcodes = Vec::new();
+                for stmt in stmts {
+                    opcodes.append(&mut self.generate_stmt(stmt)?);
+                }
+                Ok(opcodes)
+            }
+            _ => Ok(Vec::new()),
+        }
     }
 
     fn generate_function_body(
@@ -180,10 +208,7 @@ impl CodeGenerator {
         body: &TypedStmt,
         func_type: &FunctionType,
     ) -> Result<FunctionBody> {
-        let code = match body {
-            TypedStmt::Return(expr) => self.generate_expr(expr)?,
-            _ => Vec::new(),
-        };
+        let code = self.generate_stmt(body)?;
         let mut locals = vec![
             LocalEntry {
                 count: 0,
@@ -202,8 +227,8 @@ impl CodeGenerator {
                 type_: WasmType::f64,
             },
         ];
-        for param in &func_type.param_types {
-            let index = match param {
+        for local_type in &self.local_variables {
+            let index = match local_type {
                 WasmType::i32 => 0,
                 WasmType::i64 => 1,
                 WasmType::f32 => 2,
@@ -220,15 +245,22 @@ impl CodeGenerator {
         Ok(FunctionBody { locals, code })
     }
 
+    fn get_conversion(&self, from_type: &Arc<Type>, to_type: &Arc<Type>) -> Result<OpCode> {
+        match (&**from_type, &**to_type) {
+            (Type::Int, Type::Float) => Ok(OpCode::F32ConvertI32),
+            (t1, t2) => Err(GenerationError::CannotConvert {
+                t1: t1.clone(),
+                t2: t2.clone(),
+            }),
+        }
+    }
+
     fn generate_expr(&mut self, expr: &TypedExpr) -> Result<Vec<OpCode>> {
         match expr {
             TypedExpr::Primary { value, type_: _ } => Ok(vec![self.generate_primary(value)?]),
             TypedExpr::Var { name, type_: _ } => {
                 let index = self.get_params_index(&name)?;
-                match index {
-                    Some(i) => Ok(vec![OpCode::GetLocal(i)]),
-                    None => Err((GenerationError::UndefinedVar { name: name.clone() }).into()),
-                }
+                Ok(vec![OpCode::GetLocal(index.try_into().unwrap())])
             }
             TypedExpr::BinOp {
                 op,
@@ -236,11 +268,19 @@ impl CodeGenerator {
                 rhs,
                 type_,
             } => {
-                let mut ops = self.generate_expr(lhs)?;
+                let mut lhs_ops = self.generate_expr(lhs)?;
+                let lhs_type = lhs.get_type();
+                if &lhs_type != type_ {
+                    lhs_ops.push(self.get_conversion(&lhs_type, type_)?)
+                }
                 let mut rhs_ops = self.generate_expr(rhs)?;
-                ops.append(&mut rhs_ops);
-                ops.push(self.generate_operator(&op, &type_)?);
-                Ok(ops)
+                let rhs_type = rhs.get_type();
+                if &rhs_type != type_ {
+                    rhs_ops.push(self.get_conversion(&rhs_type, type_)?)
+                }
+                lhs_ops.append(&mut rhs_ops);
+                lhs_ops.push(self.generate_operator(&op, &type_)?);
+                Ok(lhs_ops)
             }
             _ => Err(GenerationError::NotImplemented)?,
         }

@@ -22,6 +22,8 @@ pub enum OpCode {
     F32Div,
     I32Const(i32),
     F32Const(f32),
+    // Convert signed 32 bit integer to 32 bit float
+    F32ConvertI32,
     GetLocal(u32),
 }
 

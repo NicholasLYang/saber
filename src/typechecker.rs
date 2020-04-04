@@ -64,8 +64,6 @@ fn build_type_names(symbol_table: &mut SymbolTable) -> HashMap<Name, Arc<Type>> 
     let mut type_names = HashMap::new();
     for (name, type_) in primitive_types {
         let id = symbol_table.insert(name.to_string());
-        println!("name: {}, id: {}", name, id);
-        println!("id: {:?}", symbol_table.get_id(&name.to_string()));
         type_names.insert(id, type_);
     }
     type_names
@@ -247,7 +245,6 @@ impl TypeChecker {
         match pat {
             Pat::Id(name, Some(type_sig)) => {
                 let type_ = self.lookup_type_sig(&type_sig)?;
-                self.insert_var(*name, type_.clone());
                 Ok(type_)
             }
             Pat::Id(name, None) => {
@@ -259,14 +256,60 @@ impl TypeChecker {
                 let types: Result<Vec<_>, _> = pats.iter().map(|pat| self.pat(pat)).collect();
                 Ok(Arc::new(Type::Tuple(types?)))
             }
-            Pat::Record(pats) => {
-                let types: Result<Vec<_>, _> = pats
-                    .iter()
-                    .map(|name| Ok((name.clone(), self.pat(pat)?)))
-                    .collect();
-                Ok(Arc::new(Type::Record(types?)))
+            Pat::Record(pats, type_sig) => {
+                // In the future I should unify these two if they both exist.
+                if let Some(type_sig) = type_sig {
+                    self.lookup_type_sig(&type_sig)
+                } else {
+                    let types: Result<Vec<_>, _> = pats
+                        .iter()
+                        .map(|name| Ok((name.clone(), self.get_fresh_type_var())))
+                        .collect();
+                    Ok(Arc::new(Type::Record(types?)))
+                }
             }
             Pat::Empty => Ok(Arc::new(Type::Unit)),
+        }
+    }
+
+    /// Gets the function parameters as a list of names with
+    /// types. Useful for WebAssembly code generation.
+    fn get_func_params(&mut self, pat: &Pat) -> Result<Vec<(Name, Arc<Type>)>, TypeError> {
+        match pat {
+            Pat::Id(name, Some(type_sig)) => {
+                let type_ = self.lookup_type_sig(&type_sig)?;
+                Ok(vec![(*name, type_)])
+            }
+            Pat::Id(name, None) => {
+                let type_ = self.get_fresh_type_var();
+                self.insert_var(*name, type_.clone());
+                Ok(vec![(*name, type_)])
+            }
+            Pat::Tuple(pats) => {
+                let mut types = Vec::new();
+                for pat in pats {
+                    types.append(&mut self.get_func_params(pat)?)
+                }
+                Ok(types)
+            }
+            Pat::Record(names, type_sig) => {
+                let type_ = if let Some(type_sig) = type_sig {
+                    Some(self.lookup_type_sig(&type_sig)?)
+                } else {
+                    None
+                };
+                let mut params = Vec::new();
+                for name in names {
+                    let field_type = if let Some(t) = &type_ {
+                        self.get_field_type(t, name)?
+                    } else {
+                        self.get_fresh_type_var()
+                    };
+                    params.push((name.clone(), field_type))
+                }
+                Ok(params)
+            }
+            Pat::Empty => Ok(Vec::new()),
         }
     }
 
@@ -299,7 +342,7 @@ impl TypeChecker {
         let mut bindings = Vec::new();
         match pat {
             Pat::Id(_, _) | Pat::Empty => Ok(Vec::new()),
-            Pat::Record(names) => {
+            Pat::Record(names, _) => {
                 for name in names {
                     bindings.push(TypedStmt::Asgn(
                         name.clone(),
@@ -342,7 +385,11 @@ impl TypeChecker {
     fn asgn(&mut self, pat: Pat, expr: TypedExpr) -> Result<Vec<TypedStmt>, TypeError> {
         let pat_type = self.pat(&pat)?;
         if self.unify(&pat_type, &expr.get_type()) {
-            let name = self.symbol_table.get_fresh_name();
+            let name = if let Pat::Id(name, _) = pat {
+                name
+            } else {
+                self.symbol_table.get_fresh_name()
+            };
             let mut pat_bindings = self.generate_pattern_bindings(&pat, &name, &expr.get_type())?;
             let mut bindings = vec![TypedStmt::Asgn(name.clone(), expr)];
             bindings.append(&mut pat_bindings);
@@ -401,7 +448,7 @@ impl TypeChecker {
                 body,
                 return_type,
             } => {
-                let param_name = self.symbol_table.get_fresh_name();
+                let func_params = self.get_func_params(&params)?;
                 let param_type = self.pat(&params)?;
                 // Insert return type into typechecker so that
                 // typechecker can verify return statements.
@@ -410,7 +457,9 @@ impl TypeChecker {
                 }
                 let func_scope = {
                     let mut names = HashMap::new();
-                    names.insert(param_name.clone(), param_type.clone());
+                    for (name, type_) in &func_params {
+                        names.insert(name.clone(), type_.clone());
+                    }
                     Scope {
                         names,
                         parent: Some(self.current_scope),
@@ -428,7 +477,7 @@ impl TypeChecker {
                 std::mem::swap(&mut return_type, &mut self.return_type);
                 let return_type = return_type.unwrap_or(Arc::new(Type::Unit));
                 Ok(TypedExpr::Function {
-                    param: param_name,
+                    params: func_params,
                     body: Box::new(TypedStmt::Block(body)),
                     param_type: param_type.clone(),
                     return_type,
@@ -480,8 +529,8 @@ impl TypeChecker {
         match op {
             Op::Plus | Op::Minus | Op::Times | Op::Div => match (&*lhs_type, &*rhs_type) {
                 (Type::Float, Type::Float)
-                | (Type::Bool, Type::Float)
-                | (Type::Float, Type::Bool) => Some(Type::Float),
+                | (Type::Int, Type::Float)
+                | (Type::Float, Type::Int) => Some(Type::Float),
                 (Type::Int, Type::Int) => Some(Type::Int),
                 _ => None,
             },
