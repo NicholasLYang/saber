@@ -125,6 +125,31 @@ impl TypeChecker {
                 let typed_expr = self.expr(expr)?;
                 Ok(vec![TypedStmt::Expr(typed_expr)])
             }
+            Stmt::Function(func_name, params, return_type_sig, body) => {
+                let params_type = self.pat(&params)?;
+                let return_type = if let Some(type_sig) = &return_type_sig {
+                    self.lookup_type_sig(type_sig)?
+                } else {
+                    self.get_fresh_type_var()
+                };
+                let func_scope = {
+                    let mut names = HashMap::new();
+                    names.insert(
+                        func_name,
+                        Arc::new(Type::Arrow(params_type.clone(), return_type)),
+                    );
+                    Scope {
+                        names,
+                        parent: Some(self.current_scope),
+                    }
+                };
+                self.scopes.push(func_scope);
+                let previous_scope = self.current_scope;
+                self.current_scope = self.scopes.len() - 1;
+                let rhs = self.func(params, body, return_type_sig, params_type)?;
+                self.current_scope = previous_scope;
+                Ok(vec![TypedStmt::Asgn(func_name, rhs)])
+            }
             Stmt::Asgn(pat, rhs) => Ok(self.asgn(pat, rhs)?),
             Stmt::If(cond, then_stmt, else_stmt) => {
                 let typed_cond = self.expr(cond)?;
@@ -401,6 +426,36 @@ impl TypeChecker {
         }
     }
 
+    fn func(
+        &mut self,
+        params: Pat,
+        body: Box<Stmt>,
+        return_type: Option<TypeSig>,
+        param_type: Arc<Type>,
+    ) -> Result<TypedExpr, TypeError> {
+        let func_params = self.get_func_params(&params)?;
+        for (name, type_) in &func_params {
+            self.insert_var(name.clone(), type_.clone());
+        }
+        // Insert return type into typechecker so that
+        // typechecker can verify return statements.
+        if let Some(return_type_sig) = return_type {
+            self.return_type = Some(self.lookup_type_sig(&return_type_sig)?);
+        }
+        // Check body
+        let body = self.stmt(*body)?;
+        let mut return_type = None;
+        std::mem::swap(&mut return_type, &mut self.return_type);
+        let return_type = return_type.unwrap_or(Arc::new(Type::Unit));
+        Ok(TypedExpr::Function {
+            params: func_params,
+            body: Box::new(TypedStmt::Block(body)),
+            param_type: param_type.clone(),
+            return_type,
+            scope_index: self.current_scope,
+        })
+    }
+
     fn expr(&mut self, expr: Expr) -> Result<TypedExpr, TypeError> {
         match expr {
             Expr::Primary { value } => Ok(self.value(value)),
@@ -447,41 +502,17 @@ impl TypeChecker {
                 body,
                 return_type,
             } => {
-                let func_params = self.get_func_params(&params)?;
-                let param_type = self.pat(&params)?;
-                // Insert return type into typechecker so that
-                // typechecker can verify return statements.
-                if let Some(return_type_sig) = return_type {
-                    self.return_type = Some(self.lookup_type_sig(&return_type_sig)?);
-                }
-                let func_scope = {
-                    let mut names = HashMap::new();
-                    for (name, type_) in &func_params {
-                        names.insert(name.clone(), type_.clone());
-                    }
-                    Scope {
-                        names,
-                        parent: Some(self.current_scope),
-                    }
+                let func_scope = Scope {
+                    names: HashMap::new(),
+                    parent: Some(self.current_scope),
                 };
+                let params_type = self.pat(&params)?;
                 self.scopes.push(func_scope);
                 let previous_scope = self.current_scope;
                 self.current_scope = self.scopes.len() - 1;
-                // Check body
-                let body = self.stmt(*body)?;
-
-                let func_scope = self.current_scope;
+                let func = self.func(params, body, return_type, params_type);
                 self.current_scope = previous_scope;
-                let mut return_type = None;
-                std::mem::swap(&mut return_type, &mut self.return_type);
-                let return_type = return_type.unwrap_or(Arc::new(Type::Unit));
-                Ok(TypedExpr::Function {
-                    params: func_params,
-                    body: Box::new(TypedStmt::Block(body)),
-                    param_type: param_type.clone(),
-                    return_type,
-                    scope_index: func_scope,
-                })
+                func
             }
             Expr::UnaryOp { op, rhs } => match op {
                 Op::Minus | Op::Plus => {
@@ -583,6 +614,7 @@ impl TypeChecker {
             return true;
         }
         match (&**type1, &**type2) {
+            (Type::Tuple(ts), Type::Unit) | (Type::Unit, Type::Tuple(ts)) => ts.len() == 0,
             (Type::Tuple(t1), Type::Tuple(t2)) => self.unify_type_vectors(&t1, &t2),
             (Type::Arrow(param_type1, return_type1), Type::Arrow(param_type2, return_type2)) => {
                 self.unify(&param_type1, &param_type2) && self.unify(&return_type1, &return_type2)

@@ -10,6 +10,7 @@ pub enum Stmt {
     Return(Expr),
     Block(Vec<Stmt>),
     If(Expr, Box<Stmt>, Option<Box<Stmt>>),
+    Function(Name, Pat, Option<TypeSig>, Box<Stmt>),
     Export(Name),
 }
 

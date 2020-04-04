@@ -36,6 +36,12 @@ pub enum ParseError {
         expected_tokens: Vec<TokenDiscriminants>,
         location: Location,
     },
+    #[fail(display = "Cannot destructure a function")]
+    DestructureFunction,
+    #[fail(
+        display = "Cannot have a type signature on a let function binding (use type signatures in the function!)"
+    )]
+    FuncBindingTypeSig,
     #[fail(display = "Not implemented yet")]
     NotImplemented,
     #[fail(display = "Lexer error: {}", err)]
@@ -252,14 +258,11 @@ impl<'input> Parser<'input> {
             body,
         } = rhs_expr
         {
-            Ok(Stmt::Asgn(
-                pat,
-                Expr::Function {
-                    params,
-                    return_type,
-                    body,
-                },
-            ))
+            match pat {
+                Pat::Id(name, None) => Ok(Stmt::Function(name, params, return_type, body)),
+                Pat::Id(_, _) => Err(ParseError::FuncBindingTypeSig),
+                _ => Err(ParseError::DestructureFunction),
+            }
         } else {
             self.expect(TokenDiscriminants::Semicolon)?;
             Ok(Stmt::Asgn(pat, rhs_expr))
