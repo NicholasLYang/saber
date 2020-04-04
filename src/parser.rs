@@ -170,7 +170,6 @@ impl<'input> Parser<'input> {
         }
     }
 
-    // Returns multiple stmts because of desugaring.
     pub fn stmt(&mut self) -> Result<Stmt, ParseError> {
         let tok = self.bump()?;
         match tok {
