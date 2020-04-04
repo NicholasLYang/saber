@@ -15,20 +15,6 @@ pub enum Stmt {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum TypedStmt {
-    // We need to desugar complicated bindings like:
-    //   let { a, b, c } = f();
-    // into:
-    //   let res = f();
-    //   let a = res.a;
-    //   let b = res.b;
-    //   let c = res.c;
-    // However we want to make sure res doesn't shadow anything
-    // and don't want to do scope analysis before desugaring.
-    // The hacky solution we're pulling out of our ass?
-    // HiddenVars! Basically compiler internal vars that
-    // don't shadow. We have HiddenAsgn to assign to
-    // a hidden var and HiddenVar to use it.
-    // HiddenAsgn(Name, TypedExpr),
     Asgn(Name, TypedExpr),
     Expr(TypedExpr),
     Return(TypedExpr),
@@ -61,7 +47,7 @@ pub enum Expr {
     },
     Call {
         callee: Box<Expr>,
-        args: Vec<Expr>,
+        args: Box<Expr>,
     },
     Field(Box<Expr>, Name),
     Record {
@@ -86,10 +72,6 @@ pub enum TypedExpr {
         name: Name,
         type_: Arc<Type>,
     },
-    HiddenVar {
-        name: u64,
-        type_: Arc<Type>,
-    },
     BinOp {
         op: Op,
         lhs: Box<TypedExpr>,
@@ -111,7 +93,7 @@ pub enum TypedExpr {
     Field(Box<TypedExpr>, Name, Arc<Type>),
     Call {
         callee: Box<TypedExpr>,
-        args: Vec<TypedExpr>,
+        args: Box<TypedExpr>,
         type_: Arc<Type>,
     },
     Tuple(Vec<TypedExpr>, Arc<Type>),
@@ -237,7 +219,6 @@ impl TypedExpr {
             TypedExpr::Primary { value: _, type_ } => type_.clone(),
             TypedExpr::Var { name: _, type_ } => type_.clone(),
             TypedExpr::Tuple(_elems, type_) => type_.clone(),
-            TypedExpr::HiddenVar { name: _, type_ } => type_.clone(),
             TypedExpr::BinOp {
                 op: _,
                 lhs: _,

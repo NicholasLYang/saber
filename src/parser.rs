@@ -177,6 +177,7 @@ impl<'input> Parser<'input> {
             Some((_, Token::Let, _)) => self.let_stmt(),
             Some((_, Token::Return, _)) => Ok(self.return_stmt()?),
             Some((_, Token::Export, _)) => Ok(self.export_stmt()?),
+            Some((_, Token::If, _)) => Ok(self.if_stmt()?),
             Some(token) => {
                 self.pushback(token);
                 Ok(self.expression_stmt()?)
@@ -189,6 +190,27 @@ impl<'input> Parser<'input> {
                 ],
             })?,
         }
+    }
+
+    fn if_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let cond = self.expr()?;
+        self.expect(TokenDiscriminants::LBrace)?;
+        let result_block = self.block()?;
+        let else_block = if let Some(_) = self.match_one(TokenDiscriminants::Else)? {
+            if let Some(_) = self.match_one(TokenDiscriminants::If)? {
+                Some(self.if_stmt()?)
+            } else {
+                self.expect(TokenDiscriminants::LBrace)?;
+                Some(self.block()?)
+            }
+        } else {
+            None
+        };
+        Ok(Stmt::If(
+            cond,
+            Box::new(result_block),
+            else_block.map(|block| Box::new(block)),
+        ))
     }
 
     fn export_stmt(&mut self) -> Result<Stmt, ParseError> {
@@ -397,10 +419,17 @@ impl<'input> Parser<'input> {
     }
 
     fn finish_call(&mut self, callee: Expr) -> Result<Expr, ParseError> {
-        let args = self.comma::<Expr>(&Self::expr, Token::RParen)?;
+        let args = {
+            let mut exprs = self.comma::<Expr>(&Self::expr, Token::RParen)?;
+            if exprs.len() == 1 {
+                exprs.remove(0)
+            } else {
+                Expr::Tuple(exprs)
+            }
+        };
         Ok(Expr::Call {
             callee: Box::new(callee),
-            args,
+            args: Box::new(args),
         })
     }
 

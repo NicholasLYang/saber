@@ -125,10 +125,7 @@ impl TypeChecker {
                 let typed_expr = self.expr(expr)?;
                 Ok(vec![TypedStmt::Expr(typed_expr)])
             }
-            Stmt::Asgn(pat, expr) => {
-                let typed_rhs = self.expr(expr)?;
-                Ok(self.asgn(pat, typed_rhs)?)
-            }
+            Stmt::Asgn(pat, rhs) => Ok(self.asgn(pat, rhs)?),
             Stmt::If(cond, then_stmt, else_stmt) => {
                 let typed_cond = self.expr(cond)?;
                 if !self.unify(&typed_cond.get_type(), &Arc::new(Type::Bool)) {
@@ -243,7 +240,7 @@ impl TypeChecker {
 
     fn pat(&mut self, pat: &Pat) -> Result<Arc<Type>, TypeError> {
         match pat {
-            Pat::Id(name, Some(type_sig)) => {
+            Pat::Id(_, Some(type_sig)) => {
                 let type_ = self.lookup_type_sig(&type_sig)?;
                 Ok(type_)
             }
@@ -319,7 +316,7 @@ impl TypeChecker {
         field_name: &usize,
     ) -> Result<Arc<Type>, TypeError> {
         if let Type::Record(fields) = &**record_type {
-            if let Some((name, type_)) = fields.iter().find(|(name, _)| name == field_name) {
+            if let Some((_, type_)) = fields.iter().find(|(name, _)| name == field_name) {
                 Ok(type_.clone())
             } else {
                 Err(TypeError::FieldDoesNotExist {
@@ -382,22 +379,24 @@ impl TypeChecker {
         }
     }
 
-    fn asgn(&mut self, pat: Pat, expr: TypedExpr) -> Result<Vec<TypedStmt>, TypeError> {
+    fn asgn(&mut self, pat: Pat, rhs: Expr) -> Result<Vec<TypedStmt>, TypeError> {
         let pat_type = self.pat(&pat)?;
-        if self.unify(&pat_type, &expr.get_type()) {
+        let typed_rhs = self.expr(rhs)?;
+        if self.unify(&pat_type, &typed_rhs.get_type()) {
             let name = if let Pat::Id(name, _) = pat {
                 name
             } else {
                 self.symbol_table.get_fresh_name()
             };
-            let mut pat_bindings = self.generate_pattern_bindings(&pat, &name, &expr.get_type())?;
-            let mut bindings = vec![TypedStmt::Asgn(name.clone(), expr)];
+            let mut pat_bindings =
+                self.generate_pattern_bindings(&pat, &name, &typed_rhs.get_type())?;
+            let mut bindings = vec![TypedStmt::Asgn(name.clone(), typed_rhs)];
             bindings.append(&mut pat_bindings);
             Ok(bindings)
         } else {
             Err(TypeError::UnificationFailure {
                 type1: pat_type,
-                type2: expr.get_type(),
+                type2: typed_rhs.get_type(),
             })
         }
     }
@@ -506,19 +505,27 @@ impl TypeChecker {
             },
             Expr::Call { callee, args } => {
                 let typed_callee = self.expr(*callee)?;
-                let mut typed_args = Vec::new();
-                for arg in args {
-                    typed_args.push(self.expr(arg)?);
-                }
                 let callee_type = typed_callee.get_type();
-                if let Type::Arrow(args_type, return_type) = &(*callee_type) {
+                let (params_type, return_type) = match &(*callee_type) {
+                    Type::Arrow(params_type, return_type) => {
+                        (params_type.clone(), return_type.clone())
+                    }
+                    Type::Var(_) => (self.get_fresh_type_var(), self.get_fresh_type_var()),
+                    _ => return Err(TypeError::CalleeNotFunction),
+                };
+                let typed_args = self.expr(*args)?;
+                let args_type = typed_args.get_type();
+                if self.unify(&params_type, &args_type) {
                     Ok(TypedExpr::Call {
                         callee: Box::new(typed_callee),
-                        args: typed_args,
-                        type_: args_type.clone(),
+                        args: Box::new(typed_args),
+                        type_: return_type,
                     })
                 } else {
-                    Err(TypeError::CalleeNotFunction)
+                    Err(TypeError::UnificationFailure {
+                        type1: params_type,
+                        type2: args_type.clone(),
+                    })
                 }
             }
             _ => Err(TypeError::NotImplemented),
@@ -583,7 +590,7 @@ impl TypeChecker {
             (Type::Int, Type::Bool) | (Type::Bool, Type::Int) => true,
             // TODO: We need a way to look up usages of type vars and
             // convert them to the other type with unification
-            (Type::Var(name), t2) | (t2, Type::Var(name)) => true,
+            (Type::Var(_), _) | (_, Type::Var(_)) => true,
             _ => false,
         }
     }

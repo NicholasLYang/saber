@@ -86,17 +86,11 @@ impl CodeGenerator {
                     scope_index: _,
                     params,
                     body,
-                    param_type,
+                    param_type: _,
                     return_type,
                 } = expr
                 {
-                    return self.generate_function_binding(
-                        name,
-                        params,
-                        return_type,
-                        param_type,
-                        body,
-                    );
+                    return self.generate_function_binding(name, params, return_type, body);
                 }
                 Err(GenerationError::NotImplemented)?
             }
@@ -110,7 +104,6 @@ impl CodeGenerator {
         name: &Name,
         params: &Vec<(Name, Arc<Type>)>,
         return_type: &Arc<Type>,
-        param_type: &Arc<Type>,
         body: &TypedStmt,
     ) -> Result<(FunctionType, FunctionBody, ExportEntry, u32)> {
         let (type_, body, index) = self.generate_function(return_type, params, body)?;
@@ -132,7 +125,7 @@ impl CodeGenerator {
         body: &TypedStmt,
     ) -> Result<(FunctionType, FunctionBody, u32)> {
         let function_type = self.generate_function_type(return_type, params)?;
-        let function_body = self.generate_function_body(body, &function_type)?;
+        let function_body = self.generate_function_body(body)?;
         let function_index = self.function_index;
         self.function_index += 1;
         Ok((function_type, function_body, function_index))
@@ -203,11 +196,7 @@ impl CodeGenerator {
         }
     }
 
-    fn generate_function_body(
-        &mut self,
-        body: &TypedStmt,
-        func_type: &FunctionType,
-    ) -> Result<FunctionBody> {
+    fn generate_function_body(&mut self, body: &TypedStmt) -> Result<FunctionBody> {
         let code = self.generate_stmt(body)?;
         let mut locals = vec![
             LocalEntry {
