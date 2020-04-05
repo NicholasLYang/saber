@@ -1,5 +1,4 @@
 use crate::types::Result;
-use ast::Type;
 use byteorder::{LittleEndian, WriteBytesExt};
 use std::convert::TryInto;
 use std::fs::File;
@@ -14,11 +13,6 @@ pub struct Emitter {
 
 #[derive(Debug, Fail, PartialEq)]
 pub enum EmitError {
-    #[fail(
-        display = "INTERNAL: Invalid function type. Type {} was not an Arrow",
-        type_
-    )]
-    InvalidFunctionType { type_: Type },
     #[fail(display = "Not implemented yet")]
     NotImplemented,
     #[fail(
@@ -69,6 +63,11 @@ pub fn emit_code<T: Write>(mut dest: T, op_code: OpCode) -> Result<()> {
         OpCode::F32Mul => dest.write_u8(0x94),
         OpCode::F32Div => dest.write_u8(0x95),
         OpCode::F32ConvertI32 => dest.write_u8(0xb2),
+        OpCode::SetLocal(i) => {
+            dest.write_u8(0x21)?;
+            leb128::write::unsigned(&mut dest, i.into())?;
+            Ok(())
+        }
         OpCode::GetLocal(i) => {
             dest.write_u8(0x20)?;
             leb128::write::unsigned(&mut dest, i.into())?;

@@ -9,6 +9,6 @@
   "author": "Nicholas Yang <nick@nicholasyang.com> (nicholasyang.com)",
   "license": "ISC",
   "dependencies": {
-    "wabt": "^1.0.6"
+    "wabt": "^1.0.13"
   }
 }

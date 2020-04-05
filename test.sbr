@@ -1,3 +1,7 @@
-let a = \(b: int, c: int, d: float): float => (b + c + d)
+let a = \(b: int, c: int): float => {
+  let d: float = 30.2;
+  let b: float = 20.1;
+  return b + c + d;
+}
 
 

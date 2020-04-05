@@ -12,17 +12,10 @@ use wasm::{
 pub enum GenerationError {
     #[fail(display = "Operator '{}' is not valid for type {}", op, type_)]
     InvalidOperator { op: Op, type_: Type },
-    #[fail(display = "Local variable cannot have type: {}", type_)]
-    InvalidLocal { type_: WasmType },
     #[fail(display = "Unsupported value, probably string")]
     UnsupportedValue,
-    #[fail(
-        display = "INTERNAL: Invalid function type. Type {:?} was not an Arrow",
-        type_
-    )]
-    InvalidFunctionType { type_: Arc<Type> },
-    #[fail(display = "Cannot have () as param type")]
-    EmptyParamType,
+    #[fail(display = "Cannot have () as type")]
+    EmptyType,
     #[fail(display = "Could not infer type var {:?}", type_)]
     CouldNotInfer { type_: Arc<Type> },
     #[fail(display = "Not implemented yet!")]
@@ -33,8 +26,6 @@ pub enum GenerationError {
     DestructureFunctionBinding,
     #[fail(display = "Cannot find variable with name '{}'", name)]
     UndefinedVar { name: String },
-    #[fail(display = "Somehow you have 2^32 args...")]
-    TooManyArgs,
     #[fail(display = "Cannot convert type {} to type {}", t1, t2)]
     CannotConvert { t1: Type, t2: Type },
 }
@@ -47,6 +38,9 @@ pub struct CodeGenerator {
     var_indices: HashMap<Name, usize>,
     // The local variables for current function.
     local_variables: Vec<WasmType>,
+    // Parameter count. Important for computing offsets and generating
+    // local_entries
+    param_count: usize,
 }
 
 type Result<T> = std::result::Result<T, GenerationError>;
@@ -58,6 +52,7 @@ impl CodeGenerator {
             symbol_table,
             var_indices: HashMap::new(),
             local_variables: Vec::new(),
+            param_count: 0,
         }
     }
 
@@ -142,15 +137,14 @@ impl CodeGenerator {
         for (param_name, param_type) in params {
             let wasm_type = self
                 .generate_wasm_type(param_type)?
-                .ok_or(GenerationError::EmptyParamType)?;
+                .ok_or(GenerationError::EmptyType)?;
             self.local_variables.push(wasm_type.clone());
             self.var_indices
                 .insert(*param_name, self.local_variables.len() - 1);
+            self.param_count += 1;
             wasm_param_types.push(wasm_type);
         }
-        println!("RETURN: {:?}", return_type);
         let return_type = self.generate_wasm_type(&return_type)?;
-        println!("WASM RETURN: {:?}", return_type);
         Ok(FunctionType {
             param_types: wasm_param_types,
             return_type,
@@ -185,6 +179,17 @@ impl CodeGenerator {
     fn generate_stmt(&mut self, stmt: &TypedStmt) -> Result<Vec<OpCode>> {
         match stmt {
             TypedStmt::Return(expr) => self.generate_expr(expr),
+            TypedStmt::Asgn(name, expr) => {
+                let wasm_type = self
+                    .generate_wasm_type(&expr.get_type())?
+                    .ok_or(GenerationError::EmptyType)?;
+                self.local_variables.push(wasm_type);
+                let local_index = self.local_variables.len() - 1;
+                self.var_indices.insert(*name, local_index);
+                let mut opcodes = self.generate_expr(expr)?;
+                opcodes.push(OpCode::SetLocal(local_index.try_into().unwrap()));
+                Ok(opcodes)
+            }
             TypedStmt::Block(stmts) => {
                 let mut opcodes = Vec::new();
                 for stmt in stmts {
@@ -198,38 +203,14 @@ impl CodeGenerator {
 
     fn generate_function_body(&mut self, body: &TypedStmt) -> Result<FunctionBody> {
         let code = self.generate_stmt(body)?;
-        let mut locals = vec![
-            LocalEntry {
-                count: 0,
-                type_: WasmType::i32,
-            },
-            LocalEntry {
-                count: 0,
-                type_: WasmType::i64,
-            },
-            LocalEntry {
-                count: 0,
-                type_: WasmType::f32,
-            },
-            LocalEntry {
-                count: 0,
-                type_: WasmType::f64,
-            },
-        ];
-        for local_type in &self.local_variables {
-            let index = match local_type {
-                WasmType::i32 => 0,
-                WasmType::i64 => 1,
-                WasmType::f32 => 2,
-                WasmType::f64 => 3,
-                type_ => {
-                    return Err((GenerationError::InvalidLocal {
-                        type_: type_.clone(),
-                    })
-                    .into())
-                }
-            };
-            locals[index].count += 1;
+        let mut locals = Vec::new();
+        // We want to generate only the locals not params so we skip
+        // to after the params
+        for local_type in &self.local_variables[self.param_count..] {
+            locals.push(LocalEntry {
+                count: 1,
+                type_: local_type.clone(),
+            })
         }
         Ok(FunctionBody { locals, code })
     }

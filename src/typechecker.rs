@@ -413,6 +413,7 @@ impl TypeChecker {
             } else {
                 self.symbol_table.get_fresh_name()
             };
+            self.insert_var(name, typed_rhs.get_type());
             let mut pat_bindings =
                 self.generate_pattern_bindings(&pat, &name, &typed_rhs.get_type())?;
             let mut bindings = vec![TypedStmt::Asgn(name.clone(), typed_rhs)];

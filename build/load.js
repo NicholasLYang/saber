@@ -7,7 +7,7 @@ const instantiate = async (fileName) => {
     const module = await WebAssembly.compile(buffer);
     const instance = await WebAssembly.instantiate(module);
     let wasm = instance.exports;
-    return wasm.a(10, 11.2, 12);
+    return wasm.a(10, 11);
 };
 
 const buildToWasm = (fileName) => {
