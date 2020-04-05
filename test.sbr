@@ -1,7 +1,4 @@
 let a = \(b: int, c: int): float => {
-  let d: float = 30.2;
-  let b: float = 20.1;
+  let d: float = 10.2;
   return b + c + d;
 }
-
-

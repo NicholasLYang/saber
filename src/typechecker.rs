@@ -8,6 +8,8 @@ use utils::SymbolTable;
 pub enum TypeError {
     #[fail(display = "Could not determine type of '{}'", name)]
     InferFailure { name: String },
+    #[fail(display = "Variable not defined: '{}'", name)]
+    VarNotDefined { name: String },
     #[fail(display = "Not implemented yet")]
     NotImplemented,
     #[fail(
@@ -465,7 +467,7 @@ impl TypeChecker {
                     name,
                     type_: type_.clone(),
                 }),
-                None => Err(TypeError::InferFailure {
+                None => Err(TypeError::VarNotDefined {
                     name: self.symbol_table.get_str(&name).to_string(),
                 }),
             },

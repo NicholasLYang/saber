@@ -176,9 +176,17 @@ impl CodeGenerator {
             })?)
     }
 
-    fn generate_stmt(&mut self, stmt: &TypedStmt) -> Result<Vec<OpCode>> {
+    fn generate_stmt(&mut self, stmt: &TypedStmt, is_last: bool) -> Result<Vec<OpCode>> {
         match stmt {
-            TypedStmt::Return(expr) => self.generate_expr(expr),
+            TypedStmt::Return(expr) => {
+                if is_last {
+                    self.generate_expr(expr)
+                } else {
+                    let mut opcodes = self.generate_expr(expr)?;
+                    opcodes.push(OpCode::Return);
+                    Ok(opcodes)
+                }
+            }
             TypedStmt::Asgn(name, expr) => {
                 let wasm_type = self
                     .generate_wasm_type(&expr.get_type())?
@@ -192,8 +200,8 @@ impl CodeGenerator {
             }
             TypedStmt::Block(stmts) => {
                 let mut opcodes = Vec::new();
-                for stmt in stmts {
-                    opcodes.append(&mut self.generate_stmt(stmt)?);
+                for (i, stmt) in stmts.iter().enumerate() {
+                    opcodes.append(&mut self.generate_stmt(stmt, i == stmts.len() - 1)?);
                 }
                 Ok(opcodes)
             }
@@ -202,7 +210,7 @@ impl CodeGenerator {
     }
 
     fn generate_function_body(&mut self, body: &TypedStmt) -> Result<FunctionBody> {
-        let code = self.generate_stmt(body)?;
+        let code = self.generate_stmt(body, true)?;
         let mut locals = Vec::new();
         // We want to generate only the locals not params so we skip
         // to after the params

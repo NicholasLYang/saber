@@ -31,13 +31,20 @@ mod types;
 mod utils;
 mod wasm;
 
-fn main() -> Result<()> {
+fn main() {
     let args: Vec<String> = env::args().collect();
 
-    if args.len() < 2 {
+    let res = if args.len() < 2 {
         run_repl()
     } else {
         read_file(&args[1])
+    };
+    match res {
+        Ok(_) => (),
+        Err(err) => {
+            println!("{}", err);
+            ()
+        }
     }
 }
 
@@ -50,7 +57,6 @@ fn read_file(file_name: &String) -> Result<()> {
     let parser_out = parser.stmts()?;
     let mut typechecker = TypeChecker::new(parser.get_symbol_table());
     let typed_program = typechecker.check_program(parser_out)?;
-    println!("{:?}", typed_program);
     let mut code_generator = CodeGenerator::new(typechecker.get_symbol_table());
     let program = code_generator.generate_program(typed_program)?;
     let out_file = File::create("build/out.wasm")?;

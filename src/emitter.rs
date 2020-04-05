@@ -73,6 +73,7 @@ pub fn emit_code<T: Write>(mut dest: T, op_code: OpCode) -> Result<()> {
             leb128::write::unsigned(&mut dest, i.into())?;
             Ok(())
         }
+        OpCode::Return => dest.write_u8(0x0f),
         OpCode::End => dest.write_u8(0x0b),
     }?;
     Ok(())

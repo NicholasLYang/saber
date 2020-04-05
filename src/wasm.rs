@@ -26,6 +26,7 @@ pub enum OpCode {
     F32ConvertI32,
     SetLocal(u32),
     GetLocal(u32),
+    Return,
 }
 
 #[derive(Debug, Clone, PartialEq)]
