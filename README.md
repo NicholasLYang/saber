@@ -21,7 +21,8 @@ hopefully I'll be able to port it to other platforms.
   - Get closures working
 - Code gen
   - ~~Get something working.~~ (Kinda accomplished?)
-  - Add local variables
+  - ~~Add local variables~~
+  - Add control flow
 
 ## Design
 
@@ -36,3 +37,11 @@ Goals:
 - Lightweight syntax. Avoid using keywords when possible (however,
   will affect syntax highlighting)
 
+## WASM Notes
+
+Locals are stored in local entries in the code section, and params are
+stored in the function types section, but they share the same index
+space.
+
+Remember what is an actual parameter for an op (i.e. goes right after
+the opcode) and what is implicitly read from the stack.
