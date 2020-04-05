@@ -1,4 +1,3 @@
-let a = \(b: int, c: int): float => {
-  let d: float = 10.2;
-  return b + c + d;
+let isEven = \(n: int): bool => {
+  return n == ((n/2) * 2);
 }

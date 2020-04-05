@@ -23,8 +23,8 @@ pub enum TypeError {
     },
     #[fail(display = "Could not unify {} with {}", type1, type2)]
     UnificationFailure { type1: Arc<Type>, type2: Arc<Type> },
-    #[fail(display = "Type {} does not exit", type_name)]
-    TypeDoesNotExist { type_name: Name },
+    #[fail(display = "Type {} does not exist", type_name)]
+    TypeDoesNotExist { type_name: String },
     #[fail(display = "Arity mismatch: Expected {} but got {}", arity1, arity2)]
     ArityMismatch { arity1: usize, arity2: usize },
     //    #[fail(display = "Record contains non indentifier patterns: {:?}", record)]
@@ -62,6 +62,7 @@ fn build_type_names(symbol_table: &mut SymbolTable) -> HashMap<Name, Arc<Type>> 
         ("float", Arc::new(Type::Float)),
         ("char", Arc::new(Type::Char)),
         ("string", Arc::new(Type::String)),
+        ("bool", Arc::new(Type::Bool)),
     ];
     let mut type_names = HashMap::new();
     for (name, type_) in primitive_types {
@@ -231,7 +232,7 @@ impl TypeChecker {
         }
     }
 
-    fn lookup_type_sig(&self, sig: &TypeSig) -> Result<Arc<Type>, TypeError> {
+    fn lookup_type_sig(&mut self, sig: &TypeSig) -> Result<Arc<Type>, TypeError> {
         match sig {
             TypeSig::Array(sig) => {
                 let type_ = self.lookup_type_sig(sig)?;
@@ -242,7 +243,7 @@ impl TypeChecker {
                     Ok(type_.clone())
                 } else {
                     Err(TypeError::TypeDoesNotExist {
-                        type_name: name.clone(),
+                        type_name: self.symbol_table.get_str(name).to_string(),
                     })
                 }
             }

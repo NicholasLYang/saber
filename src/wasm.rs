@@ -16,6 +16,8 @@ pub enum OpCode {
     I32Sub,
     I32Mul,
     I32Div,
+    I32Eq,
+    I32GreaterSigned,
     F32Add,
     F32Sub,
     F32Mul,
@@ -26,7 +28,10 @@ pub enum OpCode {
     F32ConvertI32,
     SetLocal(u32),
     GetLocal(u32),
+    If,
+    Else,
     Return,
+    Unreachable,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -41,6 +46,7 @@ pub enum WasmType {
     f64,
     AnyFunction,
     Function,
+    Empty,
 }
 
 impl fmt::Display for WasmType {
@@ -55,6 +61,7 @@ impl fmt::Display for WasmType {
                 WasmType::f64 => "Wasm f64",
                 WasmType::AnyFunction => "Wasm AnyFunction",
                 WasmType::Function => "Wasm Function",
+                WasmType::Empty => "Wasm Empty",
             }
         )
     }
@@ -69,6 +76,7 @@ impl From<WasmType> for u64 {
             WasmType::f64 => 0x7c,
             WasmType::AnyFunction => 0x70,
             WasmType::Function => 0x60,
+            WasmType::Empty => 0x40,
         }
     }
 }

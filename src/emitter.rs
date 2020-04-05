@@ -58,6 +58,8 @@ pub fn emit_code<T: Write>(mut dest: T, op_code: OpCode) -> Result<()> {
         OpCode::I32Sub => dest.write_u8(0x6b),
         OpCode::I32Mul => dest.write_u8(0x6c),
         OpCode::I32Div => dest.write_u8(0x6d),
+        OpCode::I32Eq => dest.write_u8(0x46),
+        OpCode::I32GreaterSigned => dest.write_u8(0x4a),
         OpCode::F32Add => dest.write_u8(0x92),
         OpCode::F32Sub => dest.write_u8(0x93),
         OpCode::F32Mul => dest.write_u8(0x94),
@@ -73,7 +75,10 @@ pub fn emit_code<T: Write>(mut dest: T, op_code: OpCode) -> Result<()> {
             leb128::write::unsigned(&mut dest, i.into())?;
             Ok(())
         }
+        OpCode::If => dest.write_u8(0x04),
+        OpCode::Else => dest.write_u8(0x05),
         OpCode::Return => dest.write_u8(0x0f),
+        OpCode::Unreachable => dest.write_u8(0x00),
         OpCode::End => dest.write_u8(0x0b),
     }?;
     Ok(())
