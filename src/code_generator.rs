@@ -19,6 +19,8 @@ pub enum GenerationError {
         input_type: Type,
         result_type: Type,
     },
+    #[fail(display = "Function '{}' not defined", name)]
+    FunctionNotDefined { name: String },
     #[fail(display = "Unsupported value, probably string")]
     UnsupportedValue,
     #[fail(display = "Cannot have () as type")]
@@ -39,8 +41,9 @@ pub enum GenerationError {
 
 pub struct CodeGenerator {
     /// Counter for function generation
-    function_index: u32,
+    current_function: usize,
     symbol_table: SymbolTable,
+    function_indices: HashMap<Name, usize>,
     // Map from var name to index in local_variables
     var_indices: HashMap<Name, usize>,
     // The local variables for current function.
@@ -55,8 +58,9 @@ type Result<T> = std::result::Result<T, GenerationError>;
 impl CodeGenerator {
     pub fn new(symbol_table: SymbolTable) -> Self {
         CodeGenerator {
-            function_index: 0,
+            current_function: 0,
             symbol_table,
+            function_indices: HashMap::new(),
             var_indices: HashMap::new(),
             local_variables: Vec::new(),
             param_count: 0,
@@ -70,7 +74,9 @@ impl CodeGenerator {
             program_data.type_section.push(type_);
             program_data.code_section.push(body);
             program_data.exports_section.push(entry);
-            program_data.function_section.push(index);
+            program_data
+                .function_section
+                .push(index.try_into().unwrap());
         }
         Ok(program_data)
     }
@@ -78,7 +84,7 @@ impl CodeGenerator {
     pub fn generate_top_level_stmt(
         &mut self,
         stmt: &TypedStmt,
-    ) -> Result<(FunctionType, FunctionBody, ExportEntry, u32)> {
+    ) -> Result<(FunctionType, FunctionBody, ExportEntry, usize)> {
         match stmt {
             TypedStmt::Asgn(name, expr) => {
                 // If the rhs is a function, we want to generate a
@@ -107,14 +113,17 @@ impl CodeGenerator {
         params: &Vec<(Name, Arc<Type>)>,
         return_type: &Arc<Type>,
         body: &TypedStmt,
-    ) -> Result<(FunctionType, FunctionBody, ExportEntry, u32)> {
-        let (type_, body, index) = self.generate_function(return_type, params, body)?;
+    ) -> Result<(FunctionType, FunctionBody, ExportEntry, usize)> {
+        let index = self.current_function;
+        self.function_indices.insert(*name, index);
+        let (type_, body) = self.generate_function(return_type, params, body)?;
         let name = self.symbol_table.get_str(name);
         let entry = ExportEntry {
             field_str: name.as_bytes().to_vec(),
             kind: ExternalKind::Function,
-            index,
+            index: index.try_into().unwrap(),
         };
+        self.current_function += 1;
         self.var_indices = HashMap::new();
         self.local_variables = Vec::new();
         Ok((type_, body, entry, index))
@@ -125,13 +134,11 @@ impl CodeGenerator {
         return_type: &Arc<Type>,
         params: &Vec<(Name, Arc<Type>)>,
         body: &TypedStmt,
-    ) -> Result<(FunctionType, FunctionBody, u32)> {
+    ) -> Result<(FunctionType, FunctionBody)> {
         let return_type = self.generate_wasm_type(&return_type)?;
         let function_type = self.generate_function_type(&return_type, params)?;
         let function_body = self.generate_function_body(body, return_type)?;
-        let function_index = self.function_index;
-        self.function_index += 1;
-        Ok((function_type, function_body, function_index))
+        Ok((function_type, function_body))
     }
 
     // Generates function type. Also inserts params into local_variables.
@@ -298,6 +305,25 @@ impl CodeGenerator {
             TypedExpr::Var { name, type_: _ } => {
                 let index = self.get_params_index(&name)?;
                 Ok(vec![OpCode::GetLocal(index.try_into().unwrap())])
+            }
+            TypedExpr::Call {
+                callee,
+                args,
+                type_: _,
+            } => {
+                if let TypedExpr::Var { name, type_: _ } = &**callee {
+                    let mut opcodes = Vec::new();
+                    let index = *self.function_indices.get(name).ok_or(
+                        GenerationError::FunctionNotDefined {
+                            name: self.symbol_table.get_str(name).to_string(),
+                        },
+                    )?;
+                    opcodes.append(&mut self.generate_expr(args)?);
+                    opcodes.push(OpCode::Call((index).try_into().unwrap()));
+                    Ok(opcodes)
+                } else {
+                    Err(GenerationError::NotImplemented)
+                }
             }
             TypedExpr::BinOp {
                 op,

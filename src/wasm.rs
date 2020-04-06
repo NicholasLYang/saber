@@ -31,6 +31,7 @@ pub enum OpCode {
     If,
     Else,
     Return,
+    Call(u32),
     Unreachable,
 }
 

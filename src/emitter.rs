@@ -78,6 +78,11 @@ pub fn emit_code<T: Write>(mut dest: T, op_code: OpCode) -> Result<()> {
         OpCode::If => dest.write_u8(0x04),
         OpCode::Else => dest.write_u8(0x05),
         OpCode::Return => dest.write_u8(0x0f),
+        OpCode::Call(i) => {
+            dest.write_u8(0x10)?;
+            leb128::write::unsigned(&mut dest, i.into())?;
+            Ok(())
+        }
         OpCode::Unreachable => dest.write_u8(0x00),
         OpCode::End => dest.write_u8(0x0b),
     }?;

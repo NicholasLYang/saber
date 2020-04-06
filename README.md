@@ -20,9 +20,13 @@ hopefully I'll be able to port it to other platforms.
 - Lexical Analysis
   - Get closures working
 - Code gen
-  - ~~Get something working.~~ (Kinda accomplished?)
+  - ~~Get something working.~~
   - ~~Add local variables~~
-  - Add control flow
+  - ~~Add control flow~~ (Kinda)
+  - ~~Add function calls~~ (Kinda)
+- Tests/Debugging
+  - Write some tests
+  - Add locations in errors with row/col
 
 ## Design
 
