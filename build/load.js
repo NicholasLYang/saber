@@ -8,7 +8,7 @@ const instantiate = async (fileName) => {
     const instance = await WebAssembly.instantiate(module);
     let wasm = instance.exports;
     for (let i = 0; i < 10; i++) {
-	console.log(wasm.isEven(i));
+	console.log(wasm.fact(i));
     }
 };
 
