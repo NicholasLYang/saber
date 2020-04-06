@@ -55,9 +55,9 @@ fn read_file(file_name: &String) -> Result<()> {
     let lexer = lexer::Lexer::new(&contents);
     let mut parser = Parser::new(lexer);
     let parser_out = parser.stmts()?;
-    let mut typechecker = TypeChecker::new(parser.get_symbol_table());
+    let mut typechecker = TypeChecker::new(parser.get_name_table());
     let typed_program = typechecker.check_program(parser_out)?;
-    let mut code_generator = CodeGenerator::new(typechecker.get_symbol_table());
+    let mut code_generator = CodeGenerator::new(typechecker.get_name_table());
     let program = code_generator.generate_program(typed_program)?;
     let out_file = File::create("build/out.wasm")?;
     let mut emitter = Emitter::new(out_file);
@@ -84,8 +84,8 @@ fn run_repl() -> Result<()> {
         let lexer = lexer::Lexer::new(&input);
         let mut parser = Parser::new(lexer);
         let parser_out = parser.stmt()?;
-        let symbol_table = parser.get_symbol_table();
-        let mut typechecker = TypeChecker::new(symbol_table);
+        let name_table = parser.get_name_table();
+        let mut typechecker = TypeChecker::new(name_table);
         let typed_stmt = typechecker.stmt(parser_out)?;
         println!("{:#?}", typed_stmt);
     }

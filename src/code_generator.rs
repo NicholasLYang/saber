@@ -2,7 +2,7 @@ use ast::{Name, Op, Type, TypedExpr, TypedStmt, Value};
 use im::hashmap::HashMap;
 use std::convert::TryInto;
 use std::sync::Arc;
-use utils::SymbolTable;
+use utils::NameTable;
 use wasm::{
     ExportEntry, ExternalKind, FunctionBody, FunctionType, LocalEntry, OpCode, ProgramData,
     WasmType,
@@ -42,7 +42,7 @@ pub enum GenerationError {
 pub struct CodeGenerator {
     /// Counter for function generation
     current_function: usize,
-    symbol_table: SymbolTable,
+    name_table: NameTable,
     function_indices: HashMap<Name, usize>,
     // Map from var name to index in local_variables
     var_indices: HashMap<Name, usize>,
@@ -58,10 +58,10 @@ pub struct CodeGenerator {
 type Result<T> = std::result::Result<T, GenerationError>;
 
 impl CodeGenerator {
-    pub fn new(symbol_table: SymbolTable) -> Self {
+    pub fn new(name_table: NameTable) -> Self {
         CodeGenerator {
             current_function: 0,
-            symbol_table,
+            name_table,
             function_indices: HashMap::new(),
             var_indices: HashMap::new(),
             local_variables: Vec::new(),
@@ -107,7 +107,7 @@ impl CodeGenerator {
             }
             TypedStmt::Return(_) => Err(GenerationError::TopLevelReturn)?,
             TypedStmt::Export(func_name) => {
-                let name_str = self.symbol_table.get_str(func_name);
+                let name_str = self.name_table.get_str(func_name);
                 let index = *self.function_indices.get(func_name).ok_or(
                     GenerationError::FunctionNotDefined {
                         name: name_str.to_string(),
@@ -135,7 +135,7 @@ impl CodeGenerator {
         let index = self.current_function;
         self.function_indices.insert(*name, index);
         let (type_, body) = self.generate_function(return_type, params, body)?;
-        let name = self.symbol_table.get_str(name);
+        let name = self.name_table.get_str(name);
         self.current_function += 1;
         self.var_indices = HashMap::new();
         self.local_variables = Vec::new();
@@ -217,7 +217,7 @@ impl CodeGenerator {
             .var_indices
             .get(var)
             .ok_or(GenerationError::UndefinedVar {
-                name: self.symbol_table.get_str(var).to_string(),
+                name: self.name_table.get_str(var).to_string(),
             })?)
     }
 
@@ -328,7 +328,7 @@ impl CodeGenerator {
                     let mut opcodes = Vec::new();
                     let index = *self.function_indices.get(name).ok_or(
                         GenerationError::FunctionNotDefined {
-                            name: self.symbol_table.get_str(name).to_string(),
+                            name: self.name_table.get_str(name).to_string(),
                         },
                     )?;
                     opcodes.append(&mut self.generate_expr(args)?);

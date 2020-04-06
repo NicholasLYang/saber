@@ -2,7 +2,7 @@ use ast::Value;
 use ast::{Expr, Name, Op, Pat, Scope, Stmt, Type, TypeSig, TypedExpr, TypedStmt};
 use im::hashmap::HashMap;
 use std::sync::Arc;
-use utils::SymbolTable;
+use utils::NameTable;
 
 #[derive(Debug, Fail, PartialEq)]
 pub enum TypeError {
@@ -53,10 +53,10 @@ pub struct TypeChecker {
     // Index for type variable names
     type_var_index: usize,
     // Symbol table
-    symbol_table: SymbolTable,
+    name_table: NameTable,
 }
 
-fn build_type_names(symbol_table: &mut SymbolTable) -> HashMap<Name, Arc<Type>> {
+fn build_type_names(name_table: &mut NameTable) -> HashMap<Name, Arc<Type>> {
     let primitive_types = vec![
         ("int", Arc::new(Type::Int)),
         ("float", Arc::new(Type::Float)),
@@ -66,14 +66,14 @@ fn build_type_names(symbol_table: &mut SymbolTable) -> HashMap<Name, Arc<Type>> 
     ];
     let mut type_names = HashMap::new();
     for (name, type_) in primitive_types {
-        let id = symbol_table.insert(name.to_string());
+        let id = name_table.insert(name.to_string());
         type_names.insert(id, type_);
     }
     type_names
 }
 
 impl TypeChecker {
-    pub fn new(mut symbol_table: SymbolTable) -> TypeChecker {
+    pub fn new(mut name_table: NameTable) -> TypeChecker {
         let scopes = vec![Scope {
             names: HashMap::new(),
             parent: None,
@@ -81,15 +81,15 @@ impl TypeChecker {
         TypeChecker {
             scopes,
             current_scope: 0,
-            type_names: build_type_names(&mut symbol_table),
+            type_names: build_type_names(&mut name_table),
             return_type: None,
             type_var_index: 0,
-            symbol_table,
+            name_table,
         }
     }
 
-    pub fn get_symbol_table(self) -> SymbolTable {
-        self.symbol_table
+    pub fn get_name_table(self) -> NameTable {
+        self.name_table
     }
 
     fn get_fresh_type_var(&mut self) -> Arc<Type> {
@@ -243,7 +243,7 @@ impl TypeChecker {
                     Ok(type_.clone())
                 } else {
                     Err(TypeError::TypeDoesNotExist {
-                        type_name: self.symbol_table.get_str(name).to_string(),
+                        type_name: self.name_table.get_str(name).to_string(),
                     })
                 }
             }
@@ -348,7 +348,7 @@ impl TypeChecker {
                 Ok(type_.clone())
             } else {
                 Err(TypeError::FieldDoesNotExist {
-                    name: self.symbol_table.get_str(field_name).to_string(),
+                    name: self.name_table.get_str(field_name).to_string(),
                 })
             }
         } else {
@@ -387,7 +387,7 @@ impl TypeChecker {
                 // TODO: Make this recursive so that we can
                 // flatten bindings
                 for (i, pat) in pats.iter().enumerate() {
-                    let name = self.symbol_table.get_fresh_name();
+                    let name = self.name_table.get_fresh_name();
                     bindings.push(TypedStmt::Asgn(
                         name.clone(),
                         TypedExpr::Field(
@@ -414,7 +414,7 @@ impl TypeChecker {
             let name = if let Pat::Id(name, _) = pat {
                 name
             } else {
-                self.symbol_table.get_fresh_name()
+                self.name_table.get_fresh_name()
             };
             self.insert_var(name, typed_rhs.get_type());
             let mut pat_bindings =
@@ -469,7 +469,7 @@ impl TypeChecker {
                     type_: type_.clone(),
                 }),
                 None => Err(TypeError::VarNotDefined {
-                    name: self.symbol_table.get_str(&name).to_string(),
+                    name: self.name_table.get_str(&name).to_string(),
                 }),
             },
             Expr::BinOp { op, lhs, rhs } => {

@@ -1,10 +1,10 @@
 use bimap::BiMap;
 
-pub struct SymbolTable(BiMap<String, usize>, usize);
+pub struct NameTable(BiMap<String, usize>, usize);
 
-impl SymbolTable {
+impl NameTable {
     pub fn new() -> Self {
-        SymbolTable(BiMap::new(), 0)
+        NameTable(BiMap::new(), 0)
     }
     pub fn insert(&mut self, sym: String) -> usize {
         if let Some(id) = self.0.get_by_left(&sym) {

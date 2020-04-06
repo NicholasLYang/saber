@@ -2,7 +2,7 @@ use crate::ast::{Expr, Name, Op, Pat, Stmt, TypeSig, Value};
 use crate::lexer::{Lexer, LexicalError, Token, TokenDiscriminants};
 use std::fmt;
 use std::fmt::{Debug, Display, Formatter};
-use utils::SymbolTable;
+use utils::NameTable;
 
 pub struct Parser<'input> {
     lexer: Lexer<'input>,
@@ -64,9 +64,9 @@ impl<'input> Parser<'input> {
         }
     }
 
-    // Gets the symbol table. Drops the parser though
-    pub fn get_symbol_table(self) -> SymbolTable {
-        self.lexer.get_symbol_table()
+    // Gets the name table. Drops the parser though
+    pub fn get_name_table(self) -> NameTable {
+        self.lexer.get_name_table()
     }
 
     fn expect(

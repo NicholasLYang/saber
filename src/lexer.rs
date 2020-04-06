@@ -1,5 +1,5 @@
-use crate::utils::SymbolTable;
 use std::str::CharIndices;
+use utils::NameTable;
 
 #[derive(Clone, Debug, PartialEq, EnumDiscriminants)]
 pub enum Token {
@@ -82,7 +82,7 @@ pub enum LexicalError {
 pub struct Lexer<'input> {
     source: &'input str,
     chars: CharIndices<'input>,
-    symbol_table: SymbolTable,
+    name_table: NameTable,
     lookahead: Option<(usize, char)>,
     lookahead2: Option<(usize, char)>,
 }
@@ -96,14 +96,14 @@ impl<'input> Lexer<'input> {
         Lexer {
             source,
             chars,
-            symbol_table: SymbolTable::new(),
+            name_table: NameTable::new(),
             lookahead,
             lookahead2,
         }
     }
 
-    pub fn get_symbol_table(self) -> SymbolTable {
-        self.symbol_table
+    pub fn get_name_table(self) -> NameTable {
+        self.name_table
     }
 
     fn bump(&mut self) -> Option<(usize, char)> {
@@ -235,10 +235,10 @@ impl<'input> Lexer<'input> {
             "export" => Ok((start, Token::Export, end)),
             ident => {
                 let ident = ident.to_string();
-                if let Some(id) = self.symbol_table.get_id(&ident) {
+                if let Some(id) = self.name_table.get_id(&ident) {
                     Ok((start, Token::Ident(*id), end))
                 } else {
-                    let id = self.symbol_table.insert(ident);
+                    let id = self.name_table.insert(ident);
                     Ok((start, Token::Ident(id), end))
                 }
             }
