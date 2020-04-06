@@ -51,6 +51,8 @@ pub struct CodeGenerator {
     // Parameter count. Important for computing offsets and generating
     // local_entries
     param_count: usize,
+    // All the generated code
+    program_data: ProgramData,
 }
 
 type Result<T> = std::result::Result<T, GenerationError>;
@@ -64,27 +66,20 @@ impl CodeGenerator {
             var_indices: HashMap::new(),
             local_variables: Vec::new(),
             param_count: 0,
+            program_data: ProgramData::new(),
         }
     }
 
     pub fn generate_program(&mut self, program: Vec<TypedStmt>) -> Result<ProgramData> {
-        let mut program_data = ProgramData::new();
         for stmt in program {
-            let (type_, body, entry, index) = self.generate_top_level_stmt(&stmt)?;
-            program_data.type_section.push(type_);
-            program_data.code_section.push(body);
-            program_data.exports_section.push(entry);
-            program_data
-                .function_section
-                .push(index.try_into().unwrap());
+            self.generate_top_level_stmt(&stmt)?;
         }
+        let mut program_data = ProgramData::new();
+        std::mem::swap(&mut program_data, &mut self.program_data);
         Ok(program_data)
     }
 
-    pub fn generate_top_level_stmt(
-        &mut self,
-        stmt: &TypedStmt,
-    ) -> Result<(FunctionType, FunctionBody, ExportEntry, usize)> {
+    pub fn generate_top_level_stmt(&mut self, stmt: &TypedStmt) -> Result<()> {
         match stmt {
             TypedStmt::Asgn(name, expr) => {
                 // If the rhs is a function, we want to generate a
@@ -98,11 +93,34 @@ impl CodeGenerator {
                     return_type,
                 } = expr
                 {
-                    return self.generate_function_binding(name, params, return_type, body);
+                    let (type_, body, index) =
+                        self.generate_function_binding(name, params, return_type, body)?;
+                    self.program_data.type_section.push(type_);
+                    self.program_data.code_section.push(body);
+                    self.program_data
+                        .function_section
+                        .push(index.try_into().unwrap());
+                    Ok(())
+                } else {
+                    Err(GenerationError::NotImplemented)?
                 }
-                Err(GenerationError::NotImplemented)?
             }
             TypedStmt::Return(_) => Err(GenerationError::TopLevelReturn)?,
+            TypedStmt::Export(func_name) => {
+                let name_str = self.symbol_table.get_str(func_name);
+                let index = *self.function_indices.get(func_name).ok_or(
+                    GenerationError::FunctionNotDefined {
+                        name: name_str.to_string(),
+                    },
+                )?;
+                let entry = ExportEntry {
+                    field_str: name_str.as_bytes().to_vec(),
+                    kind: ExternalKind::Function,
+                    index: index.try_into().unwrap(),
+                };
+                self.program_data.exports_section.push(entry);
+                Ok(())
+            }
             _ => Err(GenerationError::NotImplemented)?,
         }
     }
@@ -113,20 +131,15 @@ impl CodeGenerator {
         params: &Vec<(Name, Arc<Type>)>,
         return_type: &Arc<Type>,
         body: &TypedStmt,
-    ) -> Result<(FunctionType, FunctionBody, ExportEntry, usize)> {
+    ) -> Result<(FunctionType, FunctionBody, usize)> {
         let index = self.current_function;
         self.function_indices.insert(*name, index);
         let (type_, body) = self.generate_function(return_type, params, body)?;
         let name = self.symbol_table.get_str(name);
-        let entry = ExportEntry {
-            field_str: name.as_bytes().to_vec(),
-            kind: ExternalKind::Function,
-            index: index.try_into().unwrap(),
-        };
         self.current_function += 1;
         self.var_indices = HashMap::new();
         self.local_variables = Vec::new();
-        Ok((type_, body, entry, index))
+        Ok((type_, body, index))
     }
 
     pub fn generate_function(

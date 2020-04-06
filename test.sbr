@@ -5,3 +5,5 @@ let fact = \(n: int): int => {
     return n * fact(n - 1);
   }
 }
+
+export fact;
