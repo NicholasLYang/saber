@@ -129,7 +129,7 @@ impl TypeChecker {
                 Ok(vec![TypedStmt::Expr(typed_expr)])
             }
             Stmt::Function(func_name, params, return_type_sig, body) => {
-                let params_type = self.pat(&params)?;
+                let param_type = self.pat(&params)?;
                 let return_type = if let Some(type_sig) = &return_type_sig {
                     self.lookup_type_sig(type_sig)?
                 } else {
@@ -139,7 +139,7 @@ impl TypeChecker {
                     let mut names = HashMap::new();
                     names.insert(
                         func_name,
-                        Arc::new(Type::Arrow(params_type.clone(), return_type)),
+                        Arc::new(Type::Arrow(param_type.clone(), return_type)),
                     );
                     Scope {
                         names,
@@ -149,9 +149,17 @@ impl TypeChecker {
                 self.scopes.push(func_scope);
                 let previous_scope = self.current_scope;
                 self.current_scope = self.scopes.len() - 1;
-                let rhs = self.func(params, body, return_type_sig, params_type)?;
+                let scope_index = self.current_scope;
+                let (params, body, return_type) = self.func(params, body, return_type_sig)?;
                 self.current_scope = previous_scope;
-                Ok(vec![TypedStmt::Asgn(func_name, rhs)])
+                Ok(vec![TypedStmt::Function {
+                    name: func_name,
+                    params,
+                    param_type,
+                    return_type,
+                    body,
+                    scope_index,
+                }])
             }
             Stmt::Asgn(pat, rhs) => Ok(self.asgn(pat, rhs)?),
             Stmt::If(cond, then_stmt, else_stmt) => {
@@ -430,13 +438,20 @@ impl TypeChecker {
         }
     }
 
+    /**
+     *
+     * BEFORE calling this function, please set up a new scope. Why before?
+     * Because if we're calling this with a function binding, i.e. TypedStmt::Function,
+     * then we need to insert the name into the scope, but if we're calling this with
+     * an anonymous function, i.e. TypedExpr::Function, then we can't do that
+     *
+     **/
     fn func(
         &mut self,
         params: Pat,
         body: Box<Stmt>,
         return_type: Option<TypeSig>,
-        param_type: Arc<Type>,
-    ) -> Result<TypedExpr, TypeError> {
+    ) -> Result<(Vec<(Name, Arc<Type>)>, Box<TypedStmt>, Arc<Type>), TypeError> {
         let func_params = self.get_func_params(&params)?;
         for (name, type_) in &func_params {
             self.insert_var(name.clone(), type_.clone());
@@ -451,13 +466,7 @@ impl TypeChecker {
         let mut return_type = None;
         std::mem::swap(&mut return_type, &mut self.return_type);
         let return_type = return_type.unwrap_or(Arc::new(Type::Unit));
-        Ok(TypedExpr::Function {
-            params: func_params,
-            body: Box::new(TypedStmt::Block(body)),
-            param_type: param_type.clone(),
-            return_type,
-            scope_index: self.current_scope,
-        })
+        Ok((func_params, Box::new(TypedStmt::Block(body)), return_type))
     }
 
     fn expr(&mut self, expr: Expr) -> Result<TypedExpr, TypeError> {
@@ -510,13 +519,21 @@ impl TypeChecker {
                     names: HashMap::new(),
                     parent: Some(self.current_scope),
                 };
-                let params_type = self.pat(&params)?;
+                let param_type = self.pat(&params)?;
                 self.scopes.push(func_scope);
                 let previous_scope = self.current_scope;
                 self.current_scope = self.scopes.len() - 1;
-                let func = self.func(params, body, return_type, params_type);
+                let scope_index = self.current_scope;
+                let (params, body, return_type) = self.func(params, body, return_type)?;
+                let func = TypedExpr::Function {
+                    params,
+                    param_type,
+                    return_type,
+                    body,
+                    scope_index,
+                };
                 self.current_scope = previous_scope;
-                func
+                Ok(func)
             }
             Expr::UnaryOp { op, rhs } => match op {
                 Op::Minus | Op::Plus => {

@@ -21,6 +21,14 @@ pub enum TypedStmt {
     Return(TypedExpr),
     Block(Vec<TypedStmt>),
     If(TypedExpr, Box<TypedStmt>, Option<Box<TypedStmt>>),
+    Function {
+        name: Name,
+        params: Vec<(Name, Arc<Type>)>,
+        param_type: Arc<Type>,
+        return_type: Arc<Type>,
+        body: Box<TypedStmt>,
+        scope_index: usize,
+    },
     Export(Name),
 }
 
@@ -84,6 +92,8 @@ pub enum TypedExpr {
         rhs: Box<TypedExpr>,
         type_: Arc<Type>,
     },
+    // Note: only used for anonymous functions. Functions that are
+    // bound with let are TypedStmt::Function
     Function {
         params: Vec<(Name, Arc<Type>)>,
         param_type: Arc<Type>,

@@ -81,29 +81,22 @@ impl CodeGenerator {
 
     pub fn generate_top_level_stmt(&mut self, stmt: &TypedStmt) -> Result<()> {
         match stmt {
-            TypedStmt::Asgn(name, expr) => {
-                // If the rhs is a function, we want to generate a
-                // function binding (FunctionType, FunctionBody, and
-                // ExportEntry)
-                if let TypedExpr::Function {
-                    scope_index: _,
-                    params,
-                    body,
-                    param_type: _,
-                    return_type,
-                } = expr
-                {
-                    let (type_, body, index) =
-                        self.generate_function_binding(name, params, return_type, body)?;
-                    self.program_data.type_section.push(type_);
-                    self.program_data.code_section.push(body);
-                    self.program_data
-                        .function_section
-                        .push(index.try_into().unwrap());
-                    Ok(())
-                } else {
-                    Err(GenerationError::NotImplemented)?
-                }
+            TypedStmt::Function {
+                name,
+                params,
+                param_type: _,
+                return_type,
+                body,
+                scope_index,
+            } => {
+                let (type_, body, index) =
+                    self.generate_function_binding(name, params, return_type, body)?;
+                self.program_data.type_section.push(type_);
+                self.program_data.code_section.push(body);
+                self.program_data
+                    .function_section
+                    .push(index.try_into().unwrap());
+                Ok(())
             }
             TypedStmt::Return(_) => Err(GenerationError::TopLevelReturn)?,
             TypedStmt::Export(func_name) => {
