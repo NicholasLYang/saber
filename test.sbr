@@ -6,4 +6,12 @@ let fact = \(n: int): int => {
   }
 }
 
+let foo = \(n: int): int => {
+  let bar = \(m: int): int => {
+    return m + 1;
+  }
+  return bar(n);
+}
+
 export fact;
+export foo;

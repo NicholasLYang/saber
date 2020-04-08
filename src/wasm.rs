@@ -82,7 +82,7 @@ impl From<WasmType> for u64 {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FunctionType {
     pub param_types: Vec<WasmType>,
     pub return_type: Option<WasmType>,
@@ -104,6 +104,7 @@ pub enum ImportKind {
     Memory { type_: MemoryType },
     Global { type_: GlobalType },
 }
+
 
 #[derive(Debug)]
 pub struct TableType {
@@ -127,9 +128,9 @@ pub struct GlobalType {
 
 #[derive(Debug)]
 pub struct ProgramData {
-    pub type_section: Vec<FunctionType>,
+    pub type_section: Vec<Option<FunctionType>>,
     pub import_section: Vec<ImportEntry>,
-    pub function_section: Vec<u32>,
+    pub function_section: Vec<usize>,
     pub table_section: Vec<TableType>,
     pub memory_section: Vec<MemoryType>,
     pub global_section: Vec<(GlobalType, Vec<OpCode>)>,
@@ -141,7 +142,7 @@ pub struct ProgramData {
 impl ProgramData {
     pub fn new(func_count: usize) -> Self {
         ProgramData {
-            type_section: Vec::new(),
+            type_section: vec![None; func_count],
             import_section: Vec::new(),
             function_section: vec![0; func_count],
             table_section: Vec::new(),

@@ -7,8 +7,6 @@ use utils::NameTable;
 
 #[derive(Debug, Fail, PartialEq)]
 pub enum TypeError {
-    #[fail(display = "Could not determine type of '{}'", name)]
-    InferFailure { name: String },
     #[fail(display = "Variable not defined: '{}'", name)]
     VarNotDefined { name: String },
     #[fail(display = "Not implemented yet")]
@@ -26,8 +24,6 @@ pub enum TypeError {
     UnificationFailure { type1: Arc<Type>, type2: Arc<Type> },
     #[fail(display = "Type {} does not exist", type_name)]
     TypeDoesNotExist { type_name: String },
-    #[fail(display = "Arity mismatch: Expected {} but got {}", arity1, arity2)]
-    ArityMismatch { arity1: usize, arity2: usize },
     #[fail(display = "Field {} does not exist in record", name)]
     FieldDoesNotExist { name: String },
     #[fail(display = "Type {} is not a record", type_)]
@@ -121,7 +117,7 @@ impl TypeChecker {
                     .insert_function(func_name, params_type.clone(), return_type);
                 let previous_scope = self.symbol_table.push_scope();
                 let (params, body, return_type) = self.func(params, body, return_type_sig)?;
-                let func_scope = self.symbol_table.restore_scope(previous_scope);
+                let func_scope = self.symbol_table.set_scope(previous_scope);
                 Ok(vec![TypedStmt::Function {
                     name: func_name,
                     params,
@@ -443,7 +439,7 @@ impl TypeChecker {
                         name,
                         type_: Arc::new(Type::Arrow(params_type.clone(), return_type.clone())),
                     }),
-                    SymbolTableEntry::Var { index: _, var_type } => Ok(TypedExpr::Var {
+                    SymbolTableEntry::Var { var_type } => Ok(TypedExpr::Var {
                         name,
                         type_: var_type.clone(),
                     }),
@@ -486,7 +482,7 @@ impl TypeChecker {
                 let params_type = self.pat(&params)?;
                 let previous_scope = self.symbol_table.push_scope();
                 let (params, body, return_type) = self.func(params, body, return_type)?;
-                let func_scope = self.symbol_table.restore_scope(previous_scope);
+                let func_scope = self.symbol_table.set_scope(previous_scope);
                 let func = TypedExpr::Function {
                     params,
                     params_type,

@@ -34,8 +34,6 @@ pub enum GenerationError {
     NotReachable,
     #[fail(display = "Cannot return at top level")]
     TopLevelReturn,
-    #[fail(display = "Cannot destructure function binding")]
-    DestructureFunctionBinding,
     #[fail(display = "Cannot find variable with name '{}'", name)]
     UndefinedVar { name: String },
     #[fail(display = "Cannot convert type {} to type {}", t1, t2)]
@@ -46,8 +44,6 @@ pub enum GenerationError {
 
 pub struct CodeGenerator {
     symbol_table: SymbolTable,
-    current_scope: usize,
-    current_function: usize,
     name_table: NameTable,
     var_indices: HashMap<Name, usize>,
     // The local variables for current function.
@@ -66,8 +62,6 @@ impl CodeGenerator {
         let func_count = symbol_table.get_function_index();
         CodeGenerator {
             symbol_table,
-            current_scope: 0,
-            current_function: 0,
             name_table,
             var_indices: HashMap::new(),
             local_variables: Vec::new(),
@@ -76,9 +70,9 @@ impl CodeGenerator {
         }
     }
 
-    pub fn generate_program(self, program: Vec<TypedStmt>) -> Result<ProgramData> {
+    pub fn generate_program(mut self, program: Vec<TypedStmt>) -> Result<ProgramData> {
         for stmt in program {
-            self.generate_top_level_stmt(&stmt)?;
+            (&mut self).generate_top_level_stmt(&stmt)?;
         }
         Ok(self.program_data)
     }
@@ -93,33 +87,18 @@ impl CodeGenerator {
                 body,
                 scope,
             } => {
-                let entry = self
-                    .symbol_table
-                    .lookup_name_in_scope(&name, self.current_scope)
-                    .unwrap();
-                if let SymbolTableEntry::Function {
-                    index,
-                    params_type: _,
-                    return_type: _,
-                } = entry
-                {
-                    self.current_function = *index;
-                    let (type_, body) =
-                        self.generate_function_binding(name, params, return_type, body)?;
-                    self.program_data.type_section[index] = type_;
-                    self.program_data.code_section.push(body);
-                    self.program_data.function_section[index] = index;
-                    Ok(())
-                } else {
-                    Err(GenerationError::NotReachable)
-                }
-            }
-            TypedStmt::Return(_) => Err(GenerationError::TopLevelReturn)?,
+                self.param_count = 0;
+                self.local_variables = Vec::new();
+                self.generate_function_binding(*name, *scope, params, return_type, body)
+            },
+            TypedStmt::Return(_) => {
+                Err(GenerationError::TopLevelReturn)?
+            },
             TypedStmt::Export(func_name) => {
                 let name_str = self.name_table.get_str(func_name);
                 let sym_entry = self
                     .symbol_table
-                    .lookup_name_in_scope(func_name, self.current_scope)
+                    .lookup_name(func_name)
                     .ok_or(GenerationError::FunctionNotDefined {
                         name: name_str.to_string(),
                     })?;
@@ -146,16 +125,33 @@ impl CodeGenerator {
 
     pub fn generate_function_binding(
         &mut self,
-        name: &Name,
+        name: Name,
+        scope: usize,
         params: &Vec<(Name, Arc<Type>)>,
         return_type: &Arc<Type>,
         body: &TypedStmt,
-    ) -> Result<(FunctionType, FunctionBody)> {
+    ) -> Result<()> {
+        let entry = self
+            .symbol_table
+            .lookup_name(&name)
+            .unwrap();
+        let index = if let SymbolTableEntry::Function {
+            index,
+            params_type: _,
+            return_type: _,
+        } = entry
+        {
+            *index
+        } else {
+            return Err(GenerationError::NotReachable)
+        };
+        let old_scope = self.symbol_table.set_scope(scope);
         let (type_, body) = self.generate_function(return_type, params, body)?;
-        let name = self.name_table.get_str(name);
-        self.var_indices = HashMap::new();
-        self.local_variables = Vec::new();
-        Ok((type_, body))
+        self.program_data.type_section[index] = Some(type_);
+        self.program_data.code_section.push(body);
+        self.program_data.function_section[index] = index;
+        self.symbol_table.set_scope(old_scope);
+        Ok(())
     }
 
     pub fn generate_function(
@@ -244,6 +240,26 @@ impl CodeGenerator {
         return_type: &Option<WasmType>,
     ) -> Result<Vec<OpCode>> {
         match stmt {
+            TypedStmt::Function {
+                name,
+                params,
+                params_type: _,
+                return_type,
+                body,
+                scope,
+            } => {
+                let mut old_param_count = 0;
+                let mut old_local_variables = Vec::new();
+                let mut old_var_indices = HashMap::new();
+                std::mem::swap(&mut old_param_count, &mut self.param_count);
+                std::mem::swap(&mut old_local_variables, &mut self.local_variables);
+                std::mem::swap(&mut old_var_indices, &mut self.var_indices);
+                self.generate_function_binding(*name, *scope, params, return_type, body)?;
+                std::mem::swap(&mut old_param_count, &mut self.param_count);
+                std::mem::swap(&mut old_local_variables, &mut self.local_variables);
+                std::mem::swap(&mut old_var_indices, &mut self.var_indices);
+                Ok(Vec::new())
+            },
             TypedStmt::Return(expr) => {
                 if is_last {
                     self.generate_expr(expr)
@@ -342,11 +358,17 @@ impl CodeGenerator {
             } => {
                 if let TypedExpr::Var { name, type_: _ } = &**callee {
                     let mut opcodes = Vec::new();
-                    let index = *self.function_indices.get(name).ok_or(
+                    let entry = self.symbol_table.lookup_name(name).ok_or(
                         GenerationError::FunctionNotDefined {
                             name: self.name_table.get_str(name).to_string(),
                         },
                     )?;
+                    let index = if let SymbolTableEntry::Function { index, params_type: _, return_type: _} = entry {
+                        *index
+                    }  else {
+                        // Should not be reachable since this shouldn't typecheck in the first place
+                        return Err(GenerationError::NotReachable)
+                    };
                     opcodes.append(&mut self.generate_expr(args)?);
                     opcodes.push(OpCode::Call((index).try_into().unwrap()));
                     Ok(opcodes)

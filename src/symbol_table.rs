@@ -27,12 +27,6 @@ pub enum SymbolTableEntry {
     },
 }
 
-#[derive(Debug, Fail, PartialEq)]
-pub enum SymbolTableError {
-    #[fail(display = "Cannot pop global scope")]
-    PopGlobalScope,
-}
-
 impl SymbolTable {
     pub fn new() -> Self {
         SymbolTable {
@@ -60,22 +54,22 @@ impl SymbolTable {
         previous_scope
     }
 
-    pub fn restore_scope(&mut self, previous_scope: usize) -> usize {
+    pub fn set_scope(&mut self, previous_scope: usize) -> usize {
         let old_scope = self.current_scope;
         self.current_scope = previous_scope;
         old_scope
     }
 
-    pub fn lookup_name<'a>(&'a self, name: &usize) -> Option<&'a SymbolTableEntry> {
+    pub fn lookup_name(&self, name: &usize) -> Option<&SymbolTableEntry> {
         self.lookup_name_in_scope(name, self.current_scope)
     }
 
     // Looks up name in scope
-    pub fn lookup_name_in_scope<'a>(
-        &'a self,
+    pub fn lookup_name_in_scope(
+        &self,
         name: &usize,
         scope: usize,
-    ) -> Option<&'a SymbolTableEntry> {
+    ) -> Option<&SymbolTableEntry> {
         let mut index = Some(scope);
         while let Some(i) = index {
             if let Some(entry) = self.scopes[i].symbols.get(name) {

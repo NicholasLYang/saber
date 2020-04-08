@@ -4,7 +4,7 @@ use std::convert::TryInto;
 use std::fs::File;
 use std::io::prelude::*;
 use std::mem;
-use wasm::{ExportEntry, FunctionBody, FunctionType, OpCode, WasmType};
+use wasm::{ExportEntry, FunctionBody, FunctionType, OpCode, WasmType, ProgramData};
 
 pub struct Emitter {
     file: File,
@@ -13,8 +13,6 @@ pub struct Emitter {
 
 #[derive(Debug, Fail, PartialEq)]
 pub enum EmitError {
-    #[fail(display = "Not implemented yet")]
-    NotImplemented,
     #[fail(
         display = "INTERNAL: Index is larger than 32 bit integer. Should have been caught earlier"
     )]
@@ -97,6 +95,15 @@ impl Emitter {
         }
     }
 
+    pub fn emit_program(&mut self, program: ProgramData) -> Result<()> {
+        self.emit_prelude()?;
+        self.emit_types_section(program.type_section)?;
+        self.emit_functions_section(program.function_section)?;
+        self.emit_exports_section(program.exports_section)?;
+        self.emit_code_section(program.code_section)?;
+        Ok(())
+    }
+
     pub fn emit_code(&mut self, op_code: OpCode) -> Result<()> {
         emit_code(&mut self.buffer, op_code)
     }
@@ -122,11 +129,13 @@ impl Emitter {
         self.emit_code(OpCode::Version)
     }
 
-    pub fn emit_types_section(&mut self, types: Vec<FunctionType>) -> Result<()> {
+    pub fn emit_types_section(&mut self, types: Vec<Option<FunctionType>>) -> Result<()> {
         self.emit_code(OpCode::SectionId(1))?;
         // Start with a count for number of type definitions
         let mut opcodes = vec![OpCode::Count(types.len().try_into().unwrap())];
         for type_ in types {
+            // TODO: Give a better error than unwrap
+            let type_ = type_.unwrap();
             opcodes.push(OpCode::Type(WasmType::Function));
             opcodes.push(OpCode::Count(usize_to_u32(type_.param_types.len())?));
             for param in &type_.param_types {
@@ -145,11 +154,11 @@ impl Emitter {
         self.write_section(opcodes)
     }
 
-    pub fn emit_functions_section(&mut self, function_type_indices: Vec<u32>) -> Result<()> {
+    pub fn emit_functions_section(&mut self, function_type_indices: Vec<usize>) -> Result<()> {
         self.emit_code(OpCode::SectionId(3))?;
         let mut opcodes = vec![OpCode::Count(usize_to_u32(function_type_indices.len())?)];
         for index in function_type_indices {
-            opcodes.push(OpCode::Index(index));
+            opcodes.push(OpCode::Index(usize_to_u32(index)?));
         }
         self.write_section(opcodes)
     }

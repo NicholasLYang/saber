@@ -59,15 +59,11 @@ fn read_file(file_name: &String) -> Result<()> {
     let mut typechecker = TypeChecker::new(parser.get_name_table());
     let typed_program = typechecker.check_program(parser_out)?;
     let (name_table, symbol_table) = typechecker.get_tables();
-    let mut code_generator = CodeGenerator::new(name_table, symbol_table);
+    let code_generator = CodeGenerator::new(name_table, symbol_table);
     let program = code_generator.generate_program(typed_program)?;
     let out_file = File::create("build/out.wasm")?;
     let mut emitter = Emitter::new(out_file);
-    emitter.emit_prelude()?;
-    emitter.emit_types_section(program.type_section)?;
-    emitter.emit_functions_section(program.function_section)?;
-    emitter.emit_exports_section(program.exports_section)?;
-    emitter.emit_code_section(program.code_section)?;
+    emitter.emit_program(program)?;
     Ok(())
 }
 

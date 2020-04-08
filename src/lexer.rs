@@ -3,8 +3,6 @@ use utils::NameTable;
 
 #[derive(Clone, Debug, PartialEq, EnumDiscriminants)]
 pub enum Token {
-    Illegal,
-    EndOfFile,
     False,
     True,
     Else,

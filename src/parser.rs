@@ -42,8 +42,6 @@ pub enum ParseError {
         display = "Cannot have a type signature on a let function binding (use type signatures in the function!)"
     )]
     FuncBindingTypeSig,
-    #[fail(display = "Not implemented yet")]
-    NotImplemented,
     #[fail(display = "Lexer error: {}", err)]
     LexicalError { err: LexicalError },
     #[fail(display = "Should not be reachable")]
