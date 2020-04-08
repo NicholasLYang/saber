@@ -17,6 +17,7 @@ hopefully I'll be able to port it to other platforms.
   - Typecheck functions
   - Typecheck records
   - Add named types
+  - Constraint solve type variables
 - Lexical Analysis
   - Get closures working
 - Code gen
@@ -24,6 +25,7 @@ hopefully I'll be able to port it to other platforms.
   - ~~Add local variables~~
   - ~~Add control flow~~ (Kinda)
   - ~~Add function calls~~ (Kinda)
+  - ~~Add nested functions~~  
 - Tests/Debugging
   - Write some tests
   - Add locations in errors with row/col
