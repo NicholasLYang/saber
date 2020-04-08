@@ -1,4 +1,3 @@
-use im::hashmap::HashMap;
 use std::fmt;
 use std::sync::Arc;
 pub type Name = usize;
@@ -24,10 +23,10 @@ pub enum TypedStmt {
     Function {
         name: Name,
         params: Vec<(Name, Arc<Type>)>,
-        param_type: Arc<Type>,
+        params_type: Arc<Type>,
         return_type: Arc<Type>,
         body: Box<TypedStmt>,
-        scope_index: usize,
+        scope: usize,
     },
     Export(Name),
 }
@@ -66,12 +65,6 @@ pub enum Expr {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct Scope {
-    pub names: HashMap<Name, Arc<Type>>,
-    pub parent: Option<usize>,
-}
-
-#[derive(Debug, PartialEq, Clone)]
 pub enum TypedExpr {
     Primary {
         value: Value,
@@ -96,7 +89,7 @@ pub enum TypedExpr {
     // bound with let are TypedStmt::Function
     Function {
         params: Vec<(Name, Arc<Type>)>,
-        param_type: Arc<Type>,
+        params_type: Arc<Type>,
         return_type: Arc<Type>,
         body: Box<TypedStmt>,
         scope_index: usize,
@@ -211,8 +204,6 @@ impl fmt::Display for Type {
 pub enum TypeSig {
     Array(Box<TypeSig>),
     Name(Name),
-    Record(Vec<(Name, TypeSig)>),
-    Tuple(Vec<TypeSig>),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -245,9 +236,9 @@ impl TypedExpr {
                 params: _,
                 body: _,
                 scope_index: _,
-                param_type,
+                params_type,
                 return_type,
-            } => Arc::new(Type::Arrow(param_type.clone(), return_type.clone())),
+            } => Arc::new(Type::Arrow(params_type.clone(), return_type.clone())),
             TypedExpr::Field(_, _, type_) => type_.clone(),
             TypedExpr::Call {
                 callee: _,

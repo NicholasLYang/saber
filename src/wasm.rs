@@ -139,11 +139,11 @@ pub struct ProgramData {
 }
 
 impl ProgramData {
-    pub fn new() -> Self {
+    pub fn new(func_count: usize) -> Self {
         ProgramData {
             type_section: Vec::new(),
             import_section: Vec::new(),
-            function_section: Vec::new(),
+            function_section: vec![0; func_count],
             table_section: Vec::new(),
             memory_section: Vec::new(),
             global_section: Vec::new(),

@@ -2,6 +2,7 @@ use ast::{Name, Op, Type, TypedExpr, TypedStmt, Value};
 use im::hashmap::HashMap;
 use std::convert::TryInto;
 use std::sync::Arc;
+use symbol_table::{SymbolTable, SymbolTableEntry};
 use utils::NameTable;
 use wasm::{
     ExportEntry, ExternalKind, FunctionBody, FunctionType, LocalEntry, OpCode, ProgramData,
@@ -29,6 +30,8 @@ pub enum GenerationError {
     CouldNotInfer { type_: Arc<Type> },
     #[fail(display = "Code Generator: Not implemented yet!")]
     NotImplemented,
+    #[fail(display = "Not reachable")]
+    NotReachable,
     #[fail(display = "Cannot return at top level")]
     TopLevelReturn,
     #[fail(display = "Cannot destructure function binding")]
@@ -37,14 +40,15 @@ pub enum GenerationError {
     UndefinedVar { name: String },
     #[fail(display = "Cannot convert type {} to type {}", t1, t2)]
     CannotConvert { t1: Type, t2: Type },
+    #[fail(display = "Cannot export value")]
+    ExportValue,
 }
 
 pub struct CodeGenerator {
-    /// Counter for function generation
+    symbol_table: SymbolTable,
+    current_scope: usize,
     current_function: usize,
     name_table: NameTable,
-    function_indices: HashMap<Name, usize>,
-    // Map from var name to index in local_variables
     var_indices: HashMap<Name, usize>,
     // The local variables for current function.
     local_variables: Vec<WasmType>,
@@ -58,25 +62,25 @@ pub struct CodeGenerator {
 type Result<T> = std::result::Result<T, GenerationError>;
 
 impl CodeGenerator {
-    pub fn new(name_table: NameTable) -> Self {
+    pub fn new(name_table: NameTable, symbol_table: SymbolTable) -> Self {
+        let func_count = symbol_table.get_function_index();
         CodeGenerator {
+            symbol_table,
+            current_scope: 0,
             current_function: 0,
             name_table,
-            function_indices: HashMap::new(),
             var_indices: HashMap::new(),
             local_variables: Vec::new(),
             param_count: 0,
-            program_data: ProgramData::new(),
+            program_data: ProgramData::new(func_count),
         }
     }
 
-    pub fn generate_program(&mut self, program: Vec<TypedStmt>) -> Result<ProgramData> {
+    pub fn generate_program(self, program: Vec<TypedStmt>) -> Result<ProgramData> {
         for stmt in program {
             self.generate_top_level_stmt(&stmt)?;
         }
-        let mut program_data = ProgramData::new();
-        std::mem::swap(&mut program_data, &mut self.program_data);
-        Ok(program_data)
+        Ok(self.program_data)
     }
 
     pub fn generate_top_level_stmt(&mut self, stmt: &TypedStmt) -> Result<()> {
@@ -84,35 +88,57 @@ impl CodeGenerator {
             TypedStmt::Function {
                 name,
                 params,
-                param_type: _,
+                params_type: _,
                 return_type,
                 body,
-                scope_index,
+                scope,
             } => {
-                let (type_, body, index) =
-                    self.generate_function_binding(name, params, return_type, body)?;
-                self.program_data.type_section.push(type_);
-                self.program_data.code_section.push(body);
-                self.program_data
-                    .function_section
-                    .push(index.try_into().unwrap());
-                Ok(())
+                let entry = self
+                    .symbol_table
+                    .lookup_name_in_scope(&name, self.current_scope)
+                    .unwrap();
+                if let SymbolTableEntry::Function {
+                    index,
+                    params_type: _,
+                    return_type: _,
+                } = entry
+                {
+                    self.current_function = *index;
+                    let (type_, body) =
+                        self.generate_function_binding(name, params, return_type, body)?;
+                    self.program_data.type_section[index] = type_;
+                    self.program_data.code_section.push(body);
+                    self.program_data.function_section[index] = index;
+                    Ok(())
+                } else {
+                    Err(GenerationError::NotReachable)
+                }
             }
             TypedStmt::Return(_) => Err(GenerationError::TopLevelReturn)?,
             TypedStmt::Export(func_name) => {
                 let name_str = self.name_table.get_str(func_name);
-                let index = *self.function_indices.get(func_name).ok_or(
-                    GenerationError::FunctionNotDefined {
+                let sym_entry = self
+                    .symbol_table
+                    .lookup_name_in_scope(func_name, self.current_scope)
+                    .ok_or(GenerationError::FunctionNotDefined {
                         name: name_str.to_string(),
-                    },
-                )?;
-                let entry = ExportEntry {
-                    field_str: name_str.as_bytes().to_vec(),
-                    kind: ExternalKind::Function,
-                    index: index.try_into().unwrap(),
-                };
-                self.program_data.exports_section.push(entry);
-                Ok(())
+                    })?;
+                if let SymbolTableEntry::Function {
+                    index,
+                    params_type: _,
+                    return_type: _,
+                } = sym_entry
+                {
+                    let entry = ExportEntry {
+                        field_str: name_str.as_bytes().to_vec(),
+                        kind: ExternalKind::Function,
+                        index: (*index).try_into().unwrap(),
+                    };
+                    self.program_data.exports_section.push(entry);
+                    Ok(())
+                } else {
+                    Err(GenerationError::ExportValue)
+                }
             }
             _ => Err(GenerationError::NotImplemented)?,
         }
@@ -124,15 +150,12 @@ impl CodeGenerator {
         params: &Vec<(Name, Arc<Type>)>,
         return_type: &Arc<Type>,
         body: &TypedStmt,
-    ) -> Result<(FunctionType, FunctionBody, usize)> {
-        let index = self.current_function;
-        self.function_indices.insert(*name, index);
+    ) -> Result<(FunctionType, FunctionBody)> {
         let (type_, body) = self.generate_function(return_type, params, body)?;
         let name = self.name_table.get_str(name);
-        self.current_function += 1;
         self.var_indices = HashMap::new();
         self.local_variables = Vec::new();
-        Ok((type_, body, index))
+        Ok((type_, body))
     }
 
     pub fn generate_function(

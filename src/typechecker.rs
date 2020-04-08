@@ -1,7 +1,8 @@
 use ast::Value;
-use ast::{Expr, Name, Op, Pat, Scope, Stmt, Type, TypeSig, TypedExpr, TypedStmt};
+use ast::{Expr, Name, Op, Pat, Stmt, Type, TypeSig, TypedExpr, TypedStmt};
 use im::hashmap::HashMap;
 use std::sync::Arc;
+use symbol_table::{SymbolTable, SymbolTableEntry};
 use utils::NameTable;
 
 #[derive(Debug, Fail, PartialEq)]
@@ -27,8 +28,6 @@ pub enum TypeError {
     TypeDoesNotExist { type_name: String },
     #[fail(display = "Arity mismatch: Expected {} but got {}", arity1, arity2)]
     ArityMismatch { arity1: usize, arity2: usize },
-    //    #[fail(display = "Record contains non indentifier patterns: {:?}", record)]
-    //    RecordContainsNonIds { record: Pat },
     #[fail(display = "Field {} does not exist in record", name)]
     FieldDoesNotExist { name: String },
     #[fail(display = "Type {} is not a record", type_)]
@@ -41,10 +40,14 @@ pub enum TypeError {
     CalleeNotFunction,
 }
 
+#[derive(Debug, PartialEq, Clone)]
+pub struct Scope {
+    pub names: HashMap<Name, Arc<Type>>,
+    pub parent: Option<usize>,
+}
+
 pub struct TypeChecker {
-    // A symbol table of sorts
-    scopes: Vec<Scope>,
-    current_scope: usize,
+    symbol_table: SymbolTable,
     // Type names. Right now just has the primitives like string,
     // integer, float, char
     type_names: HashMap<Name, Arc<Type>>,
@@ -74,13 +77,8 @@ fn build_type_names(name_table: &mut NameTable) -> HashMap<Name, Arc<Type>> {
 
 impl TypeChecker {
     pub fn new(mut name_table: NameTable) -> TypeChecker {
-        let scopes = vec![Scope {
-            names: HashMap::new(),
-            parent: None,
-        }];
         TypeChecker {
-            scopes,
-            current_scope: 0,
+            symbol_table: SymbolTable::new(),
             type_names: build_type_names(&mut name_table),
             return_type: None,
             type_var_index: 0,
@@ -88,30 +86,14 @@ impl TypeChecker {
         }
     }
 
-    pub fn get_name_table(self) -> NameTable {
-        self.name_table
+    pub fn get_tables(self) -> (NameTable, SymbolTable) {
+        (self.name_table, self.symbol_table)
     }
 
     fn get_fresh_type_var(&mut self) -> Arc<Type> {
         let type_var = Type::Var(self.type_var_index);
         self.type_var_index += 1;
         Arc::new(type_var)
-    }
-
-    fn lookup_var(&self, name: &usize) -> Option<Arc<Type>> {
-        let mut index = Some(self.current_scope);
-        while let Some(i) = index {
-            if let Some(type_) = self.scopes[i].names.get(name) {
-                return Some(type_.clone());
-            }
-            index = self.scopes[i].parent;
-        }
-        None
-    }
-
-    fn insert_var(&mut self, name: usize, type_: Arc<Type>) {
-        let current_scope = self.current_scope;
-        self.scopes[current_scope].names.insert(name, type_);
     }
 
     pub fn check_program(&mut self, program: Vec<Stmt>) -> Result<Vec<TypedStmt>, TypeError> {
@@ -129,36 +111,24 @@ impl TypeChecker {
                 Ok(vec![TypedStmt::Expr(typed_expr)])
             }
             Stmt::Function(func_name, params, return_type_sig, body) => {
-                let param_type = self.pat(&params)?;
+                let params_type = self.pat(&params)?;
                 let return_type = if let Some(type_sig) = &return_type_sig {
                     self.lookup_type_sig(type_sig)?
                 } else {
                     self.get_fresh_type_var()
                 };
-                let func_scope = {
-                    let mut names = HashMap::new();
-                    names.insert(
-                        func_name,
-                        Arc::new(Type::Arrow(param_type.clone(), return_type)),
-                    );
-                    Scope {
-                        names,
-                        parent: Some(self.current_scope),
-                    }
-                };
-                self.scopes.push(func_scope);
-                let previous_scope = self.current_scope;
-                self.current_scope = self.scopes.len() - 1;
-                let scope_index = self.current_scope;
+                self.symbol_table
+                    .insert_function(func_name, params_type.clone(), return_type);
+                let previous_scope = self.symbol_table.push_scope();
                 let (params, body, return_type) = self.func(params, body, return_type_sig)?;
-                self.current_scope = previous_scope;
+                let func_scope = self.symbol_table.restore_scope(previous_scope);
                 Ok(vec![TypedStmt::Function {
                     name: func_name,
                     params,
-                    param_type,
+                    params_type,
                     return_type,
                     body,
-                    scope_index,
+                    scope: func_scope,
                 }])
             }
             Stmt::Asgn(pat, rhs) => Ok(self.asgn(pat, rhs)?),
@@ -210,10 +180,11 @@ impl TypeChecker {
                 )])
             }
             Stmt::Export(name) => {
-                if let None = self.lookup_var(&name) {
-                    let type_ = self.get_fresh_type_var();
-                    self.insert_var(name.clone(), type_);
-                }
+                self.symbol_table
+                    .lookup_name(&name)
+                    .ok_or(TypeError::VarNotDefined {
+                        name: self.name_table.get_str(&name).to_string(),
+                    })?;
                 Ok(vec![TypedStmt::Export(name)])
             }
         }
@@ -255,22 +226,6 @@ impl TypeChecker {
                     })
                 }
             }
-            TypeSig::Record(entries) => {
-                let mut field_types = Vec::new();
-                for (name, type_sig) in entries {
-                    let type_ = self.lookup_type_sig(type_sig)?;
-                    field_types.push((name.clone(), type_));
-                }
-                Ok(Arc::new(Type::Record(field_types)))
-            }
-            TypeSig::Tuple(entries) => {
-                let mut types = Vec::new();
-                for type_sig in entries {
-                    let type_ = self.lookup_type_sig(type_sig)?;
-                    types.push(type_);
-                }
-                Ok(Arc::new(Type::Tuple(types)))
-            }
         }
     }
 
@@ -282,7 +237,7 @@ impl TypeChecker {
             }
             Pat::Id(name, None) => {
                 let type_ = self.get_fresh_type_var();
-                self.insert_var(*name, type_.clone());
+                self.symbol_table.insert_var(*name, type_.clone());
                 Ok(type_)
             }
             Pat::Tuple(pats) => {
@@ -315,7 +270,7 @@ impl TypeChecker {
             }
             Pat::Id(name, None) => {
                 let type_ = self.get_fresh_type_var();
-                self.insert_var(*name, type_.clone());
+                self.symbol_table.insert_var(*name, type_.clone());
                 Ok(vec![(*name, type_)])
             }
             Pat::Tuple(pats) => {
@@ -424,7 +379,7 @@ impl TypeChecker {
             } else {
                 self.name_table.get_fresh_name()
             };
-            self.insert_var(name, typed_rhs.get_type());
+            self.symbol_table.insert_var(name, typed_rhs.get_type());
             let mut pat_bindings =
                 self.generate_pattern_bindings(&pat, &name, &typed_rhs.get_type())?;
             let mut bindings = vec![TypedStmt::Asgn(name.clone(), typed_rhs)];
@@ -454,7 +409,7 @@ impl TypeChecker {
     ) -> Result<(Vec<(Name, Arc<Type>)>, Box<TypedStmt>, Arc<Type>), TypeError> {
         let func_params = self.get_func_params(&params)?;
         for (name, type_) in &func_params {
-            self.insert_var(name.clone(), type_.clone());
+            self.symbol_table.insert_var(name.clone(), type_.clone());
         }
         // Insert return type into typechecker so that
         // typechecker can verify return statements.
@@ -472,15 +427,28 @@ impl TypeChecker {
     fn expr(&mut self, expr: Expr) -> Result<TypedExpr, TypeError> {
         match expr {
             Expr::Primary { value } => Ok(self.value(value)),
-            Expr::Var { name } => match self.lookup_var(&name) {
-                Some(type_) => Ok(TypedExpr::Var {
-                    name,
-                    type_: type_.clone(),
-                }),
-                None => Err(TypeError::VarNotDefined {
-                    name: self.name_table.get_str(&name).to_string(),
-                }),
-            },
+            Expr::Var { name } => {
+                let entry =
+                    self.symbol_table
+                        .lookup_name(&name)
+                        .ok_or(TypeError::VarNotDefined {
+                            name: self.name_table.get_str(&name).to_string(),
+                        })?;
+                match entry {
+                    SymbolTableEntry::Function {
+                        index: _,
+                        params_type,
+                        return_type,
+                    } => Ok(TypedExpr::Var {
+                        name,
+                        type_: Arc::new(Type::Arrow(params_type.clone(), return_type.clone())),
+                    }),
+                    SymbolTableEntry::Var { index: _, var_type } => Ok(TypedExpr::Var {
+                        name,
+                        type_: var_type.clone(),
+                    }),
+                }
+            }
             Expr::BinOp { op, lhs, rhs } => {
                 let typed_lhs = self.expr(*lhs)?;
                 let typed_rhs = self.expr(*rhs)?;
@@ -515,24 +483,17 @@ impl TypeChecker {
                 body,
                 return_type,
             } => {
-                let func_scope = Scope {
-                    names: HashMap::new(),
-                    parent: Some(self.current_scope),
-                };
-                let param_type = self.pat(&params)?;
-                self.scopes.push(func_scope);
-                let previous_scope = self.current_scope;
-                self.current_scope = self.scopes.len() - 1;
-                let scope_index = self.current_scope;
+                let params_type = self.pat(&params)?;
+                let previous_scope = self.symbol_table.push_scope();
                 let (params, body, return_type) = self.func(params, body, return_type)?;
+                let func_scope = self.symbol_table.restore_scope(previous_scope);
                 let func = TypedExpr::Function {
                     params,
-                    param_type,
+                    params_type,
                     return_type,
                     body,
-                    scope_index,
+                    scope_index: func_scope,
                 };
-                self.current_scope = previous_scope;
                 Ok(func)
             }
             Expr::UnaryOp { op, rhs } => match op {

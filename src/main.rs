@@ -26,6 +26,7 @@ mod code_generator;
 mod emitter;
 mod lexer;
 mod parser;
+mod symbol_table;
 mod typechecker;
 mod types;
 mod utils;
@@ -57,7 +58,8 @@ fn read_file(file_name: &String) -> Result<()> {
     let parser_out = parser.stmts()?;
     let mut typechecker = TypeChecker::new(parser.get_name_table());
     let typed_program = typechecker.check_program(parser_out)?;
-    let mut code_generator = CodeGenerator::new(typechecker.get_name_table());
+    let (name_table, symbol_table) = typechecker.get_tables();
+    let mut code_generator = CodeGenerator::new(name_table, symbol_table);
     let program = code_generator.generate_program(typed_program)?;
     let out_file = File::create("build/out.wasm")?;
     let mut emitter = Emitter::new(out_file);
