@@ -9,3 +9,16 @@ code generator (a little messier with types but more self contained)
 
 ## References
 https://en.wikipedia.org/wiki/Lambda_lifting
+
+## Feature Ideas
+
+`this` or `self` keyword in anonymous functions for easier recursion:
+```
+\(n) => {
+  if n < 0 {
+    return 1;
+  } else {
+    return n * this(n - 1)
+  }
+}
+```
