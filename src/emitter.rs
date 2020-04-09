@@ -3,8 +3,7 @@ use byteorder::{LittleEndian, WriteBytesExt};
 use std::convert::TryInto;
 use std::fs::File;
 use std::io::prelude::*;
-use std::mem;
-use wasm::{ExportEntry, FunctionBody, FunctionType, OpCode, WasmType, ProgramData};
+use wasm::{ExportEntry, FunctionBody, FunctionType, OpCode, ProgramData, WasmType};
 
 pub struct Emitter {
     file: File,
@@ -19,7 +18,7 @@ pub enum EmitError {
     IndexTooLarge,
 }
 
-static MAGIC_NUM: u32 = 0x6d736100;
+static MAGIC_NUM: u32 = 0x6d73_6100;
 static VERSION: u32 = 0x1;
 
 pub fn emit_code<T: Write>(mut dest: T, op_code: OpCode) -> Result<()> {
@@ -47,9 +46,7 @@ pub fn emit_code<T: Write>(mut dest: T, op_code: OpCode) -> Result<()> {
         }
         OpCode::F32Const(val) => {
             dest.write_u8(0x43)?;
-            unsafe {
-                dest.write_u32::<LittleEndian>(mem::transmute(val))?;
-            }
+            dest.write_u32::<LittleEndian>(val.to_bits())?;
             Ok(())
         }
         OpCode::I32Add => dest.write_u8(0x6a),
@@ -204,13 +201,13 @@ impl Emitter {
 fn usize_to_u64(i: usize) -> Result<u64> {
     match i.try_into() {
         Ok(i) => Ok(i),
-        Err(_) => Err(EmitError::IndexTooLarge)?,
+        Err(_) => Err(EmitError::IndexTooLarge.into()),
     }
 }
 
 fn usize_to_u32(i: usize) -> Result<u32> {
     match i.try_into() {
         Ok(i) => Ok(i),
-        Err(_) => Err(EmitError::IndexTooLarge)?,
+        Err(_) => Err(EmitError::IndexTooLarge.into()),
     }
 }

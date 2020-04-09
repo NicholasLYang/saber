@@ -172,7 +172,7 @@ impl<'input> Lexer<'input> {
             }
             None => Err(LexicalError::UnterminatedString {
                 location: start_pos,
-            })?,
+            }),
         }
     }
 

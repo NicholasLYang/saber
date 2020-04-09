@@ -90,18 +90,15 @@ impl CodeGenerator {
                 self.param_count = 0;
                 self.local_variables = Vec::new();
                 self.generate_function_binding(*name, *scope, params, return_type, body)
-            },
-            TypedStmt::Return(_) => {
-                Err(GenerationError::TopLevelReturn)?
-            },
+            }
+            TypedStmt::Return(_) => Err(GenerationError::TopLevelReturn),
             TypedStmt::Export(func_name) => {
                 let name_str = self.name_table.get_str(func_name);
-                let sym_entry = self
-                    .symbol_table
-                    .lookup_name(func_name)
-                    .ok_or(GenerationError::FunctionNotDefined {
+                let sym_entry = self.symbol_table.lookup_name(func_name).ok_or(
+                    GenerationError::FunctionNotDefined {
                         name: name_str.to_string(),
-                    })?;
+                    },
+                )?;
                 if let SymbolTableEntry::Function {
                     index,
                     params_type: _,
@@ -119,7 +116,7 @@ impl CodeGenerator {
                     Err(GenerationError::ExportValue)
                 }
             }
-            _ => Err(GenerationError::NotImplemented)?,
+            _ => Err(GenerationError::NotImplemented),
         }
     }
 
@@ -127,14 +124,11 @@ impl CodeGenerator {
         &mut self,
         name: Name,
         scope: usize,
-        params: &Vec<(Name, Arc<Type>)>,
+        params: &[(Name, Arc<Type>)],
         return_type: &Arc<Type>,
         body: &TypedStmt,
     ) -> Result<()> {
-        let entry = self
-            .symbol_table
-            .lookup_name(&name)
-            .unwrap();
+        let entry = self.symbol_table.lookup_name(&name).unwrap();
         let index = if let SymbolTableEntry::Function {
             index,
             params_type: _,
@@ -143,7 +137,7 @@ impl CodeGenerator {
         {
             *index
         } else {
-            return Err(GenerationError::NotReachable)
+            return Err(GenerationError::NotReachable);
         };
         let old_scope = self.symbol_table.set_scope(scope);
         let (type_, body) = self.generate_function(return_type, params, body)?;
@@ -157,7 +151,7 @@ impl CodeGenerator {
     pub fn generate_function(
         &mut self,
         return_type: &Arc<Type>,
-        params: &Vec<(Name, Arc<Type>)>,
+        params: &[(Name, Arc<Type>)],
         body: &TypedStmt,
     ) -> Result<(FunctionType, FunctionBody)> {
         let return_type = self.generate_wasm_type(&return_type)?;
@@ -171,7 +165,7 @@ impl CodeGenerator {
     fn generate_function_type(
         &mut self,
         return_type: &Option<WasmType>,
-        params: &Vec<(Name, Arc<Type>)>,
+        params: &[(Name, Arc<Type>)],
     ) -> Result<FunctionType> {
         let mut wasm_param_types = Vec::new();
         for (param_name, param_type) in params {
@@ -220,16 +214,16 @@ impl CodeGenerator {
             | Type::Tuple(_) => Ok(Some(WasmType::i32)),
             Type::Var(_) => Err(GenerationError::CouldNotInfer {
                 type_: sbr_type.clone(),
-            })?,
+            }),
         }
     }
 
-    fn get_params_index(&mut self, var: &Name) -> Result<usize> {
+    fn get_params_index(&mut self, var: Name) -> Result<usize> {
         Ok(*self
             .var_indices
-            .get(var)
+            .get(&var)
             .ok_or(GenerationError::UndefinedVar {
-                name: self.name_table.get_str(var).to_string(),
+                name: self.name_table.get_str(&var).to_string(),
             })?)
     }
 
@@ -259,7 +253,7 @@ impl CodeGenerator {
                 std::mem::swap(&mut old_local_variables, &mut self.local_variables);
                 std::mem::swap(&mut old_var_indices, &mut self.var_indices);
                 Ok(Vec::new())
-            },
+            }
             TypedStmt::Return(expr) => {
                 if is_last {
                     self.generate_expr(expr)
@@ -285,10 +279,8 @@ impl CodeGenerator {
                 opcodes.push(OpCode::End);
                 // If this is the last instruction and the function is
                 // supposed to return a value, push on an unreachable
-                if let Some(_) = return_type {
-                    if is_last {
-                        opcodes.push(OpCode::Unreachable)
-                    }
+                if return_type.is_some() && is_last {
+                    opcodes.push(OpCode::Unreachable)
                 }
                 Ok(opcodes)
             }
@@ -348,7 +340,7 @@ impl CodeGenerator {
         match expr {
             TypedExpr::Primary { value, type_: _ } => Ok(vec![self.generate_primary(value)?]),
             TypedExpr::Var { name, type_: _ } => {
-                let index = self.get_params_index(&name)?;
+                let index = self.get_params_index(*name)?;
                 Ok(vec![OpCode::GetLocal(index.try_into().unwrap())])
             }
             TypedExpr::Call {
@@ -363,11 +355,16 @@ impl CodeGenerator {
                             name: self.name_table.get_str(name).to_string(),
                         },
                     )?;
-                    let index = if let SymbolTableEntry::Function { index, params_type: _, return_type: _} = entry {
+                    let index = if let SymbolTableEntry::Function {
+                        index,
+                        params_type: _,
+                        return_type: _,
+                    } = entry
+                    {
                         *index
-                    }  else {
+                    } else {
                         // Should not be reachable since this shouldn't typecheck in the first place
-                        return Err(GenerationError::NotReachable)
+                        return Err(GenerationError::NotReachable);
                     };
                     opcodes.append(&mut self.generate_expr(args)?);
                     opcodes.push(OpCode::Call((index).try_into().unwrap()));
@@ -393,7 +390,7 @@ impl CodeGenerator {
                 lhs_ops.push(self.generate_operator(&op, &type_, &promoted_type)?);
                 Ok(lhs_ops)
             }
-            _ => Err(GenerationError::NotImplemented)?,
+            _ => Err(GenerationError::NotImplemented),
         }
     }
 
@@ -408,7 +405,7 @@ impl CodeGenerator {
                     Ok(OpCode::I32Const(0))
                 }
             }
-            _ => Err(GenerationError::UnsupportedValue)?,
+            _ => Err(GenerationError::UnsupportedValue),
         }
     }
 
@@ -433,7 +430,7 @@ impl CodeGenerator {
                 op: op.clone(),
                 input_type: (&**input_type).clone(),
                 result_type: result_type.clone(),
-            })?,
+            }),
         }
     }
 }

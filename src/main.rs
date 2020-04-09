@@ -44,7 +44,6 @@ fn main() {
         Ok(_) => (),
         Err(err) => {
             println!("{}", err);
-            ()
         }
     }
 }

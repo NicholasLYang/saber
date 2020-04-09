@@ -584,7 +584,7 @@ impl TypeChecker {
                 return false;
             }
         }
-        return true;
+        true
     }
 
     fn unify(&mut self, type1: &Arc<Type>, type2: &Arc<Type>) -> bool {

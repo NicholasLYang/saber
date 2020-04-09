@@ -190,7 +190,7 @@ impl fmt::Display for Type {
                 Type::Bool => "bool".into(),
                 Type::Char => "char".into(),
                 Type::String => "string".into(),
-                Type::Var(name) => format!("var({})", name).into(),
+                Type::Var(name) => format!("var({})", name),
                 Type::Array(t) => format!("[{}]", t),
                 Type::Record(_) => "{ Record }".into(),
                 Type::Tuple(_) => "(Tuple)".into(),
