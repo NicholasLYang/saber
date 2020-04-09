@@ -94,7 +94,7 @@ impl CodeGenerator {
             TypedStmt::Return(_) => Err(GenerationError::TopLevelReturn),
             TypedStmt::Export(func_name) => {
                 let name_str = self.name_table.get_str(func_name);
-                let sym_entry = self.symbol_table.lookup_name(func_name).ok_or(
+                let sym_entry = self.symbol_table.lookup_name(*func_name).ok_or(
                     GenerationError::FunctionNotDefined {
                         name: name_str.to_string(),
                     },
@@ -128,7 +128,7 @@ impl CodeGenerator {
         return_type: &Arc<Type>,
         body: &TypedStmt,
     ) -> Result<()> {
-        let entry = self.symbol_table.lookup_name(&name).unwrap();
+        let entry = self.symbol_table.lookup_name(name).unwrap();
         let index = if let SymbolTableEntry::Function {
             index,
             params_type: _,
@@ -350,7 +350,7 @@ impl CodeGenerator {
             } => {
                 if let TypedExpr::Var { name, type_: _ } = &**callee {
                     let mut opcodes = Vec::new();
-                    let entry = self.symbol_table.lookup_name(name).ok_or(
+                    let entry = self.symbol_table.lookup_name(*name).ok_or(
                         GenerationError::FunctionNotDefined {
                             name: self.name_table.get_str(name).to_string(),
                         },

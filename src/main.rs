@@ -16,9 +16,8 @@ use crate::typechecker::TypeChecker;
 use crate::types::Result;
 use code_generator::CodeGenerator;
 use std::env;
-use std::fs::File;
+use std::fs::{self, File};
 use std::io;
-use std::io::Read;
 use std::io::Write;
 
 mod ast;
@@ -48,10 +47,8 @@ fn main() {
     }
 }
 
-fn read_file(file_name: &String) -> Result<()> {
-    let mut file = File::open(file_name)?;
-    let mut contents = String::new();
-    file.read_to_string(&mut contents)?;
+fn read_file(file_name: &str) -> Result<()> {
+    let contents = fs::read_to_string(file_name)?;
     let lexer = lexer::Lexer::new(&contents);
     let mut parser = Parser::new(lexer);
     let parser_out = parser.stmts()?;
@@ -76,7 +73,6 @@ fn run_repl() -> Result<()> {
         }
         io::stdin()
             .read_line(&mut input)
-            .ok()
             .expect("Couldn't read line");
         let lexer = lexer::Lexer::new(&input);
         let mut parser = Parser::new(lexer);

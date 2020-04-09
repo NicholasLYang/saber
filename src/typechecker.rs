@@ -116,7 +116,7 @@ impl TypeChecker {
                 self.symbol_table
                     .insert_function(func_name, params_type.clone(), return_type);
                 let previous_scope = self.symbol_table.push_scope();
-                let (params, body, return_type) = self.func(params, body, return_type_sig)?;
+                let (params, body, return_type) = self.func(params, *body, return_type_sig)?;
                 let func_scope = self.symbol_table.set_scope(previous_scope);
                 Ok(vec![TypedStmt::Function {
                     name: func_name,
@@ -155,13 +155,13 @@ impl TypeChecker {
                             Ok(vec![TypedStmt::Return(typed_exp)])
                         } else {
                             Err(TypeError::UnificationFailure {
-                                type1: typed_exp.get_type().clone(),
+                                type1: typed_exp.get_type(),
                                 type2: return_type.clone(),
                             })
                         }
                     }
                     None => {
-                        self.return_type = Some(typed_exp.get_type().clone());
+                        self.return_type = Some(typed_exp.get_type());
                         Ok(vec![TypedStmt::Return(typed_exp)])
                     }
                 }
@@ -177,7 +177,7 @@ impl TypeChecker {
             }
             Stmt::Export(name) => {
                 self.symbol_table
-                    .lookup_name(&name)
+                    .lookup_name(name)
                     .ok_or(TypeError::VarNotDefined {
                         name: self.name_table.get_str(&name).to_string(),
                     })?;
@@ -247,7 +247,7 @@ impl TypeChecker {
                 } else {
                     let types: Result<Vec<_>, _> = pats
                         .iter()
-                        .map(|name| Ok((name.clone(), self.get_fresh_type_var())))
+                        .map(|name| Ok((*name, self.get_fresh_type_var())))
                         .collect();
                     Ok(Arc::new(Type::Record(types?)))
                 }
@@ -285,11 +285,11 @@ impl TypeChecker {
                 let mut params = Vec::new();
                 for name in names {
                     let field_type = if let Some(t) = &type_ {
-                        self.get_field_type(t, name)?
+                        self.get_field_type(t, *name)?
                     } else {
                         self.get_fresh_type_var()
                     };
-                    params.push((name.clone(), field_type))
+                    params.push((*name, field_type))
                 }
                 Ok(params)
             }
@@ -300,14 +300,14 @@ impl TypeChecker {
     fn get_field_type(
         &mut self,
         record_type: &Arc<Type>,
-        field_name: &usize,
+        field_name: usize,
     ) -> Result<Arc<Type>, TypeError> {
         if let Type::Record(fields) = &**record_type {
-            if let Some((_, type_)) = fields.iter().find(|(name, _)| name == field_name) {
+            if let Some((_, type_)) = fields.iter().find(|(name, _)| *name == field_name) {
                 Ok(type_.clone())
             } else {
                 Err(TypeError::FieldDoesNotExist {
-                    name: self.name_table.get_str(field_name).to_string(),
+                    name: self.name_table.get_str(&field_name).to_string(),
                 })
             }
         } else {
@@ -320,7 +320,7 @@ impl TypeChecker {
     fn generate_pattern_bindings(
         &mut self,
         pat: &Pat,
-        owner_name: &usize,
+        owner_name: Name,
         rhs_type: &Arc<Type>,
     ) -> Result<Vec<TypedStmt>, TypeError> {
         let mut bindings = Vec::new();
@@ -329,14 +329,14 @@ impl TypeChecker {
             Pat::Record(names, _) => {
                 for name in names {
                     bindings.push(TypedStmt::Asgn(
-                        name.clone(),
+                        *name,
                         TypedExpr::Field(
                             Box::new(TypedExpr::Var {
-                                name: owner_name.clone(),
+                                name: owner_name,
                                 type_: rhs_type.clone(),
                             }),
-                            name.clone(),
-                            self.get_field_type(rhs_type, &name)?,
+                            *name,
+                            self.get_field_type(rhs_type, *name)?,
                         ),
                     ));
                 }
@@ -348,10 +348,10 @@ impl TypeChecker {
                 for (i, pat) in pats.iter().enumerate() {
                     let name = self.name_table.get_fresh_name();
                     bindings.push(TypedStmt::Asgn(
-                        name.clone(),
+                        name,
                         TypedExpr::Field(
                             Box::new(TypedExpr::Var {
-                                name: owner_name.clone(),
+                                name: owner_name,
                                 type_: rhs_type.clone(),
                             }),
                             i,
@@ -359,7 +359,7 @@ impl TypeChecker {
                         ),
                     ));
                     let type_ = self.get_fresh_type_var();
-                    bindings.append(&mut self.generate_pattern_bindings(pat, &name, &type_)?)
+                    bindings.append(&mut self.generate_pattern_bindings(pat, name, &type_)?)
                 }
                 Ok(bindings)
             }
@@ -377,8 +377,8 @@ impl TypeChecker {
             };
             self.symbol_table.insert_var(name, typed_rhs.get_type());
             let mut pat_bindings =
-                self.generate_pattern_bindings(&pat, &name, &typed_rhs.get_type())?;
-            let mut bindings = vec![TypedStmt::Asgn(name.clone(), typed_rhs)];
+                self.generate_pattern_bindings(&pat, name, &typed_rhs.get_type())?;
+            let mut bindings = vec![TypedStmt::Asgn(name, typed_rhs)];
             bindings.append(&mut pat_bindings);
             Ok(bindings)
         } else {
@@ -400,7 +400,7 @@ impl TypeChecker {
     fn func(
         &mut self,
         params: Pat,
-        body: Box<Stmt>,
+        body: Stmt,
         return_type: Option<TypeSig>,
     ) -> Result<(Vec<(Name, Arc<Type>)>, Box<TypedStmt>, Arc<Type>), TypeError> {
         let func_params = self.get_func_params(&params)?;
@@ -413,10 +413,10 @@ impl TypeChecker {
             self.return_type = Some(self.lookup_type_sig(&return_type_sig)?);
         }
         // Check body
-        let body = self.stmt(*body)?;
+        let body = self.stmt(body)?;
         let mut return_type = None;
         std::mem::swap(&mut return_type, &mut self.return_type);
-        let return_type = return_type.unwrap_or(Arc::new(Type::Unit));
+        let return_type = return_type.unwrap_or_else(|| Arc::new(Type::Unit));
         Ok((func_params, Box::new(TypedStmt::Block(body)), return_type))
     }
 
@@ -426,7 +426,7 @@ impl TypeChecker {
             Expr::Var { name } => {
                 let entry =
                     self.symbol_table
-                        .lookup_name(&name)
+                        .lookup_name(name)
                         .ok_or(TypeError::VarNotDefined {
                             name: self.name_table.get_str(&name).to_string(),
                         })?;
@@ -481,7 +481,7 @@ impl TypeChecker {
             } => {
                 let params_type = self.pat(&params)?;
                 let previous_scope = self.symbol_table.push_scope();
-                let (params, body, return_type) = self.func(params, body, return_type)?;
+                let (params, body, return_type) = self.func(params, *body, return_type)?;
                 let func_scope = self.symbol_table.set_scope(previous_scope);
                 let func = TypedExpr::Function {
                     params,
@@ -505,9 +505,7 @@ impl TypeChecker {
                             type_,
                         })
                     } else {
-                        Err(TypeError::InvalidUnaryExpr {
-                            expr: typed_rhs.clone(),
-                        })
+                        Err(TypeError::InvalidUnaryExpr { expr: typed_rhs })
                     }
                 }
                 op => Err(TypeError::InvalidUnaryOp { op }),
@@ -533,7 +531,7 @@ impl TypeChecker {
                 } else {
                     Err(TypeError::UnificationFailure {
                         type1: params_type,
-                        type2: args_type.clone(),
+                        type2: args_type,
                     })
                 }
             }
@@ -573,8 +571,8 @@ impl TypeChecker {
 
     fn unify_type_vectors(
         &mut self,
-        type_vector1: &Vec<Arc<Type>>,
-        type_vector2: &Vec<Arc<Type>>,
+        type_vector1: &[Arc<Type>],
+        type_vector2: &[Arc<Type>],
     ) -> bool {
         if type_vector1.len() != type_vector2.len() {
             return false;
@@ -592,7 +590,7 @@ impl TypeChecker {
             return true;
         }
         match (&**type1, &**type2) {
-            (Type::Tuple(ts), Type::Unit) | (Type::Unit, Type::Tuple(ts)) => ts.len() == 0,
+            (Type::Tuple(ts), Type::Unit) | (Type::Unit, Type::Tuple(ts)) => ts.is_empty(),
             (Type::Tuple(t1), Type::Tuple(t2)) => self.unify_type_vectors(&t1, &t2),
             (Type::Arrow(param_type1, return_type1), Type::Arrow(param_type2, return_type2)) => {
                 self.unify(&param_type1, &param_type2) && self.unify(&return_type1, &return_type2)

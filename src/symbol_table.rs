@@ -60,19 +60,15 @@ impl SymbolTable {
         old_scope
     }
 
-    pub fn lookup_name(&self, name: &usize) -> Option<&SymbolTableEntry> {
+    pub fn lookup_name(&self, name: usize) -> Option<&SymbolTableEntry> {
         self.lookup_name_in_scope(name, self.current_scope)
     }
 
     // Looks up name in scope
-    pub fn lookup_name_in_scope(
-        &self,
-        name: &usize,
-        scope: usize,
-    ) -> Option<&SymbolTableEntry> {
+    pub fn lookup_name_in_scope(&self, name: usize, scope: usize) -> Option<&SymbolTableEntry> {
         let mut index = Some(scope);
         while let Some(i) = index {
-            if let Some(entry) = self.scopes[i].symbols.get(name) {
+            if let Some(entry) = self.scopes[i].symbols.get(&name) {
                 return Some(entry);
             }
             index = self.scopes[i].parent;
@@ -81,13 +77,13 @@ impl SymbolTable {
     }
 
     pub fn insert_var(&mut self, name: Name, var_type: Arc<Type>) {
-        &self.scopes[self.current_scope]
+        self.scopes[self.current_scope]
             .symbols
             .insert(name, SymbolTableEntry::Var { var_type });
     }
 
     pub fn insert_function(&mut self, name: Name, params_type: Arc<Type>, return_type: Arc<Type>) {
-        &self.scopes[self.current_scope].symbols.insert(
+        self.scopes[self.current_scope].symbols.insert(
             name,
             SymbolTableEntry::Function {
                 index: self.function_index,
