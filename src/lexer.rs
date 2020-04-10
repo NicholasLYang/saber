@@ -113,7 +113,7 @@ pub enum LexicalError {
 pub struct Lexer<'input> {
     source: &'input str,
     chars: CharIndices<'input>,
-    name_table: NameTable,
+    pub name_table: NameTable,
     row: usize,
     column: usize,
     lookahead: Option<(usize, char)>,
@@ -135,10 +135,6 @@ impl<'input> Lexer<'input> {
             lookahead,
             lookahead2,
         }
-    }
-
-    pub fn get_name_table(self) -> NameTable {
-        self.name_table
     }
 
     pub fn get_location(&self) -> Location {

@@ -4,7 +4,7 @@ use std::fmt::Debug;
 use utils::NameTable;
 
 pub struct Parser<'input> {
-    lexer: Lexer<'input>,
+    pub lexer: Lexer<'input>,
     pushedback_tokens: Vec<(Token, LocationRange)>,
 }
 
@@ -54,7 +54,7 @@ impl<'input> Parser<'input> {
 
     // Gets the name table. Drops the parser though
     pub fn get_name_table(self) -> NameTable {
-        self.lexer.get_name_table()
+        self.lexer.name_table
     }
 
     fn expect(
@@ -619,25 +619,76 @@ impl<'input> Parser<'input> {
 
 #[cfg(test)]
 mod tests {
+    use ast::{Expr, Pat, TypeSig, Value};
     use lexer::Lexer;
-    use parser::{Parser, ParseError};
-    use ast::{Expr, Value};
+    use parser::{ParseError, Parser};
 
     #[test]
     fn literal() -> Result<(), ParseError> {
-        let expected_expressions = vec![
-            Expr::Primary { value: Value::Integer(10) },
-            Expr::Primary { value: Value::Float(10.2) },
-            Expr::Primary { value: Value::Bool(true) },
-            Expr::Primary { value: Value::Bool(false) },
-            Expr::Primary { value: Value::String("hello".into()) },
+        let expected = vec![
+            Expr::Primary {
+                value: Value::Integer(10),
+            },
+            Expr::Primary {
+                value: Value::Float(10.2),
+            },
+            Expr::Primary {
+                value: Value::Bool(true),
+            },
+            Expr::Primary {
+                value: Value::Bool(false),
+            },
+            Expr::Primary {
+                value: Value::String("hello".into()),
+            },
         ];
         let source = "10 10.2 true false \"hello\"";
         let lexer = Lexer::new(&source);
         let mut parser = Parser::new(lexer);
         for i in 0..5 {
-            assert_eq!(expected_expressions[i], parser.primary()?)
+            assert_eq!(expected[i], parser.primary()?)
         }
+        Ok(())
+    }
+
+    #[test]
+    fn id() -> Result<(), ParseError> {
+        let expected = vec![
+            Expr::Var { name: 0 },
+            Expr::Var { name: 1 },
+            Expr::Var { name: 1 },
+            Expr::Var { name: 2 },
+            Expr::Var { name: 3 },
+        ];
+        let source = "foo bar bar baz bat";
+        let lexer = Lexer::new(&source);
+        let mut parser = Parser::new(lexer);
+        for i in 0..5 {
+            assert_eq!(expected[i], parser.primary()?);
+        }
+        assert_eq!("foo", parser.lexer.name_table.get_str(&0));
+        assert_eq!("bar", parser.lexer.name_table.get_str(&1));
+        assert_eq!("baz", parser.lexer.name_table.get_str(&2));
+        assert_eq!("bat", parser.lexer.name_table.get_str(&3));
+        Ok(())
+    }
+
+    #[test]
+    fn pat() -> Result<(), ParseError> {
+        let expected = vec![
+            Pat::Id(0, None),
+            Pat::Id(1, Some(TypeSig::Name(2))),
+            Pat::Tuple(vec![Pat::Id(0, None), Pat::Id(1, None)]),
+            Pat::Record(vec![0, 1, 2], Some(TypeSig::Name(3))),
+        ];
+        let source = "foo bar: int (foo, bar) { foo, bar, baz }: A";
+        let lexer = Lexer::new(&source);
+        let mut parser = Parser::new(lexer);
+        for i in 0..3 {
+            assert_eq!(expected[i], parser.pattern()?);
+        }
+        assert_eq!("foo", parser.lexer.name_table.get_str(&0));
+        assert_eq!("bar", parser.lexer.name_table.get_str(&1));
         Ok(())
     }
 }
