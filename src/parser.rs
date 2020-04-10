@@ -616,3 +616,28 @@ impl<'input> Parser<'input> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use lexer::Lexer;
+    use parser::{Parser, ParseError};
+    use ast::{Expr, Value};
+
+    #[test]
+    fn literal() -> Result<(), ParseError> {
+        let expected_expressions = vec![
+            Expr::Primary { value: Value::Integer(10) },
+            Expr::Primary { value: Value::Float(10.2) },
+            Expr::Primary { value: Value::Bool(true) },
+            Expr::Primary { value: Value::Bool(false) },
+            Expr::Primary { value: Value::String("hello".into()) },
+        ];
+        let source = "10 10.2 true false \"hello\"";
+        let lexer = Lexer::new(&source);
+        let mut parser = Parser::new(lexer);
+        for i in 0..5 {
+            assert_eq!(expected_expressions[i], parser.primary()?)
+        }
+        Ok(())
+    }
+}
