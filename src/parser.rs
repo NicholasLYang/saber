@@ -1,6 +1,6 @@
-use crate::ast::{ExprKind, Name, Op, Pat, StmtKind, TypeSig, Value};
+use crate::ast::{Expr, Name, Op, Pat, Stmt, TypeSig, Value};
 use crate::lexer::{Lexer, LexicalError, LocationRange, Token, TokenDiscriminants};
-use ast::{Expr, Stmt};
+use ast::Loc;
 use std::fmt::Debug;
 use utils::NameTable;
 
@@ -151,20 +151,20 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn block(&mut self, left: LocationRange) -> Result<Stmt, ParseError> {
+    fn block(&mut self, left: LocationRange) -> Result<Loc<Stmt>, ParseError> {
         let mut stmts = Vec::new();
         loop {
             if let Some((_, right)) = self.match_one(TokenDiscriminants::RBrace)? {
-                return Ok(Stmt {
+                return Ok(Loc {
                     location: LocationRange(left.0, right.1),
-                    kind: StmtKind::Block(stmts),
+                    inner: Stmt::Block(stmts),
                 });
             }
             stmts.push(self.stmt()?);
         }
     }
 
-    pub fn stmts(&mut self) -> Result<Vec<Stmt>, ParseError> {
+    pub fn stmts(&mut self) -> Result<Vec<Loc<Stmt>>, ParseError> {
         let mut stmts = Vec::new();
         loop {
             match self.stmt() {
@@ -175,7 +175,7 @@ impl<'input> Parser<'input> {
         }
     }
 
-    pub fn stmt(&mut self) -> Result<Stmt, ParseError> {
+    pub fn stmt(&mut self) -> Result<Loc<Stmt>, ParseError> {
         let tok = self.bump()?;
         match tok {
             Some((Token::Let, loc)) => self.let_stmt(loc),
@@ -196,7 +196,7 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn if_stmt(&mut self, left: LocationRange) -> Result<Stmt, ParseError> {
+    fn if_stmt(&mut self, left: LocationRange) -> Result<Loc<Stmt>, ParseError> {
         let cond = self.expr()?;
         let (_, block_left) = self.expect(TokenDiscriminants::LBrace)?;
         let result_block = self.block(block_left)?;
@@ -207,26 +207,26 @@ impl<'input> Parser<'input> {
                 let (_, block_left) = self.expect(TokenDiscriminants::LBrace)?;
                 self.block(block_left)?
             };
-            Ok(Stmt {
+            Ok(Loc {
                 location: LocationRange(left.0, else_block.location.1),
-                kind: StmtKind::If(cond, Box::new(result_block), Some(Box::new(else_block))),
+                inner: Stmt::If(cond, Box::new(result_block), Some(Box::new(else_block))),
             })
         } else {
-            Ok(Stmt {
+            Ok(Loc {
                 location: LocationRange(left.0, result_block.location.1),
-                kind: StmtKind::If(cond, Box::new(result_block), None),
+                inner: Stmt::If(cond, Box::new(result_block), None),
             })
         }
     }
 
-    fn export_stmt(&mut self, left: LocationRange) -> Result<Stmt, ParseError> {
+    fn export_stmt(&mut self, left: LocationRange) -> Result<Loc<Stmt>, ParseError> {
         let tok = self.bump()?;
         match tok {
             Some((Token::Ident(name), _)) => {
                 let (_, right) = self.expect(TokenDiscriminants::Semicolon)?;
-                Ok(Stmt {
+                Ok(Loc {
                     location: LocationRange(left.0, right.1),
-                    kind: StmtKind::Export(name),
+                    inner: Stmt::Export(name),
                 })
             }
             Some((token, location)) => {
@@ -243,23 +243,23 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn return_stmt(&mut self, left: LocationRange) -> Result<Stmt, ParseError> {
+    fn return_stmt(&mut self, left: LocationRange) -> Result<Loc<Stmt>, ParseError> {
         let expr = self.expr()?;
         let (_, right) = self.expect(TokenDiscriminants::Semicolon)?;
-        Ok(Stmt {
+        Ok(Loc {
             location: LocationRange(left.0, right.1),
-            kind: StmtKind::Return(expr),
+            inner: Stmt::Return(expr),
         })
     }
 
-    fn let_stmt(&mut self, left: LocationRange) -> Result<Stmt, ParseError> {
+    fn let_stmt(&mut self, left: LocationRange) -> Result<Loc<Stmt>, ParseError> {
         let pat = self.pattern()?;
         self.expect(TokenDiscriminants::Equal)?;
         let rhs_expr = self.expr()?;
-        if let Expr {
+        if let Loc {
             location,
-            kind:
-                ExprKind::Function {
+            inner:
+                Expr::Function {
                     params,
                     return_type,
                     body,
@@ -267,32 +267,32 @@ impl<'input> Parser<'input> {
         } = rhs_expr
         {
             match pat {
-                Pat::Id(name, None, _) => Ok(Stmt {
+                Pat::Id(name, None, _) => Ok(Loc {
                     location: LocationRange(left.0, location.1),
-                    kind: StmtKind::Function(name, params, return_type, body),
+                    inner: Stmt::Function(name, params, return_type, body),
                 }),
                 Pat::Id(_, _, _) => Err(ParseError::FuncBindingTypeSig),
                 _ => Err(ParseError::DestructureFunction),
             }
         } else {
             self.expect(TokenDiscriminants::Semicolon)?;
-            Ok(Stmt {
+            Ok(Loc {
                 location: LocationRange(left.0, rhs_expr.location.1),
-                kind: StmtKind::Asgn(pat, rhs_expr),
+                inner: Stmt::Asgn(pat, rhs_expr),
             })
         }
     }
 
-    fn expression_stmt(&mut self) -> Result<Stmt, ParseError> {
+    fn expression_stmt(&mut self) -> Result<Loc<Stmt>, ParseError> {
         let expr = self.expr()?;
         let (_, right) = self.expect(TokenDiscriminants::Semicolon)?;
-        Ok(Stmt {
+        Ok(Loc {
             location: LocationRange(expr.location.0, right.1),
-            kind: StmtKind::Expr(expr),
+            inner: Stmt::Expr(expr),
         })
     }
 
-    fn expr(&mut self) -> Result<Expr, ParseError> {
+    fn expr(&mut self) -> Result<Loc<Expr>, ParseError> {
         if let Some((_, left)) = self.match_one(TokenDiscriminants::Slash)? {
             self.function(left)
         } else {
@@ -300,7 +300,7 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn function(&mut self, left: LocationRange) -> Result<Expr, ParseError> {
+    fn function(&mut self, left: LocationRange) -> Result<Loc<Expr>, ParseError> {
         let params = self.pattern()?;
         let return_type = self.type_sig()?;
         self.expect(TokenDiscriminants::FatArrow)?;
@@ -310,17 +310,17 @@ impl<'input> Parser<'input> {
             Some((Token::LParen, left)) => {
                 let expr = self.expr()?;
                 let (_, right) = self.expect(TokenDiscriminants::RParen)?;
-                Stmt {
+                Loc {
                     location: LocationRange(left.0, right.1),
-                    kind: StmtKind::Return(expr),
+                    inner: Stmt::Return(expr),
                 }
             }
             Some((token, left)) => {
                 self.pushback((token, left));
                 let expr = self.expr()?;
-                Stmt {
+                Loc {
                     location: LocationRange(left.0, expr.location.1),
-                    kind: StmtKind::Return(expr),
+                    inner: Stmt::Return(expr),
                 }
             }
             // TODO: Streamline error reporting. I should group the
@@ -342,9 +342,9 @@ impl<'input> Parser<'input> {
                 });
             }
         };
-        Ok(Expr {
+        Ok(Loc {
             location: LocationRange(left.0, body.location.1),
-            kind: ExprKind::Function {
+            inner: Expr::Function {
                 params,
                 return_type: return_type.map(|(return_type, _)| return_type),
                 body: Box::new(body),
@@ -352,14 +352,14 @@ impl<'input> Parser<'input> {
         })
     }
 
-    fn equality(&mut self) -> Result<Expr, ParseError> {
+    fn equality(&mut self) -> Result<Loc<Expr>, ParseError> {
         let lhs = self.comparison()?;
         if let Some((token, _)) = self.match_multiple(vec![Token::EqualEqual, Token::BangEqual])? {
             let op = self.lookup_op_token(token)?;
             let rhs = self.comparison()?;
-            Ok(Expr {
+            Ok(Loc {
                 location: LocationRange(lhs.location.0, rhs.location.1),
-                kind: ExprKind::BinOp {
+                inner: Expr::BinOp {
                     op,
                     lhs: Box::new(lhs),
                     rhs: Box::new(rhs),
@@ -370,7 +370,7 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn comparison(&mut self) -> Result<Expr, ParseError> {
+    fn comparison(&mut self) -> Result<Loc<Expr>, ParseError> {
         let lhs = self.addition()?;
         if let Some((token, _)) = self.match_multiple(vec![
             Token::GreaterEqual,
@@ -380,9 +380,9 @@ impl<'input> Parser<'input> {
         ])? {
             let op = self.lookup_op_token(token)?;
             let rhs = self.addition()?;
-            Ok(Expr {
+            Ok(Loc {
                 location: LocationRange(lhs.location.0, rhs.location.1),
-                kind: ExprKind::BinOp {
+                inner: Expr::BinOp {
                     op,
                     lhs: Box::new(lhs),
                     rhs: Box::new(rhs),
@@ -393,14 +393,14 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn addition(&mut self) -> Result<Expr, ParseError> {
+    fn addition(&mut self) -> Result<Loc<Expr>, ParseError> {
         let mut expr = self.multiplication()?;
         while let Some((token, _)) = self.match_multiple(vec![Token::Plus, Token::Minus])? {
             let op = self.lookup_op_token(token)?;
             let rhs = self.multiplication()?;
-            expr = Expr {
+            expr = Loc {
                 location: LocationRange(expr.location.0, rhs.location.1),
-                kind: ExprKind::BinOp {
+                inner: Expr::BinOp {
                     op,
                     lhs: Box::new(expr),
                     rhs: Box::new(rhs),
@@ -410,14 +410,14 @@ impl<'input> Parser<'input> {
         Ok(expr)
     }
 
-    fn multiplication(&mut self) -> Result<Expr, ParseError> {
+    fn multiplication(&mut self) -> Result<Loc<Expr>, ParseError> {
         let mut expr = self.unary()?;
         while let Some((token, _)) = self.match_multiple(vec![Token::Times, Token::Div])? {
             let op = self.lookup_op_token(token)?;
             let rhs = self.unary()?;
-            expr = Expr {
+            expr = Loc {
                 location: LocationRange(expr.location.0, rhs.location.1),
-                kind: ExprKind::BinOp {
+                inner: Expr::BinOp {
                     op,
                     lhs: Box::new(expr),
                     rhs: Box::new(rhs),
@@ -427,13 +427,13 @@ impl<'input> Parser<'input> {
         Ok(expr)
     }
 
-    fn unary(&mut self) -> Result<Expr, ParseError> {
+    fn unary(&mut self) -> Result<Loc<Expr>, ParseError> {
         if let Some((token, left)) = self.match_multiple(vec![Token::Bang, Token::Minus])? {
             let op = self.lookup_op_token(token)?;
             let rhs = self.unary()?;
-            Ok(Expr {
+            Ok(Loc {
                 location: LocationRange(left.0, rhs.location.1),
-                kind: ExprKind::UnaryOp {
+                inner: Expr::UnaryOp {
                     op,
                     rhs: Box::new(rhs),
                 },
@@ -443,7 +443,7 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn call(&mut self) -> Result<Expr, ParseError> {
+    fn call(&mut self) -> Result<Loc<Expr>, ParseError> {
         let mut expr = self.primary()?;
         loop {
             if let Some((_, left)) = self.match_one(TokenDiscriminants::LParen)? {
@@ -451,9 +451,9 @@ impl<'input> Parser<'input> {
             } else if self.match_one(TokenDiscriminants::Dot)?.is_some() {
                 match self.bump()? {
                     Some((Token::Ident(name), right)) => {
-                        expr = Expr {
+                        expr = Loc {
                             location: LocationRange(expr.location.0, right.1),
-                            kind: ExprKind::Field(Box::new(expr), name),
+                            inner: Expr::Field(Box::new(expr), name),
                         };
                     }
                     Some((token, location)) => {
@@ -476,28 +476,32 @@ impl<'input> Parser<'input> {
         Ok(expr)
     }
 
-    fn finish_call(&mut self, callee: Expr, left: LocationRange) -> Result<Expr, ParseError> {
+    fn finish_call(
+        &mut self,
+        callee: Loc<Expr>,
+        left: LocationRange,
+    ) -> Result<Loc<Expr>, ParseError> {
         let args = {
-            let (mut exprs, right) = self.comma::<Expr>(&Self::expr, Token::RParen)?;
+            let (mut exprs, right) = self.comma::<Loc<Expr>>(&Self::expr, Token::RParen)?;
             if exprs.len() == 1 {
                 exprs.remove(0)
             } else {
-                Expr {
+                Loc {
                     location: LocationRange(left.0, right.1),
-                    kind: ExprKind::Tuple(exprs),
+                    inner: Expr::Tuple(exprs),
                 }
             }
         };
-        Ok(Expr {
+        Ok(Loc {
             location: LocationRange(callee.location.0, args.location.1),
-            kind: ExprKind::Call {
+            inner: Expr::Call {
                 callee: Box::new(callee),
                 args: Box::new(args),
             },
         })
     }
 
-    fn primary(&mut self) -> Result<Expr, ParseError> {
+    fn primary(&mut self) -> Result<Loc<Expr>, ParseError> {
         let (token, location) = if let Some(span) = self.bump()? {
             span
         } else {
@@ -513,33 +517,33 @@ impl<'input> Parser<'input> {
             });
         };
         match token {
-            Token::True => Ok(Expr {
+            Token::True => Ok(Loc {
                 location,
-                kind: ExprKind::Primary {
+                inner: Expr::Primary {
                     value: Value::Bool(true),
                 },
             }),
-            Token::False => Ok(Expr {
+            Token::False => Ok(Loc {
                 location,
-                kind: ExprKind::Primary {
+                inner: Expr::Primary {
                     value: Value::Bool(false),
                 },
             }),
-            Token::Integer(int) => Ok(Expr {
+            Token::Integer(int) => Ok(Loc {
                 location,
-                kind: ExprKind::Primary {
+                inner: Expr::Primary {
                     value: Value::Integer(int),
                 },
             }),
-            Token::Float(float) => Ok(Expr {
+            Token::Float(float) => Ok(Loc {
                 location,
-                kind: ExprKind::Primary {
+                inner: Expr::Primary {
                     value: Value::Float(float),
                 },
             }),
-            Token::String(s) => Ok(Expr {
+            Token::String(s) => Ok(Loc {
                 location,
-                kind: ExprKind::Primary {
+                inner: Expr::Primary {
                     value: Value::String(s),
                 },
             }),
@@ -549,20 +553,20 @@ impl<'input> Parser<'input> {
                 let expr = self.expr()?;
                 if self.match_one(TokenDiscriminants::Comma)?.is_some() {
                     let mut elems = vec![expr];
-                    let (mut rest, right) = self.comma::<Expr>(&Self::expr, Token::RParen)?;
+                    let (mut rest, right) = self.comma::<Loc<Expr>>(&Self::expr, Token::RParen)?;
                     elems.append(&mut rest);
-                    Ok(Expr {
+                    Ok(Loc {
                         location: LocationRange(location.0, right.1),
-                        kind: ExprKind::Tuple(elems),
+                        inner: Expr::Tuple(elems),
                     })
                 } else {
                     self.expect(TokenDiscriminants::RParen)?;
                     Ok(expr)
                 }
             }
-            Token::Ident(name) => Ok(Expr {
+            Token::Ident(name) => Ok(Loc {
                 location,
-                kind: ExprKind::Var { name },
+                inner: Expr::Var { name },
             }),
             token => Err(ParseError::UnexpectedToken {
                 token,
@@ -579,14 +583,14 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn record_literal(&mut self, left: LocationRange) -> Result<Expr, ParseError> {
+    fn record_literal(&mut self, left: LocationRange) -> Result<Loc<Expr>, ParseError> {
         let mut entries = Vec::new();
         loop {
             match self.bump()? {
                 Some((Token::RParenBrace, right)) => {
-                    return Ok(Expr {
+                    return Ok(Loc {
                         location: LocationRange(left.0, right.1),
-                        kind: ExprKind::Record { entries },
+                        inner: Expr::Record { entries },
                     });
                 }
                 Some((Token::Ident(name), _)) => {
@@ -747,26 +751,26 @@ impl<'input> Parser<'input> {
 
 #[cfg(test)]
 mod tests {
-    use ast::{ExprKind, Pat, TypeSig, Value};
+    use ast::{Expr, Pat, TypeSig, Value};
     use lexer::Lexer;
     use parser::{ParseError, Parser};
 
     #[test]
     fn literal() -> Result<(), ParseError> {
         let expected = vec![
-            ExprKind::Primary {
+            Expr::Primary {
                 value: Value::Integer(10),
             },
-            ExprKind::Primary {
+            Expr::Primary {
                 value: Value::Float(10.2),
             },
-            ExprKind::Primary {
+            Expr::Primary {
                 value: Value::Bool(true),
             },
-            ExprKind::Primary {
+            Expr::Primary {
                 value: Value::Bool(false),
             },
-            ExprKind::Primary {
+            Expr::Primary {
                 value: Value::String("hello".into()),
             },
         ];
@@ -782,11 +786,11 @@ mod tests {
     #[test]
     fn id() -> Result<(), ParseError> {
         let expected = vec![
-            ExprKind::Var { name: 0 },
-            ExprKind::Var { name: 1 },
-            ExprKind::Var { name: 1 },
-            ExprKind::Var { name: 2 },
-            ExprKind::Var { name: 3 },
+            Expr::Var { name: 0 },
+            Expr::Var { name: 1 },
+            Expr::Var { name: 1 },
+            Expr::Var { name: 2 },
+            Expr::Var { name: 3 },
         ];
         let source = "foo bar bar baz bat";
         let lexer = Lexer::new(&source);
