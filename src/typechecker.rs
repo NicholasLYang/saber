@@ -1,5 +1,6 @@
 use ast::{Expr, ExprT, Loc, Name, Op, Pat, Stmt, StmtT, Type, TypeSig, Value};
 use im::hashmap::HashMap;
+use lexer::LocationRange;
 use std::sync::Arc;
 use symbol_table::{SymbolTable, SymbolTableEntry};
 use utils::NameTable;
@@ -143,14 +144,20 @@ impl TypeChecker {
                 }
                 let typed_then = self.stmt(*then_stmt)?;
                 let typed_else = match else_stmt {
-                    Some(else_stmt) => Some(Box::new(StmtT::Block(self.stmt(*else_stmt)?))),
+                    Some(else_stmt) => Some(Box::new(Loc {
+                        location: else_stmt.location,
+                        inner: StmtT::Block(self.stmt(*else_stmt)?),
+                    })),
                     None => None,
                 };
-                Ok(vec![StmtT::If(
-                    typed_cond,
-                    Box::new(StmtT::Block(typed_then)),
-                    typed_else,
-                )])
+                let then = Loc {
+                    location: then_stmt.location,
+                    inner: StmtT::Block(typed_then),
+                };
+                Ok(vec![Loc {
+                    location: stmt.location,
+                    inner: StmtT::If(typed_cond, Box::new(then), typed_else),
+                }])
             }
             Stmt::Return(expr) => {
                 let typed_exp = self.expr(expr)?;
@@ -327,41 +334,48 @@ impl TypeChecker {
         pat: &Pat,
         owner_name: Name,
         rhs_type: &Arc<Type>,
-    ) -> Result<Vec<StmtT>, TypeError> {
+        location: LocationRange,
+    ) -> Result<Vec<Loc<StmtT>>, TypeError> {
         let mut bindings = Vec::new();
         match pat {
-            Pat::Id(_, _) | Pat::Empty(_) => Ok(Vec::new()),
-            Pat::Record(names, _) => {
+            Pat::Id(_, _, _) | Pat::Empty(_) => Ok(Vec::new()),
+            Pat::Record(names, _, _) => {
                 for name in names {
                     bindings.push(StmtT::Asgn(
                         *name,
-                        ExprT::Field(
-                            Box::new(ExprT::Var {
-                                name: owner_name,
-                                type_: rhs_type.clone(),
-                            }),
-                            *name,
-                            self.get_field_type(rhs_type, *name)?,
-                        ),
+                        Loc {
+                            location,
+                            inner: ExprT::Field(
+                                Box::new(ExprT::Var {
+                                    name: owner_name,
+                                    type_: rhs_type.clone(),
+                                }),
+                                *name,
+                                self.get_field_type(rhs_type, *name)?,
+                            ),
+                        },
                     ));
                 }
                 Ok(bindings)
             }
-            Pat::Tuple(pats) => {
+            Pat::Tuple(pats, _) => {
                 // TODO: Make this recursive so that we can
                 // flatten bindings
                 for (i, pat) in pats.iter().enumerate() {
                     let name = self.name_table.get_fresh_name();
                     bindings.push(StmtT::Asgn(
                         name,
-                        ExprT::Field(
-                            Box::new(ExprT::Var {
-                                name: owner_name,
-                                type_: rhs_type.clone(),
-                            }),
-                            i,
-                            self.get_fresh_type_var(),
-                        ),
+                        Loc {
+                            location,
+                            inner: ExprT::Field(
+                                Box::new(ExprT::Var {
+                                    name: owner_name,
+                                    type_: rhs_type.clone(),
+                                }),
+                                i,
+                                self.get_fresh_type_var(),
+                            ),
+                        },
                     ));
                     let type_ = self.get_fresh_type_var();
                     bindings.append(&mut self.generate_pattern_bindings(pat, name, &type_)?)
@@ -371,19 +385,27 @@ impl TypeChecker {
         }
     }
 
-    fn asgn(&mut self, pat: Pat, rhs: Expr) -> Result<Vec<StmtT>, TypeError> {
+    fn asgn(
+        &mut self,
+        pat: Pat,
+        rhs: Expr,
+        location: LocationRange,
+    ) -> Result<Vec<Loc<StmtT>>, TypeError> {
         let pat_type = self.pat(&pat)?;
         let typed_rhs = self.expr(rhs)?;
         if self.unify(&pat_type, &typed_rhs.get_type()) {
-            let name = if let Pat::Id(name, _) = pat {
+            let name = if let Pat::Id(name, _, _) = pat {
                 name
             } else {
                 self.name_table.get_fresh_name()
             };
             self.symbol_table.insert_var(name, typed_rhs.get_type());
             let mut pat_bindings =
-                self.generate_pattern_bindings(&pat, name, &typed_rhs.get_type())?;
-            let mut bindings = vec![StmtT::Asgn(name, typed_rhs)];
+                self.generate_pattern_bindings(&pat, name, &typed_rhs.get_type(), location)?;
+            let mut bindings = vec![Loc {
+                location,
+                inner: StmtT::Asgn(name, typed_rhs),
+            }];
             bindings.append(&mut pat_bindings);
             Ok(bindings)
         } else {
@@ -425,8 +447,9 @@ impl TypeChecker {
         Ok((func_params, Box::new(StmtT::Block(body)), return_type))
     }
 
-    fn expr(&mut self, expr: Expr) -> Result<ExprT, TypeError> {
-        match expr {
+    fn expr(&mut self, expr: Loc<Expr>) -> Result<Loc<ExprT>, TypeError> {
+        let location = expr.location;
+        match expr.kind {
             Expr::Primary { value } => Ok(self.value(value)),
             Expr::Var { name } => {
                 let entry =
@@ -440,13 +463,19 @@ impl TypeChecker {
                         index: _,
                         params_type,
                         return_type,
-                    } => Ok(ExprT::Var {
-                        name,
-                        type_: Arc::new(Type::Arrow(params_type.clone(), return_type.clone())),
+                    } => Ok(Loc {
+                        location,
+                        inner: ExprT::Var {
+                            name,
+                            type_: Arc::new(Type::Arrow(params_type.clone(), return_type.clone())),
+                        },
                     }),
-                    SymbolTableEntry::Var { var_type } => Ok(ExprT::Var {
-                        name,
-                        type_: var_type.clone(),
+                    SymbolTableEntry::Var { var_type } => Ok(Loc {
+                        location,
+                        inner: ExprT::Var {
+                            name,
+                            type_: var_type.clone(),
+                        },
                     }),
                 }
             }
@@ -456,11 +485,14 @@ impl TypeChecker {
                 let lhs_type = typed_lhs.get_type();
                 let rhs_type = typed_rhs.get_type();
                 match self.op(&op, lhs_type, rhs_type) {
-                    Some(op_type) => Ok(ExprT::BinOp {
-                        op,
-                        lhs: Box::new(typed_lhs),
-                        rhs: Box::new(typed_rhs),
-                        type_: Arc::new(op_type),
+                    Some(op_type) => Ok(Loc {
+                        location,
+                        inner: ExprT::BinOp {
+                            op,
+                            lhs: Box::new(typed_lhs),
+                            rhs: Box::new(typed_rhs),
+                            type_: Arc::new(op_type),
+                        },
                     }),
                     None => Err(TypeError::OpFailure {
                         op: op.clone(),
@@ -477,7 +509,10 @@ impl TypeChecker {
                     types.push(typed_elem.get_type());
                     typed_elems.push(typed_elem);
                 }
-                Ok(ExprT::Tuple(typed_elems, Arc::new(Type::Tuple(types))))
+                Ok(Loc {
+                    location,
+                    inner: ExprT::Tuple(typed_elems, Arc::new(Type::Tuple(types))),
+                })
             }
             Expr::Function {
                 params,
@@ -488,12 +523,15 @@ impl TypeChecker {
                 let previous_scope = self.symbol_table.push_scope();
                 let (params, body, return_type) = self.func(params, *body, return_type)?;
                 let func_scope = self.symbol_table.set_scope(previous_scope);
-                let func = ExprT::Function {
-                    params,
-                    params_type,
-                    return_type,
-                    body,
-                    scope_index: func_scope,
+                let func = Loc {
+                    location,
+                    inner: ExprT::Function {
+                        params,
+                        params_type,
+                        return_type,
+                        body,
+                        scope_index: func_scope,
+                    },
                 };
                 Ok(func)
             }
@@ -504,10 +542,13 @@ impl TypeChecker {
                         || self.unify(&typed_rhs.get_type(), &Arc::new(Type::Float))
                     {
                         let type_ = typed_rhs.get_type();
-                        Ok(ExprT::UnaryOp {
-                            op,
-                            rhs: Box::new(typed_rhs),
-                            type_,
+                        Ok(Loc {
+                            location,
+                            inner: ExprT::UnaryOp {
+                                op,
+                                rhs: Box::new(typed_rhs),
+                                type_,
+                            },
                         })
                     } else {
                         Err(TypeError::InvalidUnaryExpr { expr: typed_rhs })
@@ -528,10 +569,13 @@ impl TypeChecker {
                 let typed_args = self.expr(*args)?;
                 let args_type = typed_args.get_type();
                 if self.unify(&params_type, &args_type) {
-                    Ok(ExprT::Call {
-                        callee: Box::new(typed_callee),
-                        args: Box::new(typed_args),
-                        type_: return_type,
+                    Ok(Loc {
+                        location,
+                        inner: ExprT::Call {
+                            callee: Box::new(typed_callee),
+                            args: Box::new(typed_args),
+                            type_: return_type,
+                        },
                     })
                 } else {
                     Err(TypeError::UnificationFailure {
