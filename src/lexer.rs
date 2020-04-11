@@ -72,7 +72,7 @@ impl Debug for Location {
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct LocationRange(pub Location, pub Location);
 
 impl Display for LocationRange {
@@ -103,8 +103,8 @@ fn is_id_body(ch: char) -> bool {
 
 #[derive(Debug, Fail, PartialEq)]
 pub enum LexicalError {
-    #[fail(display = "Invalid character '{}' found at {}", ch, location)]
-    InvalidCharacter { ch: char, location: usize },
+    #[fail(display = "{}: Invalid character '{}'", location, ch)]
+    InvalidCharacter { ch: char, location: LocationRange },
 
     #[fail(display = "String starting at {} was not terminated", location)]
     UnterminatedString { location: Location },
@@ -130,7 +130,7 @@ impl<'input> Lexer<'input> {
             source,
             chars,
             row: 1,
-            column: 0,
+            column: 1,
             name_table: NameTable::new(),
             lookahead,
             lookahead2,
@@ -154,6 +154,10 @@ impl<'input> Lexer<'input> {
         next
     }
 
+    fn peek(&self) {
+        println!("{:?}", self.lookahead);
+    }
+
     fn lookahead_match(
         &mut self,
         start_loc: Location,
@@ -167,7 +171,7 @@ impl<'input> Lexer<'input> {
                     self.bump();
                     Ok((matched_token, LocationRange(start_loc, self.get_location())))
                 } else {
-                    Ok((alt_token, LocationRange(start_loc, start_loc)))
+                    Ok((alt_token, LocationRange(start_loc, self.get_location())))
                 }
             }
             None => Ok((alt_token, LocationRange(start_loc, start_loc))),
@@ -203,25 +207,32 @@ impl<'input> Lexer<'input> {
         self.take_while(|ch| ch.is_whitespace());
     }
 
-    fn read_string(&mut self, start_index: usize) -> <Lexer<'input> as Iterator>::Item {
-        let start = self.get_location();
+    fn read_string(
+        &mut self,
+        start_index: usize,
+        start_loc: Location,
+    ) -> <Lexer<'input> as Iterator>::Item {
         match self.take_until(|ch| ch == '"') {
             Some(i) => {
-                let end = self.get_location();
                 self.bump();
+                let end_loc = self.get_location();
                 Ok((
                     Token::String(self.source[start_index + 1..i].to_string()),
-                    LocationRange(start, end),
+                    LocationRange(start_loc, end_loc),
                 ))
             }
-            None => Err(LexicalError::UnterminatedString { location: start }),
+            None => Err(LexicalError::UnterminatedString {
+                location: start_loc,
+            }),
         }
     }
 
-    fn read_number(&mut self, start_index: usize) -> <Lexer<'input> as Iterator>::Item {
-        let start_loc = self.get_location();
+    fn read_number(
+        &mut self,
+        start_index: usize,
+        start_loc: Location,
+    ) -> <Lexer<'input> as Iterator>::Item {
         let mut end_index = self.take_while(|ch| ch.is_ascii_digit());
-        let end_loc = self.get_location();
         let mut is_decimal = false;
 
         if let Some((_, '.')) = self.lookahead {
@@ -234,7 +245,7 @@ impl<'input> Lexer<'input> {
                 }
             }
         }
-
+        let end_loc = self.get_location();
         let end_index = end_index.unwrap_or_else(|| self.source.len());
         if is_decimal {
             Ok((
@@ -257,8 +268,11 @@ impl<'input> Lexer<'input> {
         }
     }
 
-    fn read_identifier(&mut self, start_index: usize) -> <Lexer<'input> as Iterator>::Item {
-        let start_loc = self.get_location();
+    fn read_identifier(
+        &mut self,
+        start_index: usize,
+        start_loc: Location,
+    ) -> <Lexer<'input> as Iterator>::Item {
         let end_index = self
             .take_while(|ch| is_id_start(ch) || is_id_body(ch))
             .unwrap_or_else(|| self.source.len());
@@ -294,23 +308,24 @@ impl<'input> Iterator for Lexer<'input> {
     fn next(&mut self) -> Option<Self::Item> {
         self.skip_whitespace();
         let start_loc = self.get_location();
-        if let Some((location, ch)) = self.bump() {
+        if let Some((i, ch)) = self.bump() {
+            let end_loc = self.get_location();
             match ch {
-                '{' => Some(Ok((Token::LBrace, LocationRange(start_loc, start_loc)))),
+                '{' => Some(Ok((Token::LBrace, LocationRange(start_loc, end_loc)))),
                 '}' => {
                     Some(self.lookahead_match(start_loc, Token::RParenBrace, Token::RBrace, ')'))
                 }
                 '(' => {
                     Some(self.lookahead_match(start_loc, Token::LParenBrace, Token::LParen, '{'))
                 }
-                ')' => Some(Ok((Token::RParen, LocationRange(start_loc, start_loc)))),
-                '[' => Some(Ok((Token::LBracket, LocationRange(start_loc, start_loc)))),
-                ']' => Some(Ok((Token::RBracket, LocationRange(start_loc, start_loc)))),
-                ';' => Some(Ok((Token::Semicolon, LocationRange(start_loc, start_loc)))),
-                ',' => Some(Ok((Token::Comma, LocationRange(start_loc, start_loc)))),
-                '.' => Some(Ok((Token::Dot, LocationRange(start_loc, start_loc)))),
-                '\\' => Some(Ok((Token::Slash, LocationRange(start_loc, start_loc)))),
-                ':' => Some(Ok((Token::Colon, LocationRange(start_loc, start_loc)))),
+                ')' => Some(Ok((Token::RParen, LocationRange(start_loc, end_loc)))),
+                '[' => Some(Ok((Token::LBracket, LocationRange(start_loc, end_loc)))),
+                ']' => Some(Ok((Token::RBracket, LocationRange(start_loc, end_loc)))),
+                ';' => Some(Ok((Token::Semicolon, LocationRange(start_loc, end_loc)))),
+                ',' => Some(Ok((Token::Comma, LocationRange(start_loc, end_loc)))),
+                '.' => Some(Ok((Token::Dot, LocationRange(start_loc, end_loc)))),
+                '\\' => Some(Ok((Token::Slash, LocationRange(start_loc, end_loc)))),
+                ':' => Some(Ok((Token::Colon, LocationRange(start_loc, end_loc)))),
                 '+' => Some(self.lookahead_match(start_loc, Token::PlusEqual, Token::Plus, '=')),
                 '-' => Some(self.lookahead_match(start_loc, Token::MinusEqual, Token::Minus, '=')),
                 '*' => Some(self.lookahead_match(start_loc, Token::TimesEqual, Token::Times, '=')),
@@ -326,7 +341,7 @@ impl<'input> Iterator for Lexer<'input> {
                             LocationRange(start_loc, self.get_location()),
                         )))
                     }
-                    _ => Some(Ok((Token::Div, LocationRange(start_loc, start_loc)))),
+                    _ => Some(Ok((Token::Div, LocationRange(start_loc, end_loc)))),
                 },
                 '!' => Some(self.lookahead_match(start_loc, Token::BangEqual, Token::Bang, '=')),
                 '=' => match self.lookahead {
@@ -344,7 +359,7 @@ impl<'input> Iterator for Lexer<'input> {
                             LocationRange(start_loc, self.get_location()),
                         )))
                     }
-                    _ => Some(Ok((Token::Equal, LocationRange(start_loc, start_loc)))),
+                    _ => Some(Ok((Token::Equal, LocationRange(start_loc, end_loc)))),
                 },
                 '>' => {
                     Some(self.lookahead_match(start_loc, Token::GreaterEqual, Token::Greater, '='))
@@ -352,11 +367,14 @@ impl<'input> Iterator for Lexer<'input> {
                 '<' => Some(self.lookahead_match(start_loc, Token::LessEqual, Token::Less, '=')),
                 '&' => Some(self.lookahead_match(start_loc, Token::AmpAmp, Token::Amp, '&')),
                 '|' => Some(self.lookahead_match(start_loc, Token::PipePipe, Token::Pipe, '|')),
-                '"' => Some(self.read_string(location)),
-                ch if is_id_start(ch) => Some(self.read_identifier(location)),
-                ch if ch.is_ascii_digit() => Some(self.read_number(location)),
+                '"' => Some(self.read_string(i, start_loc)),
+                ch if is_id_start(ch) => Some(self.read_identifier(i, start_loc)),
+                ch if ch.is_ascii_digit() => Some(self.read_number(i, start_loc)),
                 ch => {
-                    let error = LexicalError::InvalidCharacter { ch, location };
+                    let error = LexicalError::InvalidCharacter {
+                        ch,
+                        location: LocationRange(start_loc, end_loc),
+                    };
                     Some(Err(error))
                 }
             }

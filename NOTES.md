@@ -22,3 +22,6 @@ https://en.wikipedia.org/wiki/Lambda_lifting
   }
 }
 ```
+
+Typechecking based on typeclass/trait constraints, then with interop, turn these constraint checks
+into runtime ones.

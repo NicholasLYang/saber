@@ -1,3 +1,4 @@
+foo bar: int (foo, bar) { foo, bar, baz }: A
 let fact = \(n: int): int => {
   if (n == 0) {
     return 1;

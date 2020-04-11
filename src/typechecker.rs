@@ -104,11 +104,12 @@ impl TypeChecker {
     }
 
     pub fn stmt(&mut self, stmt: Loc<Stmt>) -> Result<Vec<Loc<StmtT>>, TypeError> {
+        let location = stmt.location;
         match stmt.inner {
             Stmt::Expr(expr) => {
                 let typed_expr = self.expr(expr)?;
                 Ok(vec![Loc {
-                    location: stmt.location,
+                    location,
                     inner: StmtT::Expr(typed_expr),
                 }])
             }
@@ -125,7 +126,7 @@ impl TypeChecker {
                 let (params, body, return_type) = self.func(params, *body, return_type_sig)?;
                 let func_scope = self.symbol_table.set_scope(previous_scope);
                 Ok(vec![Loc {
-                    location: stmt.location,
+                    location,
                     inner: StmtT::Function {
                         name: func_name,
                         params,
@@ -136,15 +137,17 @@ impl TypeChecker {
                     },
                 }])
             }
-            Stmt::Asgn(pat, rhs) => Ok(self.asgn(pat, rhs)?),
+            Stmt::Asgn(pat, rhs) => Ok(self.asgn(pat, rhs, location)?),
             Stmt::If(cond, then_stmt, else_stmt) => {
                 let typed_cond = self.expr(cond)?;
-                if !self.unify(&typed_cond.get_type(), &Arc::new(Type::Bool)) {
+                let cond_type = typed_cond.inner.get_type();
+                if !self.unify(&cond_type, &Arc::new(Type::Bool)) {
                     return Err(TypeError::UnificationFailure {
-                        type1: typed_cond.get_type(),
+                        type1: cond_type,
                         type2: Arc::new(Type::Bool),
                     });
                 }
+                let then_location = then_stmt.location;
                 let typed_then = self.stmt(*then_stmt)?;
                 let typed_else = match else_stmt {
                     Some(else_stmt) => Some(Box::new(Loc {
@@ -154,11 +157,11 @@ impl TypeChecker {
                     None => None,
                 };
                 let then = Loc {
-                    location: then_stmt.location,
+                    location: then_location,
                     inner: StmtT::Block(typed_then),
                 };
                 Ok(vec![Loc {
-                    location: stmt.location,
+                    location,
                     inner: StmtT::If(typed_cond, Box::new(then), typed_else),
                 }])
             }
@@ -166,18 +169,24 @@ impl TypeChecker {
                 let typed_exp = self.expr(expr)?;
                 match self.return_type.clone() {
                     Some(ref return_type) => {
-                        if self.unify(&typed_exp.get_type(), return_type) {
-                            Ok(vec![StmtT::Return(typed_exp)])
+                        if self.unify(&typed_exp.inner.get_type(), return_type) {
+                            Ok(vec![Loc {
+                                location,
+                                inner: StmtT::Return(typed_exp),
+                            }])
                         } else {
                             Err(TypeError::UnificationFailure {
-                                type1: typed_exp.get_type(),
+                                type1: typed_exp.inner.get_type(),
                                 type2: return_type.clone(),
                             })
                         }
                     }
                     None => {
-                        self.return_type = Some(typed_exp.get_type());
-                        Ok(vec![StmtT::Return(typed_exp)])
+                        self.return_type = Some(typed_exp.inner.get_type());
+                        Ok(vec![Loc {
+                            location,
+                            inner: StmtT::Return(typed_exp),
+                        }])
                     }
                 }
             }
@@ -186,9 +195,10 @@ impl TypeChecker {
                 for stmt in stmts {
                     typed_stmts.push(self.stmt(stmt)?);
                 }
-                Ok(vec![StmtT::Block(
-                    typed_stmts.into_iter().flatten().collect(),
-                )])
+                Ok(vec![Loc {
+                    location,
+                    inner: StmtT::Block(typed_stmts.into_iter().flatten().collect()),
+                }])
             }
             Stmt::Export(name) => {
                 self.symbol_table
@@ -196,7 +206,10 @@ impl TypeChecker {
                     .ok_or(TypeError::VarNotDefined {
                         name: self.name_table.get_str(&name).to_string(),
                     })?;
-                Ok(vec![StmtT::Export(name)])
+                Ok(vec![Loc {
+                    location,
+                    inner: StmtT::Export(name),
+                }])
             }
         }
     }
@@ -242,20 +255,20 @@ impl TypeChecker {
 
     fn pat(&mut self, pat: &Pat) -> Result<Arc<Type>, TypeError> {
         match pat {
-            Pat::Id(_, Some(type_sig)) => {
+            Pat::Id(_, Some(type_sig), _) => {
                 let type_ = self.lookup_type_sig(&type_sig)?;
                 Ok(type_)
             }
-            Pat::Id(name, None) => {
+            Pat::Id(name, None, _) => {
                 let type_ = self.get_fresh_type_var();
                 self.symbol_table.insert_var(*name, type_.clone());
                 Ok(type_)
             }
-            Pat::Tuple(pats) => {
+            Pat::Tuple(pats, _) => {
                 let types: Result<Vec<_>, _> = pats.iter().map(|pat| self.pat(pat)).collect();
                 Ok(Arc::new(Type::Tuple(types?)))
             }
-            Pat::Record(pats, type_sig) => {
+            Pat::Record(pats, type_sig, _) => {
                 // In the future I should unify these two if they both exist.
                 if let Some(type_sig) = type_sig {
                     self.lookup_type_sig(&type_sig)
@@ -402,20 +415,21 @@ impl TypeChecker {
     fn asgn(
         &mut self,
         pat: Pat,
-        rhs: Expr,
+        rhs: Loc<Expr>,
         location: LocationRange,
     ) -> Result<Vec<Loc<StmtT>>, TypeError> {
         let pat_type = self.pat(&pat)?;
         let typed_rhs = self.expr(rhs)?;
-        if self.unify(&pat_type, &typed_rhs.get_type()) {
+        if self.unify(&pat_type, &typed_rhs.inner.get_type()) {
             let name = if let Pat::Id(name, _, _) = pat {
                 name
             } else {
                 self.name_table.get_fresh_name()
             };
-            self.symbol_table.insert_var(name, typed_rhs.get_type());
+            self.symbol_table
+                .insert_var(name, typed_rhs.inner.get_type());
             let mut pat_bindings =
-                self.generate_pattern_bindings(&pat, name, &typed_rhs.get_type(), location)?;
+                self.generate_pattern_bindings(&pat, name, &typed_rhs.inner.get_type(), location)?;
             let mut bindings = vec![Loc {
                 location,
                 inner: StmtT::Asgn(name, typed_rhs),
@@ -425,7 +439,7 @@ impl TypeChecker {
         } else {
             Err(TypeError::UnificationFailure {
                 type1: pat_type,
-                type2: typed_rhs.get_type(),
+                type2: typed_rhs.inner.get_type(),
             })
         }
     }

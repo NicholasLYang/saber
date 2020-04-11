@@ -751,27 +751,42 @@ impl<'input> Parser<'input> {
 
 #[cfg(test)]
 mod tests {
-    use ast::{Expr, Pat, TypeSig, Value};
-    use lexer::Lexer;
+    use ast::{Expr, Loc, Pat, TypeSig, Value};
+    use lexer::{Lexer, Location, LocationRange};
     use parser::{ParseError, Parser};
 
     #[test]
     fn literal() -> Result<(), ParseError> {
         let expected = vec![
-            Expr::Primary {
-                value: Value::Integer(10),
+            Loc {
+                location: LocationRange(Location(1, 1), Location(1, 3)),
+                inner: Expr::Primary {
+                    value: Value::Integer(10),
+                },
             },
-            Expr::Primary {
-                value: Value::Float(10.2),
+            Loc {
+                location: LocationRange(Location(1, 4), Location(1, 8)),
+                inner: Expr::Primary {
+                    value: Value::Float(10.2),
+                },
             },
-            Expr::Primary {
-                value: Value::Bool(true),
+            Loc {
+                location: LocationRange(Location(1, 9), Location(1, 13)),
+                inner: Expr::Primary {
+                    value: Value::Bool(true),
+                },
             },
-            Expr::Primary {
-                value: Value::Bool(false),
+            Loc {
+                location: LocationRange(Location(1, 14), Location(1, 19)),
+                inner: Expr::Primary {
+                    value: Value::Bool(false),
+                },
             },
-            Expr::Primary {
-                value: Value::String("hello".into()),
+            Loc {
+                location: LocationRange(Location(1, 20), Location(1, 27)),
+                inner: Expr::Primary {
+                    value: Value::String("hello".into()),
+                },
             },
         ];
         let source = "10 10.2 true false \"hello\"";
@@ -786,11 +801,26 @@ mod tests {
     #[test]
     fn id() -> Result<(), ParseError> {
         let expected = vec![
-            Expr::Var { name: 0 },
-            Expr::Var { name: 1 },
-            Expr::Var { name: 1 },
-            Expr::Var { name: 2 },
-            Expr::Var { name: 3 },
+            Loc {
+                location: LocationRange(Location(1, 1), Location(1, 4)),
+                inner: Expr::Var { name: 0 },
+            },
+            Loc {
+                location: LocationRange(Location(1, 5), Location(1, 8)),
+                inner: Expr::Var { name: 1 },
+            },
+            Loc {
+                location: LocationRange(Location(1, 9), Location(1, 12)),
+                inner: Expr::Var { name: 1 },
+            },
+            Loc {
+                location: LocationRange(Location(1, 13), Location(1, 16)),
+                inner: Expr::Var { name: 2 },
+            },
+            Loc {
+                location: LocationRange(Location(1, 17), Location(1, 20)),
+                inner: Expr::Var { name: 3 },
+            },
         ];
         let source = "foo bar bar baz bat";
         let lexer = Lexer::new(&source);
@@ -808,10 +838,24 @@ mod tests {
     #[test]
     fn pat() -> Result<(), ParseError> {
         let expected = vec![
-            Pat::Id(0, None),
-            Pat::Id(1, Some(TypeSig::Name(2))),
-            Pat::Tuple(vec![Pat::Id(0, None), Pat::Id(1, None)]),
-            Pat::Record(vec![0, 1, 2], Some(TypeSig::Name(3))),
+            Pat::Id(0, None, LocationRange(Location(1, 1), Location(1, 4))),
+            Pat::Id(
+                1,
+                Some(TypeSig::Name(2)),
+                LocationRange(Location(1, 5), Location(1, 13)),
+            ),
+            Pat::Tuple(
+                vec![
+                    Pat::Id(0, None, LocationRange(Location(1, 15), Location(1, 18))),
+                    Pat::Id(1, None, LocationRange(Location(1, 20), Location(1, 23))),
+                ],
+                LocationRange(Location(1, 14), Location(1, 24)),
+            ),
+            Pat::Record(
+                vec![0, 1, 2],
+                Some(TypeSig::Name(3)),
+                LocationRange(Location(1, 26), Location(1, 46)),
+            ),
         ];
         let source = "foo bar: int (foo, bar) { foo, bar, baz }: A";
         let lexer = Lexer::new(&source);
