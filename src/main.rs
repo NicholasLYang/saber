@@ -107,7 +107,7 @@ mod tests {
                     TokenDiscriminants::String,
                     TokenDiscriminants::LParen
                 ],
-                location: LocationRange(Location(1, 14), Location(1, 14))
+                location: LocationRange(Location(1, 15), Location(1, 16))
             }
             .into()
         );

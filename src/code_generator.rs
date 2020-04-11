@@ -1,4 +1,4 @@
-use ast::{Name, Op, Type, TypedExpr, TypedStmt, Value};
+use ast::{ExprT, Loc, Name, Op, StmtT, Type, Value};
 use im::hashmap::HashMap;
 use std::convert::TryInto;
 use std::sync::Arc;
@@ -70,16 +70,16 @@ impl CodeGenerator {
         }
     }
 
-    pub fn generate_program(mut self, program: Vec<TypedStmt>) -> Result<ProgramData> {
+    pub fn generate_program(mut self, program: Vec<Loc<StmtT>>) -> Result<ProgramData> {
         for stmt in program {
-            (&mut self).generate_top_level_stmt(&stmt)?;
+            (&mut self).generate_top_level_stmt(&stmt.inner)?;
         }
         Ok(self.program_data)
     }
 
-    pub fn generate_top_level_stmt(&mut self, stmt: &TypedStmt) -> Result<()> {
+    pub fn generate_top_level_stmt(&mut self, stmt: &StmtT) -> Result<()> {
         match stmt {
-            TypedStmt::Function {
+            StmtT::Function {
                 name,
                 params,
                 params_type: _,
@@ -89,10 +89,10 @@ impl CodeGenerator {
             } => {
                 self.param_count = 0;
                 self.local_variables = Vec::new();
-                self.generate_function_binding(*name, *scope, params, return_type, body)
+                self.generate_function_binding(*name, *scope, params, return_type, &(*body).inner)
             }
-            TypedStmt::Return(_) => Err(GenerationError::TopLevelReturn),
-            TypedStmt::Export(func_name) => {
+            StmtT::Return(_) => Err(GenerationError::TopLevelReturn),
+            StmtT::Export(func_name) => {
                 let name_str = self.name_table.get_str(func_name);
                 let sym_entry = self.symbol_table.lookup_name(*func_name).ok_or(
                     GenerationError::FunctionNotDefined {
@@ -126,7 +126,7 @@ impl CodeGenerator {
         scope: usize,
         params: &[(Name, Arc<Type>)],
         return_type: &Arc<Type>,
-        body: &TypedStmt,
+        body: &StmtT,
     ) -> Result<()> {
         let entry = self.symbol_table.lookup_name(name).unwrap();
         let index = if let SymbolTableEntry::Function {
@@ -152,7 +152,7 @@ impl CodeGenerator {
         &mut self,
         return_type: &Arc<Type>,
         params: &[(Name, Arc<Type>)],
-        body: &TypedStmt,
+        body: &StmtT,
     ) -> Result<(FunctionType, FunctionBody)> {
         let return_type = self.generate_wasm_type(&return_type)?;
         let function_type = self.generate_function_type(&return_type, params)?;
@@ -186,7 +186,7 @@ impl CodeGenerator {
 
     fn generate_function_body(
         &mut self,
-        body: &TypedStmt,
+        body: &StmtT,
         return_type: Option<WasmType>,
     ) -> Result<FunctionBody> {
         let code = self.generate_stmt(body, true, &return_type)?;
@@ -229,12 +229,12 @@ impl CodeGenerator {
 
     fn generate_stmt(
         &mut self,
-        stmt: &TypedStmt,
+        stmt: &StmtT,
         is_last: bool,
         return_type: &Option<WasmType>,
     ) -> Result<Vec<OpCode>> {
         match stmt {
-            TypedStmt::Function {
+            StmtT::Function {
                 name,
                 params,
                 params_type: _,
@@ -248,33 +248,37 @@ impl CodeGenerator {
                 std::mem::swap(&mut old_param_count, &mut self.param_count);
                 std::mem::swap(&mut old_local_variables, &mut self.local_variables);
                 std::mem::swap(&mut old_var_indices, &mut self.var_indices);
-                self.generate_function_binding(*name, *scope, params, return_type, body)?;
+                self.generate_function_binding(*name, *scope, params, return_type, &(*body).inner)?;
                 std::mem::swap(&mut old_param_count, &mut self.param_count);
                 std::mem::swap(&mut old_local_variables, &mut self.local_variables);
                 std::mem::swap(&mut old_var_indices, &mut self.var_indices);
                 Ok(Vec::new())
             }
-            TypedStmt::Return(expr) => {
+            StmtT::Return(expr) => {
                 if is_last {
-                    self.generate_expr(expr)
+                    self.generate_expr(&expr.inner)
                 } else {
-                    let mut opcodes = self.generate_expr(expr)?;
+                    let mut opcodes = self.generate_expr(&expr.inner)?;
                     opcodes.push(OpCode::Return);
                     Ok(opcodes)
                 }
             }
-            TypedStmt::If(cond, then_block, else_block) => {
+            StmtT::If(cond, then_block, else_block) => {
                 // Start with the cond opcodes
-                let mut opcodes = self.generate_expr(cond)?;
+                let mut opcodes = self.generate_expr(&cond.inner)?;
                 opcodes.push(OpCode::If);
                 opcodes.push(OpCode::Type(WasmType::Empty));
                 // For now we say false because allowing the blocks to
                 // implicitly return by leaving on the stack means we have to
                 // change the block return type.
-                opcodes.append(&mut self.generate_stmt(then_block, false, return_type)?);
+                opcodes.append(&mut self.generate_stmt(&then_block.inner, false, return_type)?);
                 if let Some(else_block) = else_block {
                     opcodes.push(OpCode::Else);
-                    opcodes.append(&mut self.generate_stmt(else_block, false, return_type)?);
+                    opcodes.append(&mut self.generate_stmt(
+                        &else_block.inner,
+                        false,
+                        return_type,
+                    )?);
                 }
                 opcodes.push(OpCode::End);
                 // If this is the last instruction and the function is
@@ -284,22 +288,22 @@ impl CodeGenerator {
                 }
                 Ok(opcodes)
             }
-            TypedStmt::Asgn(name, expr) => {
+            StmtT::Asgn(name, expr) => {
                 let wasm_type = self
-                    .generate_wasm_type(&expr.get_type())?
+                    .generate_wasm_type(&expr.inner.get_type())?
                     .ok_or(GenerationError::EmptyType)?;
                 self.local_variables.push(wasm_type);
                 let local_index = self.local_variables.len() - 1;
                 self.var_indices.insert(*name, local_index);
-                let mut opcodes = self.generate_expr(expr)?;
+                let mut opcodes = self.generate_expr(&expr.inner)?;
                 opcodes.push(OpCode::SetLocal(local_index.try_into().unwrap()));
                 Ok(opcodes)
             }
-            TypedStmt::Block(stmts) => {
+            StmtT::Block(stmts) => {
                 let mut opcodes = Vec::new();
                 for (i, stmt) in stmts.iter().enumerate() {
                     opcodes.append(&mut self.generate_stmt(
-                        stmt,
+                        &stmt.inner,
                         is_last && i == stmts.len() - 1,
                         return_type,
                     )?);
@@ -336,23 +340,23 @@ impl CodeGenerator {
         }
     }
 
-    fn generate_expr(&mut self, expr: &TypedExpr) -> Result<Vec<OpCode>> {
+    fn generate_expr(&mut self, expr: &ExprT) -> Result<Vec<OpCode>> {
         match expr {
-            TypedExpr::Primary { value, type_: _ } => Ok(vec![self.generate_primary(value)?]),
-            TypedExpr::Var { name, type_: _ } => {
+            ExprT::Primary { value, type_: _ } => Ok(vec![self.generate_primary(value)?]),
+            ExprT::Var { name, type_: _ } => {
                 let index = self.get_params_index(*name)?;
                 Ok(vec![OpCode::GetLocal(index.try_into().unwrap())])
             }
-            TypedExpr::Call {
+            ExprT::Call {
                 callee,
                 args,
                 type_: _,
             } => {
-                if let TypedExpr::Var { name, type_: _ } = &**callee {
+                if let ExprT::Var { name, type_: _ } = &callee.inner {
                     let mut opcodes = Vec::new();
                     let entry = self.symbol_table.lookup_name(*name).ok_or(
                         GenerationError::FunctionNotDefined {
-                            name: self.name_table.get_str(name).to_string(),
+                            name: self.name_table.get_str(&name).to_string(),
                         },
                     )?;
                     let index = if let SymbolTableEntry::Function {
@@ -366,23 +370,23 @@ impl CodeGenerator {
                         // Should not be reachable since this shouldn't typecheck in the first place
                         return Err(GenerationError::NotReachable);
                     };
-                    opcodes.append(&mut self.generate_expr(args)?);
+                    opcodes.append(&mut self.generate_expr(&args.inner)?);
                     opcodes.push(OpCode::Call((index).try_into().unwrap()));
                     Ok(opcodes)
                 } else {
                     Err(GenerationError::NotImplemented)
                 }
             }
-            TypedExpr::BinOp {
+            ExprT::BinOp {
                 op,
                 lhs,
                 rhs,
                 type_,
             } => {
-                let mut lhs_ops = self.generate_expr(lhs)?;
-                let lhs_type = lhs.get_type();
-                let mut rhs_ops = self.generate_expr(rhs)?;
-                let rhs_type = rhs.get_type();
+                let mut lhs_ops = self.generate_expr(&lhs.inner)?;
+                let lhs_type = lhs.inner.get_type();
+                let mut rhs_ops = self.generate_expr(&rhs.inner)?;
+                let rhs_type = rhs.inner.get_type();
 
                 let promoted_type =
                     self.promote_types(&lhs_type, &rhs_type, &mut lhs_ops, &mut rhs_ops)?;
