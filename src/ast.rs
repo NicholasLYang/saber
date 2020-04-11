@@ -1,9 +1,17 @@
+use lexer::LocationRange;
 use std::fmt;
 use std::sync::Arc;
+
 pub type Name = usize;
 
 #[derive(Debug, PartialEq, Clone)]
-pub enum Stmt {
+pub struct Stmt {
+    pub location: LocationRange,
+    pub kind: StmtKind,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum StmtKind {
     Asgn(Pat, Expr),
     Expr(Expr),
     Return(Expr),
@@ -32,7 +40,13 @@ pub enum TypedStmt {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub enum Expr {
+pub struct Expr {
+    pub location: LocationRange,
+    pub kind: ExprKind,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum ExprKind {
     Primary {
         value: Value,
     },
@@ -208,10 +222,10 @@ pub enum TypeSig {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Pat {
-    Id(Name, Option<TypeSig>),
-    Record(Vec<Name>, Option<TypeSig>),
-    Tuple(Vec<Pat>),
-    Empty,
+    Id(Name, Option<TypeSig>, LocationRange),
+    Record(Vec<Name>, Option<TypeSig>, LocationRange),
+    Tuple(Vec<Pat>, LocationRange),
+    Empty(LocationRange),
 }
 
 // Oy vey, cause Rust doesn't allow enum field access

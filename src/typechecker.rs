@@ -1,5 +1,5 @@
 use ast::Value;
-use ast::{Expr, Name, Op, Pat, Stmt, Type, TypeSig, TypedExpr, TypedStmt};
+use ast::{ExprKind, Name, Op, Pat, StmtKind, Type, TypeSig, TypedExpr, TypedStmt};
 use im::hashmap::HashMap;
 use std::sync::Arc;
 use symbol_table::{SymbolTable, SymbolTableEntry};
@@ -92,7 +92,7 @@ impl TypeChecker {
         Arc::new(type_var)
     }
 
-    pub fn check_program(&mut self, program: Vec<Stmt>) -> Result<Vec<TypedStmt>, TypeError> {
+    pub fn check_program(&mut self, program: Vec<StmtKind>) -> Result<Vec<TypedStmt>, TypeError> {
         let mut typed_stmts = Vec::new();
         for stmt in program {
             typed_stmts.push(self.stmt(stmt)?);
@@ -100,13 +100,13 @@ impl TypeChecker {
         Ok(typed_stmts.into_iter().flatten().collect())
     }
 
-    pub fn stmt(&mut self, stmt: Stmt) -> Result<Vec<TypedStmt>, TypeError> {
+    pub fn stmt(&mut self, stmt: StmtKind) -> Result<Vec<TypedStmt>, TypeError> {
         match stmt {
-            Stmt::Expr(expr) => {
+            StmtKind::Expr(expr) => {
                 let typed_expr = self.expr(expr)?;
                 Ok(vec![TypedStmt::Expr(typed_expr)])
             }
-            Stmt::Function(func_name, params, return_type_sig, body) => {
+            StmtKind::Function(func_name, params, return_type_sig, body) => {
                 let params_type = self.pat(&params)?;
                 let return_type = if let Some(type_sig) = &return_type_sig {
                     self.lookup_type_sig(type_sig)?
@@ -127,8 +127,8 @@ impl TypeChecker {
                     scope: func_scope,
                 }])
             }
-            Stmt::Asgn(pat, rhs) => Ok(self.asgn(pat, rhs)?),
-            Stmt::If(cond, then_stmt, else_stmt) => {
+            StmtKind::Asgn(pat, rhs) => Ok(self.asgn(pat, rhs)?),
+            StmtKind::If(cond, then_stmt, else_stmt) => {
                 let typed_cond = self.expr(cond)?;
                 if !self.unify(&typed_cond.get_type(), &Arc::new(Type::Bool)) {
                     return Err(TypeError::UnificationFailure {
@@ -147,7 +147,7 @@ impl TypeChecker {
                     typed_else,
                 )])
             }
-            Stmt::Return(expr) => {
+            StmtKind::Return(expr) => {
                 let typed_exp = self.expr(expr)?;
                 match self.return_type.clone() {
                     Some(ref return_type) => {
@@ -166,7 +166,7 @@ impl TypeChecker {
                     }
                 }
             }
-            Stmt::Block(stmts) => {
+            StmtKind::Block(stmts) => {
                 let mut typed_stmts = Vec::new();
                 for stmt in stmts {
                     typed_stmts.push(self.stmt(stmt)?);
@@ -175,7 +175,7 @@ impl TypeChecker {
                     typed_stmts.into_iter().flatten().collect(),
                 )])
             }
-            Stmt::Export(name) => {
+            StmtKind::Export(name) => {
                 self.symbol_table
                     .lookup_name(name)
                     .ok_or(TypeError::VarNotDefined {
@@ -366,7 +366,7 @@ impl TypeChecker {
         }
     }
 
-    fn asgn(&mut self, pat: Pat, rhs: Expr) -> Result<Vec<TypedStmt>, TypeError> {
+    fn asgn(&mut self, pat: Pat, rhs: ExprKind) -> Result<Vec<TypedStmt>, TypeError> {
         let pat_type = self.pat(&pat)?;
         let typed_rhs = self.expr(rhs)?;
         if self.unify(&pat_type, &typed_rhs.get_type()) {
@@ -400,7 +400,7 @@ impl TypeChecker {
     fn func(
         &mut self,
         params: Pat,
-        body: Stmt,
+        body: StmtKind,
         return_type: Option<TypeSig>,
     ) -> Result<(Vec<(Name, Arc<Type>)>, Box<TypedStmt>, Arc<Type>), TypeError> {
         let func_params = self.get_func_params(&params)?;
@@ -420,10 +420,10 @@ impl TypeChecker {
         Ok((func_params, Box::new(TypedStmt::Block(body)), return_type))
     }
 
-    fn expr(&mut self, expr: Expr) -> Result<TypedExpr, TypeError> {
+    fn expr(&mut self, expr: ExprKind) -> Result<TypedExpr, TypeError> {
         match expr {
-            Expr::Primary { value } => Ok(self.value(value)),
-            Expr::Var { name } => {
+            ExprKind::Primary { value } => Ok(self.value(value)),
+            ExprKind::Var { name } => {
                 let entry =
                     self.symbol_table
                         .lookup_name(name)
@@ -445,7 +445,7 @@ impl TypeChecker {
                     }),
                 }
             }
-            Expr::BinOp { op, lhs, rhs } => {
+            ExprKind::BinOp { op, lhs, rhs } => {
                 let typed_lhs = self.expr(*lhs)?;
                 let typed_rhs = self.expr(*rhs)?;
                 let lhs_type = typed_lhs.get_type();
@@ -464,7 +464,7 @@ impl TypeChecker {
                     }),
                 }
             }
-            Expr::Tuple(elems) => {
+            ExprKind::Tuple(elems) => {
                 let mut typed_elems = Vec::new();
                 let mut types = Vec::new();
                 for elem in elems {
@@ -474,7 +474,7 @@ impl TypeChecker {
                 }
                 Ok(TypedExpr::Tuple(typed_elems, Arc::new(Type::Tuple(types))))
             }
-            Expr::Function {
+            ExprKind::Function {
                 params,
                 body,
                 return_type,
@@ -492,7 +492,7 @@ impl TypeChecker {
                 };
                 Ok(func)
             }
-            Expr::UnaryOp { op, rhs } => match op {
+            ExprKind::UnaryOp { op, rhs } => match op {
                 Op::Minus | Op::Plus => {
                     let typed_rhs = self.expr(*rhs)?;
                     if self.unify(&typed_rhs.get_type(), &Arc::new(Type::Int))
@@ -510,7 +510,7 @@ impl TypeChecker {
                 }
                 op => Err(TypeError::InvalidUnaryOp { op }),
             },
-            Expr::Call { callee, args } => {
+            ExprKind::Call { callee, args } => {
                 let typed_callee = self.expr(*callee)?;
                 let callee_type = typed_callee.get_type();
                 let (params_type, return_type) = match &(*callee_type) {

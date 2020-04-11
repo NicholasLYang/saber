@@ -1,5 +1,6 @@
-use crate::ast::{Expr, Name, Op, Pat, Stmt, TypeSig, Value};
+use crate::ast::{ExprKind, Name, Op, Pat, StmtKind, TypeSig, Value};
 use crate::lexer::{Lexer, LexicalError, LocationRange, Token, TokenDiscriminants};
+use ast::{Expr, Stmt};
 use std::fmt::Debug;
 use utils::NameTable;
 
@@ -84,11 +85,14 @@ impl<'input> Parser<'input> {
         self.pushedback_tokens.push(token);
     }
 
-    fn match_one(&mut self, lookahead: TokenDiscriminants) -> Result<Option<Token>, ParseError> {
+    fn match_one(
+        &mut self,
+        lookahead: TokenDiscriminants,
+    ) -> Result<Option<(Token, LocationRange)>, ParseError> {
         if let Some((token, location)) = self.bump()? {
             let token_discriminant: TokenDiscriminants = (&token).into();
             if token_discriminant == lookahead {
-                Ok(Some(token))
+                Ok(Some((token, location)))
             } else {
                 self.pushback((token, location));
                 Ok(None)
@@ -100,7 +104,10 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn match_multiple(&mut self, tokens: Vec<Token>) -> Result<Option<Token>, ParseError> {
+    fn match_multiple(
+        &mut self,
+        tokens: Vec<Token>,
+    ) -> Result<Option<(Token, LocationRange)>, ParseError> {
         for token in tokens {
             if let Some(token) = self.match_one((&token).into())? {
                 return Ok(Some(token));
@@ -144,12 +151,17 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn block(&mut self) -> Result<Stmt, ParseError> {
+    fn block(&mut self, left: LocationRange) -> Result<Stmt, ParseError> {
         let mut stmts = Vec::new();
-        while let None = self.match_one(TokenDiscriminants::RBrace)? {
+        loop {
+            if let Some((_, right)) = self.match_one(TokenDiscriminants::RBrace)? {
+                return Ok(Stmt {
+                    location: LocationRange(left.0, right.1),
+                    kind: StmtKind::Block(stmts),
+                });
+            }
             stmts.push(self.stmt()?);
         }
-        Ok(Stmt::Block(stmts))
     }
 
     pub fn stmts(&mut self) -> Result<Vec<Stmt>, ParseError> {
@@ -166,12 +178,12 @@ impl<'input> Parser<'input> {
     pub fn stmt(&mut self) -> Result<Stmt, ParseError> {
         let tok = self.bump()?;
         match tok {
-            Some((Token::Let, _)) => self.let_stmt(),
-            Some((Token::Return, _)) => Ok(self.return_stmt()?),
-            Some((Token::Export, _)) => Ok(self.export_stmt()?),
-            Some((Token::If, _)) => Ok(self.if_stmt()?),
-            Some(token) => {
-                self.pushback(token);
+            Some((Token::Let, loc)) => self.let_stmt(loc),
+            Some((Token::Return, loc)) => Ok(self.return_stmt(loc)?),
+            Some((Token::Export, loc)) => Ok(self.export_stmt(loc)?),
+            Some((Token::If, loc)) => Ok(self.if_stmt(loc)?),
+            Some((token, loc)) => {
+                self.pushback((token, loc));
                 Ok(self.expression_stmt()?)
             }
             None => Err(ParseError::EndOfFile {
@@ -184,33 +196,38 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn if_stmt(&mut self) -> Result<Stmt, ParseError> {
+    fn if_stmt(&mut self, left: LocationRange) -> Result<Stmt, ParseError> {
         let cond = self.expr()?;
-        self.expect(TokenDiscriminants::LBrace)?;
-        let result_block = self.block()?;
-        let else_block = if self.match_one(TokenDiscriminants::Else)?.is_some() {
-            if self.match_one(TokenDiscriminants::If)?.is_some() {
-                Some(self.if_stmt()?)
+        let (_, block_left) = self.expect(TokenDiscriminants::LBrace)?;
+        let result_block = self.block(block_left)?;
+        if self.match_one(TokenDiscriminants::Else)?.is_some() {
+            let else_block = if let Some((_, left)) = self.match_one(TokenDiscriminants::If)? {
+                self.if_stmt(left)?
             } else {
-                self.expect(TokenDiscriminants::LBrace)?;
-                Some(self.block()?)
-            }
+                let (_, block_left) = self.expect(TokenDiscriminants::LBrace)?;
+                self.block(block_left)?
+            };
+            Ok(Stmt {
+                location: LocationRange(left.0, else_block.location.1),
+                kind: StmtKind::If(cond, Box::new(result_block), Some(Box::new(else_block))),
+            })
         } else {
-            None
-        };
-        Ok(Stmt::If(
-            cond,
-            Box::new(result_block),
-            else_block.map(Box::new),
-        ))
+            Ok(Stmt {
+                location: LocationRange(left.0, result_block.location.1),
+                kind: StmtKind::If(cond, Box::new(result_block), None),
+            })
+        }
     }
 
-    fn export_stmt(&mut self) -> Result<Stmt, ParseError> {
+    fn export_stmt(&mut self, left: LocationRange) -> Result<Stmt, ParseError> {
         let tok = self.bump()?;
         match tok {
             Some((Token::Ident(name), _)) => {
-                self.expect(TokenDiscriminants::Semicolon)?;
-                Ok(Stmt::Export(name))
+                let (_, right) = self.expect(TokenDiscriminants::Semicolon)?;
+                Ok(Stmt {
+                    location: LocationRange(left.0, right.1),
+                    kind: StmtKind::Export(name),
+                })
             }
             Some((token, location)) => {
                 self.pushback((token.clone(), location.clone()));
@@ -226,62 +243,85 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn return_stmt(&mut self) -> Result<Stmt, ParseError> {
+    fn return_stmt(&mut self, left: LocationRange) -> Result<Stmt, ParseError> {
         let expr = self.expr()?;
-        self.expect(TokenDiscriminants::Semicolon)?;
-        Ok(Stmt::Return(expr))
+        let (_, right) = self.expect(TokenDiscriminants::Semicolon)?;
+        Ok(Stmt {
+            location: LocationRange(left.0, right.1),
+            kind: StmtKind::Return(expr),
+        })
     }
 
-    fn let_stmt(&mut self) -> Result<Stmt, ParseError> {
+    fn let_stmt(&mut self, left: LocationRange) -> Result<Stmt, ParseError> {
         let pat = self.pattern()?;
         self.expect(TokenDiscriminants::Equal)?;
         let rhs_expr = self.expr()?;
-        if let Expr::Function {
-            params,
-            return_type,
-            body,
+        if let Expr {
+            location,
+            kind:
+                ExprKind::Function {
+                    params,
+                    return_type,
+                    body,
+                },
         } = rhs_expr
         {
             match pat {
-                Pat::Id(name, None) => Ok(Stmt::Function(name, params, return_type, body)),
-                Pat::Id(_, _) => Err(ParseError::FuncBindingTypeSig),
+                Pat::Id(name, None, _) => Ok(Stmt {
+                    location: LocationRange(left.0, location.1),
+                    kind: StmtKind::Function(name, params, return_type, body),
+                }),
+                Pat::Id(_, _, _) => Err(ParseError::FuncBindingTypeSig),
                 _ => Err(ParseError::DestructureFunction),
             }
         } else {
             self.expect(TokenDiscriminants::Semicolon)?;
-            Ok(Stmt::Asgn(pat, rhs_expr))
+            Ok(Stmt {
+                location: LocationRange(left.0, rhs_expr.location.1),
+                kind: StmtKind::Asgn(pat, rhs_expr),
+            })
         }
     }
 
     fn expression_stmt(&mut self) -> Result<Stmt, ParseError> {
         let expr = self.expr()?;
-        self.expect(TokenDiscriminants::Semicolon)?;
-        Ok(Stmt::Expr(expr))
+        let (_, right) = self.expect(TokenDiscriminants::Semicolon)?;
+        Ok(Stmt {
+            location: LocationRange(expr.location.0, right.1),
+            kind: StmtKind::Expr(expr),
+        })
     }
 
     fn expr(&mut self) -> Result<Expr, ParseError> {
-        if self.match_one(TokenDiscriminants::Slash)?.is_some() {
-            self.function()
+        if let Some((_, left)) = self.match_one(TokenDiscriminants::Slash)? {
+            self.function(left)
         } else {
             self.equality()
         }
     }
 
-    fn function(&mut self) -> Result<Expr, ParseError> {
+    fn function(&mut self, left: LocationRange) -> Result<Expr, ParseError> {
         let params = self.pattern()?;
         let return_type = self.type_sig()?;
         self.expect(TokenDiscriminants::FatArrow)?;
         let token = self.bump()?;
         let body = match token {
-            Some((Token::LBrace, _)) => self.block()?,
-            Some((Token::LParen, _)) => {
+            Some((Token::LBrace, left)) => self.block(left)?,
+            Some((Token::LParen, left)) => {
                 let expr = self.expr()?;
-                self.expect(TokenDiscriminants::RParen)?;
-                Stmt::Return(expr)
+                let (_, right) = self.expect(TokenDiscriminants::RParen)?;
+                Stmt {
+                    location: LocationRange(left.0, right.1),
+                    kind: StmtKind::Return(expr),
+                }
             }
-            Some((token, location)) => {
-                self.pushback((token, location));
-                Stmt::Return(self.expr()?)
+            Some((token, left)) => {
+                self.pushback((token, left));
+                let expr = self.expr()?;
+                Stmt {
+                    location: LocationRange(left.0, expr.location.1),
+                    kind: StmtKind::Return(expr),
+                }
             }
             // TODO: Streamline error reporting. I should group the
             // tokens into ones expected for each kind of syntax rule.
@@ -302,22 +342,28 @@ impl<'input> Parser<'input> {
                 });
             }
         };
-        Ok(Expr::Function {
-            params,
-            return_type,
-            body: Box::new(body),
+        Ok(Expr {
+            location: LocationRange(left.0, body.location.1),
+            kind: ExprKind::Function {
+                params,
+                return_type: return_type.map(|(return_type, _)| return_type),
+                body: Box::new(body),
+            },
         })
     }
 
     fn equality(&mut self) -> Result<Expr, ParseError> {
         let lhs = self.comparison()?;
-        if let Some(token) = self.match_multiple(vec![Token::EqualEqual, Token::BangEqual])? {
+        if let Some((token, _)) = self.match_multiple(vec![Token::EqualEqual, Token::BangEqual])? {
             let op = self.lookup_op_token(token)?;
             let rhs = self.comparison()?;
-            Ok(Expr::BinOp {
-                op,
-                lhs: Box::new(lhs),
-                rhs: Box::new(rhs),
+            Ok(Expr {
+                location: LocationRange(lhs.location.0, rhs.location.1),
+                kind: ExprKind::BinOp {
+                    op,
+                    lhs: Box::new(lhs),
+                    rhs: Box::new(rhs),
+                },
             })
         } else {
             Ok(lhs)
@@ -326,7 +372,7 @@ impl<'input> Parser<'input> {
 
     fn comparison(&mut self) -> Result<Expr, ParseError> {
         let lhs = self.addition()?;
-        if let Some(token) = self.match_multiple(vec![
+        if let Some((token, _)) = self.match_multiple(vec![
             Token::GreaterEqual,
             Token::Greater,
             Token::Less,
@@ -334,10 +380,13 @@ impl<'input> Parser<'input> {
         ])? {
             let op = self.lookup_op_token(token)?;
             let rhs = self.addition()?;
-            Ok(Expr::BinOp {
-                op,
-                lhs: Box::new(lhs),
-                rhs: Box::new(rhs),
+            Ok(Expr {
+                location: LocationRange(lhs.location.0, rhs.location.1),
+                kind: ExprKind::BinOp {
+                    op,
+                    lhs: Box::new(lhs),
+                    rhs: Box::new(rhs),
+                },
             })
         } else {
             Ok(lhs)
@@ -346,39 +395,48 @@ impl<'input> Parser<'input> {
 
     fn addition(&mut self) -> Result<Expr, ParseError> {
         let mut expr = self.multiplication()?;
-        while let Some(token) = self.match_multiple(vec![Token::Plus, Token::Minus])? {
+        while let Some((token, _)) = self.match_multiple(vec![Token::Plus, Token::Minus])? {
             let op = self.lookup_op_token(token)?;
             let rhs = self.multiplication()?;
-            expr = Expr::BinOp {
-                op,
-                lhs: Box::new(expr),
-                rhs: Box::new(rhs),
-            }
+            expr = Expr {
+                location: LocationRange(expr.location.0, rhs.location.1),
+                kind: ExprKind::BinOp {
+                    op,
+                    lhs: Box::new(expr),
+                    rhs: Box::new(rhs),
+                },
+            };
         }
         Ok(expr)
     }
 
     fn multiplication(&mut self) -> Result<Expr, ParseError> {
         let mut expr = self.unary()?;
-        while let Some(token) = self.match_multiple(vec![Token::Times, Token::Div])? {
+        while let Some((token, _)) = self.match_multiple(vec![Token::Times, Token::Div])? {
             let op = self.lookup_op_token(token)?;
             let rhs = self.unary()?;
-            expr = Expr::BinOp {
-                op,
-                lhs: Box::new(expr),
-                rhs: Box::new(rhs),
+            expr = Expr {
+                location: LocationRange(expr.location.0, rhs.location.1),
+                kind: ExprKind::BinOp {
+                    op,
+                    lhs: Box::new(expr),
+                    rhs: Box::new(rhs),
+                },
             }
         }
         Ok(expr)
     }
 
     fn unary(&mut self) -> Result<Expr, ParseError> {
-        if let Some(token) = self.match_multiple(vec![Token::Bang, Token::Minus])? {
+        if let Some((token, left)) = self.match_multiple(vec![Token::Bang, Token::Minus])? {
             let op = self.lookup_op_token(token)?;
             let rhs = self.unary()?;
-            Ok(Expr::UnaryOp {
-                op,
-                rhs: Box::new(rhs),
+            Ok(Expr {
+                location: LocationRange(left.0, rhs.location.1),
+                kind: ExprKind::UnaryOp {
+                    op,
+                    rhs: Box::new(rhs),
+                },
             })
         } else {
             Ok(self.call()?)
@@ -388,15 +446,29 @@ impl<'input> Parser<'input> {
     fn call(&mut self) -> Result<Expr, ParseError> {
         let mut expr = self.primary()?;
         loop {
-            if self.match_one(TokenDiscriminants::LParen)?.is_some() {
-                expr = self.finish_call(expr)?;
+            if let Some((_, left)) = self.match_one(TokenDiscriminants::LParen)? {
+                expr = self.finish_call(expr, left)?;
             } else if self.match_one(TokenDiscriminants::Dot)?.is_some() {
-                let tok = self.bump()?;
-                if let Some((Token::Ident(name), _)) = tok {
-                    expr = Expr::Field(Box::new(expr), name);
-                } else if let Some(tok) = tok {
-                    self.pushback(tok)
-                }
+                match self.bump()? {
+                    Some((Token::Ident(name), right)) => {
+                        expr = Expr {
+                            location: LocationRange(expr.location.0, right.1),
+                            kind: ExprKind::Field(Box::new(expr), name),
+                        };
+                    }
+                    Some((token, location)) => {
+                        return Err(ParseError::UnexpectedToken {
+                            token,
+                            location,
+                            expected_tokens: vec![TokenDiscriminants::Ident],
+                        })
+                    }
+                    None => {
+                        return Err(ParseError::EndOfFile {
+                            expected_tokens: vec![TokenDiscriminants::Ident],
+                        })
+                    }
+                };
             } else {
                 break;
             }
@@ -404,55 +476,95 @@ impl<'input> Parser<'input> {
         Ok(expr)
     }
 
-    fn finish_call(&mut self, callee: Expr) -> Result<Expr, ParseError> {
+    fn finish_call(&mut self, callee: Expr, left: LocationRange) -> Result<Expr, ParseError> {
         let args = {
-            let mut exprs = self.comma::<Expr>(&Self::expr, Token::RParen)?;
+            let (mut exprs, right) = self.comma::<Expr>(&Self::expr, Token::RParen)?;
             if exprs.len() == 1 {
                 exprs.remove(0)
             } else {
-                Expr::Tuple(exprs)
+                Expr {
+                    location: LocationRange(left.0, right.1),
+                    kind: ExprKind::Tuple(exprs),
+                }
             }
         };
-        Ok(Expr::Call {
-            callee: Box::new(callee),
-            args: Box::new(args),
+        Ok(Expr {
+            location: LocationRange(callee.location.0, args.location.1),
+            kind: ExprKind::Call {
+                callee: Box::new(callee),
+                args: Box::new(args),
+            },
         })
     }
 
     fn primary(&mut self) -> Result<Expr, ParseError> {
-        let token = self.bump()?;
+        let (token, location) = if let Some(span) = self.bump()? {
+            span
+        } else {
+            return Err(ParseError::EndOfFile {
+                expected_tokens: vec![
+                    TokenDiscriminants::True,
+                    TokenDiscriminants::False,
+                    TokenDiscriminants::Integer,
+                    TokenDiscriminants::Float,
+                    TokenDiscriminants::String,
+                    TokenDiscriminants::LParen,
+                ],
+            });
+        };
         match token {
-            Some((Token::True, _)) => Ok(Expr::Primary {
-                value: Value::Bool(true),
+            Token::True => Ok(Expr {
+                location,
+                kind: ExprKind::Primary {
+                    value: Value::Bool(true),
+                },
             }),
-            Some((Token::False, _)) => Ok(Expr::Primary {
-                value: Value::Bool(false),
+            Token::False => Ok(Expr {
+                location,
+                kind: ExprKind::Primary {
+                    value: Value::Bool(false),
+                },
             }),
-            Some((Token::Integer(int), _)) => Ok(Expr::Primary {
-                value: Value::Integer(int),
+            Token::Integer(int) => Ok(Expr {
+                location,
+                kind: ExprKind::Primary {
+                    value: Value::Integer(int),
+                },
             }),
-            Some((Token::Float(float), _)) => Ok(Expr::Primary {
-                value: Value::Float(float),
+            Token::Float(float) => Ok(Expr {
+                location,
+                kind: ExprKind::Primary {
+                    value: Value::Float(float),
+                },
             }),
-            Some((Token::String(s), _)) => Ok(Expr::Primary {
-                value: Value::String(s),
+            Token::String(s) => Ok(Expr {
+                location,
+                kind: ExprKind::Primary {
+                    value: Value::String(s),
+                },
             }),
-            Some((Token::LParenBrace, _)) => self.record_literal(),
+            Token::LParenBrace => self.record_literal(location),
             // Parsing tuple or grouping
-            Some((Token::LParen, _)) => {
+            Token::LParen => {
                 let expr = self.expr()?;
                 if self.match_one(TokenDiscriminants::Comma)?.is_some() {
                     let mut elems = vec![expr];
-                    let mut rest = self.comma::<Expr>(&Self::expr, Token::RParen)?;
+                    let (mut rest, right) = self.comma::<Expr>(&Self::expr, Token::RParen)?;
                     elems.append(&mut rest);
-                    Ok(Expr::Tuple(elems))
+                    Ok(Expr {
+                        location: LocationRange(location.0, right.1),
+                        kind: ExprKind::Tuple(elems),
+                    })
                 } else {
                     self.expect(TokenDiscriminants::RParen)?;
                     Ok(expr)
                 }
             }
-            Some((Token::Ident(name), _)) => Ok(Expr::Var { name }),
-            Some((token, location)) => Err(ParseError::UnexpectedToken {
+            Token::Ident(name) => Ok(Expr {
+                location,
+                kind: ExprKind::Var { name },
+            }),
+            token => Err(ParseError::UnexpectedToken {
                 token,
                 location,
                 expected_tokens: vec![
@@ -464,25 +576,18 @@ impl<'input> Parser<'input> {
                     TokenDiscriminants::LParen,
                 ],
             }),
-            None => Err(ParseError::EndOfFile {
-                expected_tokens: vec![
-                    TokenDiscriminants::True,
-                    TokenDiscriminants::False,
-                    TokenDiscriminants::Integer,
-                    TokenDiscriminants::Float,
-                    TokenDiscriminants::String,
-                    TokenDiscriminants::LParen,
-                ],
-            }),
         }
     }
 
-    fn record_literal(&mut self) -> Result<Expr, ParseError> {
+    fn record_literal(&mut self, left: LocationRange) -> Result<Expr, ParseError> {
         let mut entries = Vec::new();
         loop {
             match self.bump()? {
-                Some((Token::RParenBrace, _)) => {
-                    return Ok(Expr::Record { entries });
+                Some((Token::RParenBrace, right)) => {
+                    return Ok(Expr {
+                        location: LocationRange(left.0, right.1),
+                        kind: ExprKind::Record { entries },
+                    });
                 }
                 Some((Token::Ident(name), _)) => {
                     let field_val = self.expr()?;
@@ -511,47 +616,66 @@ impl<'input> Parser<'input> {
     }
 
     fn pattern(&mut self) -> Result<Pat, ParseError> {
-        let tok = self.bump()?;
-        match tok {
-            Some((Token::LParen, _)) => {
-                if self.match_one(TokenDiscriminants::RParen)?.is_some() {
-                    return Ok(Pat::Empty);
+        let (token, left) = if let Some((token, loc)) = self.bump()? {
+            (token, loc)
+        } else {
+            return Err(ParseError::EndOfFile {
+                expected_tokens: vec![
+                    TokenDiscriminants::LParen,
+                    TokenDiscriminants::LBrace,
+                    TokenDiscriminants::Ident,
+                ],
+            });
+        };
+        match token {
+            Token::LParen => {
+                if let Some((_, right)) = self.match_one(TokenDiscriminants::RParen)? {
+                    return Ok(Pat::Empty(LocationRange(left.0, right.0)));
                 }
 
-                let mut pats = self.comma::<Pat>(&Self::pattern, Token::RParen)?;
+                let (mut pats, right) = self.comma::<Pat>(&Self::pattern, Token::RParen)?;
                 // If the pattern is singular, i.e. let (a) = 10, then
                 // we treat it as a single id
                 if pats.len() == 1 {
                     Ok(pats.pop().unwrap())
                 } else {
-                    Ok(Pat::Tuple(pats))
+                    Ok(Pat::Tuple(pats, LocationRange(left.0, right.1)))
                 }
             }
-            Some((Token::LBrace, _)) => {
-                let fields = self.comma::<Name>(&Self::record_pattern, Token::RBrace)?;
-                let type_sig = self.type_sig()?;
-                Ok(Pat::Record(fields, type_sig))
+            Token::LBrace => {
+                let (fields, right) = self.comma::<Name>(&Self::record_pattern, Token::RBrace)?;
+                if let Some((type_sig, right)) = self.type_sig()? {
+                    Ok(Pat::Record(
+                        fields,
+                        Some(type_sig),
+                        LocationRange(left.0, right.1),
+                    ))
+                } else {
+                    Ok(Pat::Record(fields, None, LocationRange(left.0, right.1)))
+                }
             }
-            Some((Token::Ident(name), _)) => {
-                let type_sig = self.type_sig()?;
-                Ok(Pat::Id(name, type_sig))
+            Token::Ident(name) => {
+                if let Some((type_sig, right)) = self.type_sig()? {
+                    Ok(Pat::Id(
+                        name,
+                        Some(type_sig),
+                        LocationRange(left.0, right.1),
+                    ))
+                } else {
+                    Ok(Pat::Id(name, None, left))
+                }
             }
-            Some((token, location)) => Err(ParseError::UnexpectedToken {
-                token,
-                location,
-                expected_tokens: vec![
-                    TokenDiscriminants::LParen,
-                    TokenDiscriminants::LBrace,
-                    TokenDiscriminants::Ident,
-                ],
-            }),
-            None => Err(ParseError::EndOfFile {
-                expected_tokens: vec![
-                    TokenDiscriminants::LParen,
-                    TokenDiscriminants::LBrace,
-                    TokenDiscriminants::Ident,
-                ],
-            }),
+            token => {
+                return Err(ParseError::UnexpectedToken {
+                    token,
+                    location: left,
+                    expected_tokens: vec![
+                        TokenDiscriminants::LParen,
+                        TokenDiscriminants::LBrace,
+                        TokenDiscriminants::Ident,
+                    ],
+                })
+            }
         }
     }
 
@@ -570,22 +694,26 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn type_sig(&mut self) -> Result<Option<TypeSig>, ParseError> {
-        if self.match_one(TokenDiscriminants::Colon)?.is_some() {
-            Ok(Some(self.type_()?))
+    fn type_sig(&mut self) -> Result<Option<(TypeSig, LocationRange)>, ParseError> {
+        if let Some((_, left)) = self.match_one(TokenDiscriminants::Colon)? {
+            let (type_, right) = self.type_()?;
+            Ok(Some((type_, LocationRange(left.0, right.1))))
         } else {
             Ok(None)
         }
     }
 
-    fn type_(&mut self) -> Result<TypeSig, ParseError> {
+    fn type_(&mut self) -> Result<(TypeSig, LocationRange), ParseError> {
         let token = self.bump()?;
         match token {
-            Some((Token::Ident(name), _)) => Ok(TypeSig::Name(name)),
-            Some((Token::LBracket, _)) => {
-                let array_type = self.type_()?;
-                self.expect(TokenDiscriminants::RBracket)?;
-                Ok(TypeSig::Array(Box::new(array_type)))
+            Some((Token::Ident(name), loc)) => Ok((TypeSig::Name(name), loc)),
+            Some((Token::LBracket, left)) => {
+                let (array_type, _) = self.type_()?;
+                let (_, right) = self.expect(TokenDiscriminants::RBracket)?;
+                Ok((
+                    TypeSig::Array(Box::new(array_type)),
+                    LocationRange(left.0, right.1),
+                ))
             }
             Some((token, location)) => Err(ParseError::UnexpectedToken {
                 token,
@@ -602,15 +730,15 @@ impl<'input> Parser<'input> {
         &mut self,
         parse_fn: &dyn Fn(&mut Self) -> Result<T, ParseError>,
         end_token: Token,
-    ) -> Result<Vec<T>, ParseError> {
-        let mut parsed: Vec<T> = Vec::new();
-        if self.match_one((&end_token).into())?.is_some() {
-            return Ok(parsed);
+    ) -> Result<(Vec<T>, LocationRange), ParseError> {
+        let mut elems: Vec<T> = Vec::new();
+        if let Some((_, right)) = self.match_one((&end_token).into())? {
+            return Ok((elems, right));
         }
         loop {
-            parsed.push(parse_fn(self)?);
-            if self.match_one((&end_token).into())?.is_some() {
-                return Ok(parsed);
+            elems.push(parse_fn(self)?);
+            if let Some((_, right)) = self.match_one((&end_token).into())? {
+                return Ok((elems, right));
             }
             self.expect(TokenDiscriminants::Comma)?;
         }
@@ -619,26 +747,26 @@ impl<'input> Parser<'input> {
 
 #[cfg(test)]
 mod tests {
-    use ast::{Expr, Pat, TypeSig, Value};
+    use ast::{ExprKind, Pat, TypeSig, Value};
     use lexer::Lexer;
     use parser::{ParseError, Parser};
 
     #[test]
     fn literal() -> Result<(), ParseError> {
         let expected = vec![
-            Expr::Primary {
+            ExprKind::Primary {
                 value: Value::Integer(10),
             },
-            Expr::Primary {
+            ExprKind::Primary {
                 value: Value::Float(10.2),
             },
-            Expr::Primary {
+            ExprKind::Primary {
                 value: Value::Bool(true),
             },
-            Expr::Primary {
+            ExprKind::Primary {
                 value: Value::Bool(false),
             },
-            Expr::Primary {
+            ExprKind::Primary {
                 value: Value::String("hello".into()),
             },
         ];
@@ -654,11 +782,11 @@ mod tests {
     #[test]
     fn id() -> Result<(), ParseError> {
         let expected = vec![
-            Expr::Var { name: 0 },
-            Expr::Var { name: 1 },
-            Expr::Var { name: 1 },
-            Expr::Var { name: 2 },
-            Expr::Var { name: 3 },
+            ExprKind::Var { name: 0 },
+            ExprKind::Var { name: 1 },
+            ExprKind::Var { name: 1 },
+            ExprKind::Var { name: 2 },
+            ExprKind::Var { name: 3 },
         ];
         let source = "foo bar bar baz bat";
         let lexer = Lexer::new(&source);
