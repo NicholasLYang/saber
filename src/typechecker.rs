@@ -30,8 +30,11 @@ pub enum TypeError {
     NotARecord { type_: Arc<Type> },
     #[fail(display = "Invalid unary operator: {}", op)]
     InvalidUnaryOp { op: Op },
-    #[fail(display = "Cannot apply unary operator to {:?}", expr)]
-    InvalidUnaryExpr { expr: ExprT },
+    #[fail(display = "{} Cannot apply unary operator to {:?}", location, expr)]
+    InvalidUnaryExpr {
+        location: LocationRange,
+        expr: ExprT,
+    },
     #[fail(display = "Callee is not a function")]
     CalleeNotFunction,
 }
@@ -101,7 +104,7 @@ impl TypeChecker {
     }
 
     pub fn stmt(&mut self, stmt: Loc<Stmt>) -> Result<Vec<Loc<StmtT>>, TypeError> {
-        match stmt.kind {
+        match stmt.inner {
             Stmt::Expr(expr) => {
                 let typed_expr = self.expr(expr)?;
                 Ok(vec![Loc {
@@ -329,6 +332,10 @@ impl TypeChecker {
         }
     }
 
+    // Desugars an assignment statement into multiple bindings.
+    // We pass in a location because these bindings don't have
+    // an actual source code place so we just give them the location
+    // of the original assignment
     fn generate_pattern_bindings(
         &mut self,
         pat: &Pat,
@@ -341,20 +348,23 @@ impl TypeChecker {
             Pat::Id(_, _, _) | Pat::Empty(_) => Ok(Vec::new()),
             Pat::Record(names, _, _) => {
                 for name in names {
-                    bindings.push(StmtT::Asgn(
-                        *name,
-                        Loc {
-                            location,
-                            inner: ExprT::Field(
-                                Box::new(ExprT::Var {
-                                    name: owner_name,
-                                    type_: rhs_type.clone(),
-                                }),
-                                *name,
-                                self.get_field_type(rhs_type, *name)?,
-                            ),
-                        },
-                    ));
+                    bindings.push(Loc {
+                        location,
+                        inner: StmtT::Asgn(
+                            *name,
+                            Loc {
+                                location,
+                                inner: ExprT::Field(
+                                    Box::new(ExprT::Var {
+                                        name: owner_name,
+                                        type_: rhs_type.clone(),
+                                    }),
+                                    *name,
+                                    self.get_field_type(rhs_type, *name)?,
+                                ),
+                            },
+                        ),
+                    });
                 }
                 Ok(bindings)
             }
@@ -363,22 +373,26 @@ impl TypeChecker {
                 // flatten bindings
                 for (i, pat) in pats.iter().enumerate() {
                     let name = self.name_table.get_fresh_name();
-                    bindings.push(StmtT::Asgn(
-                        name,
-                        Loc {
-                            location,
-                            inner: ExprT::Field(
-                                Box::new(ExprT::Var {
-                                    name: owner_name,
-                                    type_: rhs_type.clone(),
-                                }),
-                                i,
-                                self.get_fresh_type_var(),
-                            ),
-                        },
-                    ));
+                    bindings.push(Loc {
+                        location,
+                        inner: StmtT::Asgn(
+                            name,
+                            Loc {
+                                location,
+                                inner: ExprT::Field(
+                                    Box::new(ExprT::Var {
+                                        name: owner_name,
+                                        type_: rhs_type.clone(),
+                                    }),
+                                    i,
+                                    self.get_fresh_type_var(),
+                                ),
+                            },
+                        ),
+                    });
                     let type_ = self.get_fresh_type_var();
-                    bindings.append(&mut self.generate_pattern_bindings(pat, name, &type_)?)
+                    bindings
+                        .append(&mut self.generate_pattern_bindings(pat, name, &type_, location)?)
                 }
                 Ok(bindings)
             }
@@ -427,9 +441,9 @@ impl TypeChecker {
     fn func(
         &mut self,
         params: Pat,
-        body: Stmt,
+        body: Loc<Stmt>,
         return_type: Option<TypeSig>,
-    ) -> Result<(Vec<(Name, Arc<Type>)>, Box<StmtT>, Arc<Type>), TypeError> {
+    ) -> Result<(Vec<(Name, Arc<Type>)>, Box<Loc<StmtT>>, Arc<Type>), TypeError> {
         let func_params = self.get_func_params(&params)?;
         for (name, type_) in &func_params {
             self.symbol_table.insert_var(name.clone(), type_.clone());
@@ -439,18 +453,29 @@ impl TypeChecker {
         if let Some(return_type_sig) = return_type {
             self.return_type = Some(self.lookup_type_sig(&return_type_sig)?);
         }
+        let body_location = body.location;
         // Check body
         let body = self.stmt(body)?;
         let mut return_type = None;
         std::mem::swap(&mut return_type, &mut self.return_type);
         let return_type = return_type.unwrap_or_else(|| Arc::new(Type::Unit));
-        Ok((func_params, Box::new(StmtT::Block(body)), return_type))
+        Ok((
+            func_params,
+            Box::new(Loc {
+                location: body_location,
+                inner: StmtT::Block(body),
+            }),
+            return_type,
+        ))
     }
 
     fn expr(&mut self, expr: Loc<Expr>) -> Result<Loc<ExprT>, TypeError> {
         let location = expr.location;
-        match expr.kind {
-            Expr::Primary { value } => Ok(self.value(value)),
+        match expr.inner {
+            Expr::Primary { value } => Ok(Loc {
+                location,
+                inner: self.value(value),
+            }),
             Expr::Var { name } => {
                 let entry =
                     self.symbol_table
@@ -482,8 +507,8 @@ impl TypeChecker {
             Expr::BinOp { op, lhs, rhs } => {
                 let typed_lhs = self.expr(*lhs)?;
                 let typed_rhs = self.expr(*rhs)?;
-                let lhs_type = typed_lhs.get_type();
-                let rhs_type = typed_rhs.get_type();
+                let lhs_type = typed_lhs.inner.get_type();
+                let rhs_type = typed_rhs.inner.get_type();
                 match self.op(&op, lhs_type, rhs_type) {
                     Some(op_type) => Ok(Loc {
                         location,
@@ -496,8 +521,8 @@ impl TypeChecker {
                     }),
                     None => Err(TypeError::OpFailure {
                         op: op.clone(),
-                        lhs_type: typed_lhs.get_type(),
-                        rhs_type: typed_rhs.get_type(),
+                        lhs_type: typed_lhs.inner.get_type(),
+                        rhs_type: typed_rhs.inner.get_type(),
                     }),
                 }
             }
@@ -506,7 +531,7 @@ impl TypeChecker {
                 let mut types = Vec::new();
                 for elem in elems {
                     let typed_elem = self.expr(elem)?;
-                    types.push(typed_elem.get_type());
+                    types.push(typed_elem.inner.get_type());
                     typed_elems.push(typed_elem);
                 }
                 Ok(Loc {
@@ -538,10 +563,10 @@ impl TypeChecker {
             Expr::UnaryOp { op, rhs } => match op {
                 Op::Minus | Op::Plus => {
                     let typed_rhs = self.expr(*rhs)?;
-                    if self.unify(&typed_rhs.get_type(), &Arc::new(Type::Int))
-                        || self.unify(&typed_rhs.get_type(), &Arc::new(Type::Float))
+                    if self.unify(&typed_rhs.inner.get_type(), &Arc::new(Type::Int))
+                        || self.unify(&typed_rhs.inner.get_type(), &Arc::new(Type::Float))
                     {
-                        let type_ = typed_rhs.get_type();
+                        let type_ = typed_rhs.inner.get_type();
                         Ok(Loc {
                             location,
                             inner: ExprT::UnaryOp {
@@ -551,14 +576,17 @@ impl TypeChecker {
                             },
                         })
                     } else {
-                        Err(TypeError::InvalidUnaryExpr { expr: typed_rhs })
+                        Err(TypeError::InvalidUnaryExpr {
+                            location: typed_rhs.location,
+                            expr: typed_rhs.inner,
+                        })
                     }
                 }
                 op => Err(TypeError::InvalidUnaryOp { op }),
             },
             Expr::Call { callee, args } => {
                 let typed_callee = self.expr(*callee)?;
-                let callee_type = typed_callee.get_type();
+                let callee_type = typed_callee.inner.get_type();
                 let (params_type, return_type) = match &(*callee_type) {
                     Type::Arrow(params_type, return_type) => {
                         (params_type.clone(), return_type.clone())
@@ -567,7 +595,7 @@ impl TypeChecker {
                     _ => return Err(TypeError::CalleeNotFunction),
                 };
                 let typed_args = self.expr(*args)?;
-                let args_type = typed_args.get_type();
+                let args_type = typed_args.inner.get_type();
                 if self.unify(&params_type, &args_type) {
                     Ok(Loc {
                         location,
