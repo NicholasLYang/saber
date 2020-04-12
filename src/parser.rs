@@ -12,7 +12,7 @@ pub struct Parser<'input> {
 #[derive(Debug, Fail, PartialEq)]
 pub enum ParseError {
     #[fail(
-        display = "Reached end of file without completing parse. Expected these tokens: {:?}",
+        display = "ParseError: Reached end of file without completing parse. Expected these tokens: {:?}",
         expected_tokens
     )]
     EndOfFile {
@@ -27,8 +27,8 @@ pub enum ParseError {
         expected_tokens: Vec<TokenDiscriminants>,
         location: LocationRange,
     },
-    #[fail(display = "Cannot destructure a function")]
-    DestructureFunction,
+    #[fail(display = "({}): Cannot destructure a function", location)]
+    DestructureFunction { location: LocationRange },
     #[fail(
         display = "Cannot have a type signature on a let function binding (use type signatures in the function!)"
     )]
@@ -98,9 +98,7 @@ impl<'input> Parser<'input> {
                 Ok(None)
             }
         } else {
-            Err(ParseError::EndOfFile {
-                expected_tokens: vec![lookahead],
-            })
+            Ok(None)
         }
     }
 
@@ -272,7 +270,9 @@ impl<'input> Parser<'input> {
                     inner: Stmt::Function(name, params, return_type, body),
                 }),
                 Pat::Id(_, _, _) => Err(ParseError::FuncBindingTypeSig),
-                _ => Err(ParseError::DestructureFunction),
+                Pat::Record(_, _, location) | Pat::Empty(location) | Pat::Tuple(_, location) => {
+                    Err(ParseError::DestructureFunction { location })
+                }
             }
         } else {
             self.expect(TokenDiscriminants::Semicolon)?;
@@ -836,7 +836,7 @@ mod tests {
     }
 
     #[test]
-    fn pat() -> Result<(), ParseError> {
+    fn pattern() -> Result<(), ParseError> {
         let expected = vec![
             Pat::Id(0, None, LocationRange(Location(1, 1), Location(1, 4))),
             Pat::Id(

@@ -57,6 +57,66 @@ pub enum Token {
     String(String),
 }
 
+impl Display for Token {
+    fn fmt<'a>(&self, f: &'a mut Formatter) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Token::False => "false".to_string(),
+                Token::True => "true".to_string(),
+                Token::Else => "else".to_string(),
+                Token::Export => "export".to_string(),
+                Token::For => "for".to_string(),
+                Token::If => "if".to_string(),
+                Token::Print => "print".to_string(),
+                Token::Return => "return".to_string(),
+                Token::This => "this".to_string(),
+                Token::Let => "let".to_string(),
+                Token::While => "while".to_string(),
+                Token::Ident(i) => format!("<{}>", i),
+                Token::Float(f) => format!("{}", f),
+                Token::Integer(i) => format!("{}", i),
+                Token::LBrace => "{".to_string(),
+                Token::RBrace => "}".to_string(),
+                Token::LBracket => "[".to_string(),
+                Token::RBracket => "]".to_string(),
+                Token::LParen => "(".to_string(),
+                Token::RParen => ")".to_string(),
+                Token::LParenBrace => "({".to_string(),
+                Token::RParenBrace => "})".to_string(),
+                Token::Semicolon => ";".to_string(),
+                Token::Colon => ":".to_string(),
+                Token::Comma => ",".to_string(),
+                Token::Dot => ".".to_string(),
+                Token::Amp => "&".to_string(),
+                Token::AmpAmp => "&&".to_string(),
+                Token::Pipe => "|".to_string(),
+                Token::PipePipe => "||".to_string(),
+                Token::Greater => ">".to_string(),
+                Token::GreaterEqual => ">=".to_string(),
+                Token::Less => "<".to_string(),
+                Token::LessEqual => "<=".to_string(),
+                Token::Bang => "!".to_string(),
+                Token::BangEqual => "!=".to_string(),
+                Token::Equal => "=".to_string(),
+                Token::EqualEqual => "==".to_string(),
+                Token::Plus => "+".to_string(),
+                Token::PlusEqual => "+=".to_string(),
+                Token::Minus => "-".to_string(),
+                Token::MinusEqual => "-=".to_string(),
+                Token::Div => "/".to_string(),
+                Token::DivEqual => "/=".to_string(),
+                Token::Times => "*".to_string(),
+                Token::TimesEqual => "*=".to_string(),
+                Token::FatArrow => "=>".to_string(),
+                Token::Slash => "\\".to_string(),
+                Token::String(s) => format!("\"{}\"", s),
+            }
+        )
+    }
+}
+
 #[derive(PartialEq, Clone, Copy)]
 pub struct Location(pub usize, pub usize);
 
