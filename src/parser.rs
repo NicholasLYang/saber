@@ -751,7 +751,7 @@ impl<'input> Parser<'input> {
 
 #[cfg(test)]
 mod tests {
-    use ast::{Expr, Loc, Pat, TypeSig, Value};
+    use ast::{Expr, Loc, Op, Pat, TypeSig, Value};
     use lexer::{Lexer, Location, LocationRange};
     use parser::{ParseError, Parser};
 
@@ -865,6 +865,57 @@ mod tests {
         }
         assert_eq!("foo", parser.lexer.name_table.get_str(&0));
         assert_eq!("bar", parser.lexer.name_table.get_str(&1));
+        Ok(())
+    }
+
+    #[test]
+    fn arithmetic() -> Result<(), ParseError> {
+        let expected = Loc {
+            location: LocationRange(Location(1, 1), Location(1, 15)),
+            inner: Expr::BinOp {
+                op: Op::Plus,
+                lhs: Box::new(Loc {
+                    location: LocationRange(Location(1, 1), Location(1, 7)),
+                    inner: Expr::BinOp {
+                        op: Op::Times,
+                        lhs: Box::new(Loc {
+                            location: LocationRange(Location(1, 1), Location(1, 3)),
+                            inner: Expr::Primary {
+                                value: Value::Integer(10),
+                            },
+                        }),
+                        rhs: Box::new(Loc {
+                            location: LocationRange(Location(1, 6), Location(1, 7)),
+                            inner: Expr::Primary {
+                                value: Value::Integer(2),
+                            },
+                        }),
+                    },
+                }),
+                rhs: Box::new(Loc {
+                    location: LocationRange(Location(1, 10), Location(1, 15)),
+                    inner: Expr::BinOp {
+                        op: Op::Div,
+                        lhs: Box::new(Loc {
+                            location: LocationRange(Location(1, 10), Location(1, 11)),
+                            inner: Expr::Primary {
+                                value: Value::Integer(3),
+                            },
+                        }),
+                        rhs: Box::new(Loc {
+                            location: LocationRange(Location(1, 14), Location(1, 15)),
+                            inner: Expr::Primary {
+                                value: Value::Integer(4),
+                            },
+                        }),
+                    },
+                }),
+            },
+        };
+        let source = "10 * 2 + 3 / 4";
+        let lexer = Lexer::new(&source);
+        let mut parser = Parser::new(lexer);
+        assert_eq!(expected, parser.expr()?);
         Ok(())
     }
 }
