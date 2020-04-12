@@ -19,7 +19,7 @@ pub enum Stmt {
     Return(Loc<Expr>),
     Block(Vec<Loc<Stmt>>),
     If(Loc<Expr>, Box<Loc<Stmt>>, Option<Box<Loc<Stmt>>>),
-    Function(Name, Pat, Option<TypeSig>, Box<Loc<Stmt>>),
+    Function(Name, Pat, Option<Loc<TypeSig>>, Box<Loc<Stmt>>),
     Export(Name),
 }
 
@@ -60,7 +60,7 @@ pub enum Expr {
     },
     Function {
         params: Pat,
-        return_type: Option<TypeSig>,
+        return_type: Option<Loc<TypeSig>>,
         body: Box<Loc<Stmt>>,
     },
     Call {
@@ -212,14 +212,14 @@ impl fmt::Display for Type {
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum TypeSig {
-    Array(Box<TypeSig>),
+    Array(Box<Loc<TypeSig>>),
     Name(Name),
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum Pat {
-    Id(Name, Option<TypeSig>, LocationRange),
-    Record(Vec<Name>, Option<TypeSig>, LocationRange),
+    Id(Name, Option<Loc<TypeSig>>, LocationRange),
+    Record(Vec<Name>, Option<Loc<TypeSig>>, LocationRange),
     Tuple(Vec<Pat>, LocationRange),
     Empty(LocationRange),
 }

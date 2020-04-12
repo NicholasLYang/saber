@@ -7,23 +7,30 @@ use utils::NameTable;
 
 #[derive(Debug, Fail, PartialEq)]
 pub enum TypeError {
-    #[fail(display = "Variable not defined: '{}'", name)]
-    VarNotDefined { name: String },
+    #[fail(display = "{}: Variable not defined: '{}'", location, name)]
+    VarNotDefined {
+        location: LocationRange,
+        name: String,
+    },
     #[fail(display = "Not implemented yet")]
     NotImplemented,
     #[fail(
-        display = "Could not find operation {} with arguments of type {} and {}",
-        op, lhs_type, rhs_type
+        display = "{}: Could not find operation {} with arguments of type {} and {}",
+        location, op, lhs_type, rhs_type
     )]
     OpFailure {
+        location: LocationRange,
         op: Op,
         lhs_type: Arc<Type>,
         rhs_type: Arc<Type>,
     },
     #[fail(display = "Could not unify {} with {}", type1, type2)]
     UnificationFailure { type1: Arc<Type>, type2: Arc<Type> },
-    #[fail(display = "Type {} does not exist", type_name)]
-    TypeDoesNotExist { type_name: String },
+    #[fail(display = "{}: Type {} does not exist", location, type_name)]
+    TypeDoesNotExist {
+        location: LocationRange,
+        type_name: String,
+    },
     #[fail(display = "Field {} does not exist in record", name)]
     FieldDoesNotExist { name: String },
     #[fail(display = "Type {} is not a record", type_)]
@@ -204,6 +211,7 @@ impl TypeChecker {
                 self.symbol_table
                     .lookup_name(name)
                     .ok_or(TypeError::VarNotDefined {
+                        location,
                         name: self.name_table.get_str(&name).to_string(),
                     })?;
                 Ok(vec![Loc {
@@ -235,8 +243,8 @@ impl TypeChecker {
         }
     }
 
-    fn lookup_type_sig(&mut self, sig: &TypeSig) -> Result<Arc<Type>, TypeError> {
-        match sig {
+    fn lookup_type_sig(&mut self, sig: &Loc<TypeSig>) -> Result<Arc<Type>, TypeError> {
+        match &sig.inner {
             TypeSig::Array(sig) => {
                 let type_ = self.lookup_type_sig(sig)?;
                 Ok(Arc::new(Type::Array(type_)))
@@ -246,6 +254,7 @@ impl TypeChecker {
                     Ok(type_.clone())
                 } else {
                     Err(TypeError::TypeDoesNotExist {
+                        location: sig.location,
                         type_name: self.name_table.get_str(name).to_string(),
                     })
                 }
@@ -456,7 +465,7 @@ impl TypeChecker {
         &mut self,
         params: Pat,
         body: Loc<Stmt>,
-        return_type: Option<TypeSig>,
+        return_type: Option<Loc<TypeSig>>,
     ) -> Result<(Vec<(Name, Arc<Type>)>, Box<Loc<StmtT>>, Arc<Type>), TypeError> {
         let func_params = self.get_func_params(&params)?;
         for (name, type_) in &func_params {
@@ -495,6 +504,7 @@ impl TypeChecker {
                     self.symbol_table
                         .lookup_name(name)
                         .ok_or(TypeError::VarNotDefined {
+                            location,
                             name: self.name_table.get_str(&name).to_string(),
                         })?;
                 match entry {
@@ -534,6 +544,7 @@ impl TypeChecker {
                         },
                     }),
                     None => Err(TypeError::OpFailure {
+                        location,
                         op: op.clone(),
                         lhs_type: typed_lhs.inner.get_type(),
                         rhs_type: typed_rhs.inner.get_type(),

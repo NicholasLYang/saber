@@ -698,26 +698,30 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn type_sig(&mut self) -> Result<Option<(TypeSig, LocationRange)>, ParseError> {
+    fn type_sig(&mut self) -> Result<Option<(Loc<TypeSig>, LocationRange)>, ParseError> {
         if let Some((_, left)) = self.match_one(TokenDiscriminants::Colon)? {
-            let (type_, right) = self.type_()?;
-            Ok(Some((type_, LocationRange(left.0, right.1))))
+            let type_sig = self.type_()?;
+            let right = type_sig.location;
+            Ok(Some((type_sig, LocationRange(left.0, right.1))))
         } else {
             Ok(None)
         }
     }
 
-    fn type_(&mut self) -> Result<(TypeSig, LocationRange), ParseError> {
+    fn type_(&mut self) -> Result<Loc<TypeSig>, ParseError> {
         let token = self.bump()?;
         match token {
-            Some((Token::Ident(name), loc)) => Ok((TypeSig::Name(name), loc)),
+            Some((Token::Ident(name), location)) => Ok(Loc {
+                location,
+                inner: TypeSig::Name(name),
+            }),
             Some((Token::LBracket, left)) => {
-                let (array_type, _) = self.type_()?;
+                let array_type = self.type_()?;
                 let (_, right) = self.expect(TokenDiscriminants::RBracket)?;
-                Ok((
-                    TypeSig::Array(Box::new(array_type)),
-                    LocationRange(left.0, right.1),
-                ))
+                Ok(Loc {
+                    location: LocationRange(left.0, right.1),
+                    inner: TypeSig::Array(Box::new(array_type)),
+                })
             }
             Some((token, location)) => Err(ParseError::UnexpectedToken {
                 token,
