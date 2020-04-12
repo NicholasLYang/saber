@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use std::fmt::{self, Debug, Display, Formatter};
 use std::str::CharIndices;
 use utils::NameTable;
@@ -117,7 +118,7 @@ impl Display for Token {
     }
 }
 
-#[derive(PartialEq, Clone, Copy)]
+#[derive(PartialEq, Clone, Copy, Deserialize, Serialize)]
 pub struct Location(pub usize, pub usize);
 
 impl Display for Location {
@@ -132,7 +133,7 @@ impl Debug for Location {
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Deserialize, Serialize)]
 pub struct LocationRange(pub Location, pub Location);
 
 impl Display for LocationRange {
@@ -161,7 +162,7 @@ fn is_id_body(ch: char) -> bool {
     ch == '_' || ch.is_ascii_digit() || ch.is_ascii_alphabetic()
 }
 
-#[derive(Debug, Fail, PartialEq)]
+#[derive(Debug, Fail, PartialEq, Serialize, Deserialize)]
 pub enum LexicalError {
     #[fail(display = "{}: Invalid character '{}'", location, ch)]
     InvalidCharacter { ch: char, location: LocationRange },

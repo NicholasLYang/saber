@@ -14,3 +14,6 @@ itertools = "0.8.0"
 leb128 = "0.2.4"
 strum = "0.13.0"
 strum_macros = "0.13.0"
+serde = { version = "1.0.106", features = ["derive", "rc"] }
+serde_json = "1.0"
+

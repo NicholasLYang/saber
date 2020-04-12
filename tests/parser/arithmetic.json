@@ -1,0 +1,301 @@
+[
+  {
+    "location": [
+      [
+        1,
+        1
+      ],
+      [
+        1,
+        17
+      ]
+    ],
+    "inner": {
+      "Expr": {
+        "location": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            16
+          ]
+        ],
+        "inner": {
+          "BinOp": {
+            "op": "Plus",
+            "lhs": {
+              "location": [
+                [
+                  1,
+                  1
+                ],
+                [
+                  1,
+                  11
+                ]
+              ],
+              "inner": {
+                "BinOp": {
+                  "op": "Minus",
+                  "lhs": {
+                    "location": [
+                      [
+                        1,
+                        1
+                      ],
+                      [
+                        1,
+                        3
+                      ]
+                    ],
+                    "inner": {
+                      "Primary": {
+                        "value": {
+                          "Integer": 10
+                        }
+                      }
+                    }
+                  },
+                  "rhs": {
+                    "location": [
+                      [
+                        1,
+                        6
+                      ],
+                      [
+                        1,
+                        11
+                      ]
+                    ],
+                    "inner": {
+                      "BinOp": {
+                        "op": "Times",
+                        "lhs": {
+                          "location": [
+                            [
+                              1,
+                              6
+                            ],
+                            [
+                              1,
+                              7
+                            ]
+                          ],
+                          "inner": {
+                            "Primary": {
+                              "value": {
+                                "Integer": 2
+                              }
+                            }
+                          }
+                        },
+                        "rhs": {
+                          "location": [
+                            [
+                              1,
+                              10
+                            ],
+                            [
+                              1,
+                              11
+                            ]
+                          ],
+                          "inner": {
+                            "Primary": {
+                              "value": {
+                                "Integer": 3
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "rhs": {
+              "location": [
+                [
+                  1,
+                  14
+                ],
+                [
+                  1,
+                  16
+                ]
+              ],
+              "inner": {
+                "UnaryOp": {
+                  "op": "Minus",
+                  "rhs": {
+                    "location": [
+                      [
+                        1,
+                        15
+                      ],
+                      [
+                        1,
+                        16
+                      ]
+                    ],
+                    "inner": {
+                      "Primary": {
+                        "value": {
+                          "Integer": 2
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "location": [
+      [
+        2,
+        0
+      ],
+      [
+        2,
+        13
+      ]
+    ],
+    "inner": {
+      "Expr": {
+        "location": [
+          [
+            2,
+            0
+          ],
+          [
+            2,
+            12
+          ]
+        ],
+        "inner": {
+          "BinOp": {
+            "op": "Minus",
+            "lhs": {
+              "location": [
+                [
+                  2,
+                  0
+                ],
+                [
+                  2,
+                  8
+                ]
+              ],
+              "inner": {
+                "BinOp": {
+                  "op": "Times",
+                  "lhs": {
+                    "location": [
+                      [
+                        2,
+                        0
+                      ],
+                      [
+                        2,
+                        4
+                      ]
+                    ],
+                    "inner": {
+                      "BinOp": {
+                        "op": "Div",
+                        "lhs": {
+                          "location": [
+                            [
+                              2,
+                              0
+                            ],
+                            [
+                              2,
+                              2
+                            ]
+                          ],
+                          "inner": {
+                            "Primary": {
+                              "value": {
+                                "Integer": 11
+                              }
+                            }
+                          }
+                        },
+                        "rhs": {
+                          "location": [
+                            [
+                              2,
+                              3
+                            ],
+                            [
+                              2,
+                              4
+                            ]
+                          ],
+                          "inner": {
+                            "Primary": {
+                              "value": {
+                                "Integer": 4
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "rhs": {
+                    "location": [
+                      [
+                        2,
+                        7
+                      ],
+                      [
+                        2,
+                        8
+                      ]
+                    ],
+                    "inner": {
+                      "Primary": {
+                        "value": {
+                          "Integer": 2
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "rhs": {
+              "location": [
+                [
+                  2,
+                  11
+                ],
+                [
+                  2,
+                  12
+                ]
+              ],
+              "inner": {
+                "Primary": {
+                  "value": {
+                    "Integer": 4
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+]

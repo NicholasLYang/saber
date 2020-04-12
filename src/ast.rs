@@ -1,17 +1,18 @@
 use lexer::LocationRange;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::sync::Arc;
 
 pub type Name = usize;
 
 // Wrapper to provide location to AST nodes
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct Loc<T> {
     pub location: LocationRange,
     pub inner: T,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum Stmt {
     Asgn(Pat, Loc<Expr>),
     Expr(Loc<Expr>),
@@ -40,7 +41,7 @@ pub enum StmtT {
     Export(Name),
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum Expr {
     Primary {
         value: Value,
@@ -112,7 +113,7 @@ pub enum ExprT {
     Tuple(Vec<Loc<ExprT>>, Arc<Type>),
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum Value {
     Float(f32),
     Integer(i32),
@@ -136,7 +137,7 @@ impl fmt::Display for Value {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum Op {
     Plus,
     Minus,
@@ -172,7 +173,7 @@ impl fmt::Display for Op {
 }
 
 // Yeah this is hilariously basic rn.
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum Type {
     Unit,
     Float,
@@ -209,13 +210,13 @@ impl fmt::Display for Type {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum TypeSig {
     Array(Box<TypeSig>),
     Name(Name),
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum Pat {
     Id(Name, Option<TypeSig>, LocationRange),
     Record(Vec<Name>, Option<TypeSig>, LocationRange),

@@ -751,12 +751,44 @@ impl<'input> Parser<'input> {
 
 #[cfg(test)]
 mod tests {
-    use ast::{Expr, Loc, Op, Pat, TypeSig, Value};
+    use ast::{Expr, Loc, Op, Pat, Stmt, TypeSig, Value};
     use lexer::{Lexer, Location, LocationRange};
     use parser::{ParseError, Parser};
+    use std::ffi::OsStr;
+    use std::fs;
+    use std::fs::File;
+    use std::io::Write;
+    use std::path::PathBuf;
 
     #[test]
-    fn literal() -> Result<(), ParseError> {
+    fn main() -> Result<(), failure::Error> {
+        generate_baseline()
+    }
+
+    fn generate_baseline() -> Result<(), failure::Error> {
+        for entry in fs::read_dir("tests/parser")? {
+            let entry = &entry?.path();
+            if entry.extension() == Some(OsStr::new("sbr")) {
+                let source = fs::read_to_string(entry)?;
+                let lexer = Lexer::new(&source);
+                let mut parser = Parser::new(lexer);
+                let output = match parser.stmts() {
+                    Ok(stmts) => serde_json::to_string_pretty(&stmts)?,
+                    Err(err) => err.to_string(),
+                };
+                let mut out_path = PathBuf::new();
+                out_path.push("tests/parser/");
+                out_path.push(entry.file_stem().unwrap());
+                out_path.set_extension("json");
+                let mut out_file = File::create(out_path)?;
+                out_file.write_all(output.as_bytes())?;
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn literal() -> Result<(), failure::Error> {
         let expected = vec![
             Loc {
                 location: LocationRange(Location(1, 1), Location(1, 3)),
@@ -871,7 +903,7 @@ mod tests {
     #[test]
     fn arithmetic() -> Result<(), ParseError> {
         let expected = Loc {
-            location: LocationRange(Location(1, 1), Location(1, 15)),
+            location: LocationRange(Location(1, 1), Location(1, 16)),
             inner: Expr::BinOp {
                 op: Op::Plus,
                 lhs: Box::new(Loc {
@@ -893,7 +925,7 @@ mod tests {
                     },
                 }),
                 rhs: Box::new(Loc {
-                    location: LocationRange(Location(1, 10), Location(1, 15)),
+                    location: LocationRange(Location(1, 10), Location(1, 16)),
                     inner: Expr::BinOp {
                         op: Op::Div,
                         lhs: Box::new(Loc {
@@ -903,16 +935,57 @@ mod tests {
                             },
                         }),
                         rhs: Box::new(Loc {
-                            location: LocationRange(Location(1, 14), Location(1, 15)),
-                            inner: Expr::Primary {
-                                value: Value::Integer(4),
+                            location: LocationRange(Location(1, 14), Location(1, 16)),
+                            inner: Expr::UnaryOp {
+                                op: Op::Minus,
+                                rhs: Box::new(Loc {
+                                    location: LocationRange(Location(1, 15), Location(1, 16)),
+                                    inner: Expr::Primary {
+                                        value: Value::Integer(4),
+                                    },
+                                }),
                             },
                         }),
                     },
                 }),
             },
         };
-        let source = "10 * 2 + 3 / 4";
+        let source = "10 * 2 + 3 / -4";
+        let lexer = Lexer::new(&source);
+        let mut parser = Parser::new(lexer);
+        assert_eq!(expected, parser.expr()?);
+        Ok(())
+    }
+
+    #[test]
+    fn function() -> Result<(), ParseError> {
+        let expected = Loc {
+            location: LocationRange(Location(1, 1), Location(1, 12)),
+            inner: Expr::Function {
+                params: Pat::Id(0, None, LocationRange(Location(1, 2), Location(1, 3))),
+                return_type: None,
+                body: Box::new(Loc {
+                    location: LocationRange(Location(1, 7), Location(1, 12)),
+                    inner: Stmt::Return(Loc {
+                        location: LocationRange(Location(1, 7), Location(1, 12)),
+                        inner: Expr::BinOp {
+                            op: Op::Plus,
+                            lhs: Box::new(Loc {
+                                location: LocationRange(Location(1, 7), Location(1, 8)),
+                                inner: Expr::Var { name: 0 },
+                            }),
+                            rhs: Box::new(Loc {
+                                location: LocationRange(Location(1, 11), Location(1, 12)),
+                                inner: Expr::Primary {
+                                    value: Value::Integer(1),
+                                },
+                            }),
+                        },
+                    }),
+                }),
+            },
+        };
+        let source = "\\a => a + 1";
         let lexer = Lexer::new(&source);
         let mut parser = Parser::new(lexer);
         assert_eq!(expected, parser.expr()?);

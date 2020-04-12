@@ -9,6 +9,8 @@ extern crate leb128;
 extern crate strum;
 #[macro_use]
 extern crate strum_macros;
+extern crate serde;
+extern crate serde_json;
 
 use crate::emitter::Emitter;
 use crate::parser::Parser;
