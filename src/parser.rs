@@ -761,10 +761,7 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
-    fn main() -> Result<(), failure::Error> {
-        generate_baseline()
-    }
-
+    #[ignore]
     fn generate_baseline() -> Result<(), failure::Error> {
         for entry in fs::read_dir("tests/parser")? {
             let entry = &entry?.path();

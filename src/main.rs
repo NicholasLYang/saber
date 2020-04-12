@@ -85,33 +85,3 @@ fn run_repl() -> Result<()> {
         println!("{:#?}", typed_stmt);
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::read_file;
-    use crate::lexer::{Location, LocationRange, Token, TokenDiscriminants};
-    use crate::parser::ParseError;
-
-    #[test]
-    fn bad_syntax() {
-        let res = read_file("tests/bad_syntax.sbr");
-        assert_eq!(
-            res.expect_err("Expected syntax error")
-                .downcast::<ParseError>()
-                .unwrap(),
-            ParseError::UnexpectedToken {
-                token: Token::Semicolon,
-                expected_tokens: vec![
-                    TokenDiscriminants::True,
-                    TokenDiscriminants::False,
-                    TokenDiscriminants::Integer,
-                    TokenDiscriminants::Float,
-                    TokenDiscriminants::String,
-                    TokenDiscriminants::LParen
-                ],
-                location: LocationRange(Location(1, 15), Location(1, 16))
-            }
-            .into()
-        );
-    }
-}
