@@ -5,10 +5,11 @@ const path = require("path")
 const instantiate = async (fileName) => {
     const buffer = readFileSync(path.join(__dirname, `${fileName}.wasm`));
     const module = await WebAssembly.compile(buffer);
-    const instance = await WebAssembly.instantiate(module);
+    const importObject = { std: { print: arg => console.log(arg) }};
+    const instance = await WebAssembly.instantiate(module, importObject);
     let wasm = instance.exports;
     for (let i = 0; i < 10; i++) {
-	  console.log(wasm.fact(i));
+	  wasm.foo(i);
     }
 };
 

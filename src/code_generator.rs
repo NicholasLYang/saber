@@ -5,8 +5,8 @@ use std::sync::Arc;
 use symbol_table::{SymbolTable, SymbolTableEntry};
 use utils::NameTable;
 use wasm::{
-    ExportEntry, ExternalKind, FunctionBody, FunctionType, LocalEntry, OpCode, ProgramData,
-    WasmType,
+    ExportEntry, ExternalKind, FunctionBody, FunctionType, ImportEntry, ImportKind, LocalEntry,
+    OpCode, ProgramData, WasmType,
 };
 
 #[derive(Debug, Fail, PartialEq)]
@@ -70,10 +70,42 @@ impl CodeGenerator {
         }
     }
 
+    fn generate_default_imports(&mut self) -> Result<()> {
+        let print_type = FunctionType {
+            param_types: vec![WasmType::i32],
+            return_type: None,
+        };
+        let print_id = self
+            .name_table
+            .get_id(&"print".to_string())
+            .expect("Print must be defined");
+        let print_entry = self
+            .symbol_table
+            .lookup_name_in_scope(*print_id, 0)
+            .expect("Print is not in symbol table");
+        match print_entry {
+            SymbolTableEntry::Function {
+                index,
+                params_type: _,
+                return_type: _,
+            } => {
+                self.program_data.type_section[*index] = Some(print_type);
+                self.program_data.import_section.push(ImportEntry {
+                    module_str: "std".into(),
+                    field_str: "print".into(),
+                    kind: ImportKind::Function { type_: *index },
+                });
+                Ok(())
+            }
+            _ => Err(GenerationError::NotReachable),
+        }
+    }
+
     pub fn generate_program(mut self, program: Vec<Loc<StmtT>>) -> Result<ProgramData> {
         for stmt in program {
             (&mut self).generate_top_level_stmt(&stmt.inner)?;
         }
+        self.generate_default_imports()?;
         Ok(self.program_data)
     }
 
@@ -143,7 +175,7 @@ impl CodeGenerator {
         let (type_, body) = self.generate_function(return_type, params, body)?;
         self.program_data.type_section[index] = Some(type_);
         self.program_data.code_section.push(body);
-        self.program_data.function_section[index] = index;
+        self.program_data.function_section[index] = Some(index);
         self.symbol_table.set_scope(old_scope);
         Ok(())
     }
@@ -253,6 +285,13 @@ impl CodeGenerator {
                 std::mem::swap(&mut old_local_variables, &mut self.local_variables);
                 std::mem::swap(&mut old_var_indices, &mut self.var_indices);
                 Ok(Vec::new())
+            }
+            StmtT::Expr(expr) => {
+                let mut opcodes = self.generate_expr(&expr.inner)?;
+                if expr.inner.get_type() != Arc::new(Type::Unit) {
+                    opcodes.push(OpCode::Drop);
+                }
+                Ok(opcodes)
             }
             StmtT::Return(expr) => {
                 if is_last {

@@ -3,7 +3,9 @@ use byteorder::{LittleEndian, WriteBytesExt};
 use std::convert::TryInto;
 use std::fs::File;
 use std::io::prelude::*;
-use wasm::{ExportEntry, FunctionBody, FunctionType, OpCode, ProgramData, WasmType};
+use wasm::{
+    ExportEntry, FunctionBody, FunctionType, ImportEntry, ImportKind, OpCode, ProgramData, WasmType,
+};
 
 pub struct Emitter {
     file: File,
@@ -79,6 +81,7 @@ pub fn emit_code<T: Write>(mut dest: T, op_code: OpCode) -> Result<()> {
             Ok(())
         }
         OpCode::Unreachable => dest.write_u8(0x00),
+        OpCode::Drop => dest.write_u8(0x1a),
         OpCode::End => dest.write_u8(0x0b),
     }?;
     Ok(())
@@ -95,6 +98,7 @@ impl Emitter {
     pub fn emit_program(&mut self, program: ProgramData) -> Result<()> {
         self.emit_prelude()?;
         self.emit_types_section(program.type_section)?;
+        self.emit_imports_section(program.import_section)?;
         self.emit_functions_section(program.function_section)?;
         self.emit_exports_section(program.exports_section)?;
         self.emit_code_section(program.code_section)?;
@@ -151,11 +155,37 @@ impl Emitter {
         self.write_section(opcodes)
     }
 
-    pub fn emit_functions_section(&mut self, function_type_indices: Vec<usize>) -> Result<()> {
+    fn emit_imports_section(&mut self, imports: Vec<ImportEntry>) -> Result<()> {
+        self.emit_code(OpCode::SectionId(2))?;
+        let mut opcodes = vec![OpCode::Count(imports.len().try_into().unwrap())];
+        for import in imports {
+            opcodes.push(OpCode::Count(usize_to_u32(import.module_str.len())?));
+            opcodes.push(OpCode::Name(import.module_str));
+            opcodes.push(OpCode::Count(usize_to_u32(import.field_str.len())?));
+            opcodes.push(OpCode::Name(import.field_str));
+            match import.kind {
+                ImportKind::Function { type_ } => {
+                    opcodes.push(OpCode::Kind(0));
+                    opcodes.push(OpCode::Index(usize_to_u32(type_)?));
+                }
+                _ => unimplemented!(),
+            };
+        }
+        self.write_section(opcodes)
+    }
+
+    pub fn emit_functions_section(
+        &mut self,
+        function_type_indices: Vec<Option<usize>>,
+    ) -> Result<()> {
+        let function_type_indices: Vec<_> = function_type_indices
+            .iter()
+            .filter_map(|t| t.as_ref())
+            .collect();
         self.emit_code(OpCode::SectionId(3))?;
         let mut opcodes = vec![OpCode::Count(usize_to_u32(function_type_indices.len())?)];
         for index in function_type_indices {
-            opcodes.push(OpCode::Index(usize_to_u32(index)?));
+            opcodes.push(OpCode::Index(usize_to_u32(*index)?));
         }
         self.write_section(opcodes)
     }

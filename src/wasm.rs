@@ -33,6 +33,7 @@ pub enum OpCode {
     Return,
     Call(u32),
     Unreachable,
+    Drop,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -90,21 +91,18 @@ pub struct FunctionType {
 
 #[derive(Debug)]
 pub struct ImportEntry {
-    module_len: u32,
-    module_str: String,
-    field_len: u32,
-    field_str: String,
-    kind: ImportKind,
+    pub module_str: Vec<u8>,
+    pub field_str: Vec<u8>,
+    pub kind: ImportKind,
 }
 
 #[derive(Debug)]
 pub enum ImportKind {
-    Function { type_: u32 },
+    Function { type_: usize },
     Table { type_: TableType },
     Memory { type_: MemoryType },
     Global { type_: GlobalType },
 }
-
 
 #[derive(Debug)]
 pub struct TableType {
@@ -130,7 +128,7 @@ pub struct GlobalType {
 pub struct ProgramData {
     pub type_section: Vec<Option<FunctionType>>,
     pub import_section: Vec<ImportEntry>,
-    pub function_section: Vec<usize>,
+    pub function_section: Vec<Option<usize>>,
     pub table_section: Vec<TableType>,
     pub memory_section: Vec<MemoryType>,
     pub global_section: Vec<(GlobalType, Vec<OpCode>)>,
@@ -144,7 +142,7 @@ impl ProgramData {
         ProgramData {
             type_section: vec![None; func_count],
             import_section: Vec::new(),
-            function_section: vec![0; func_count],
+            function_section: vec![None; func_count],
             table_section: Vec::new(),
             memory_section: Vec::new(),
             global_section: Vec::new(),
