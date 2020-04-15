@@ -7,8 +7,11 @@ let fact = \(n: int): int => {
 }
 
 let foo = \(n: int): int => {
-  print(n);
-  return n;
+  let bar = \() => \() => {
+    print(10);
+  }
+  bar()();
+  return 10;
 }
 
 export fact;

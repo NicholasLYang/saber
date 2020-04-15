@@ -4,7 +4,8 @@ use std::convert::TryInto;
 use std::fs::File;
 use std::io::prelude::*;
 use wasm::{
-    ExportEntry, FunctionBody, FunctionType, ImportEntry, ImportKind, OpCode, ProgramData, WasmType,
+    ElemSegment, ExportEntry, FunctionBody, FunctionType, ImportEntry, ImportKind, OpCode,
+    ProgramData, WasmType,
 };
 
 pub struct Emitter {
@@ -41,6 +42,7 @@ pub fn emit_code<T: Write>(mut dest: T, op_code: OpCode) -> Result<()> {
         }
         OpCode::Name(bytes) | OpCode::Code(bytes) => dest.write_all(&bytes),
         OpCode::Kind(kind) => dest.write_u8(kind),
+        OpCode::Bool(b) => dest.write_u8(b as u8),
         OpCode::I32Const(val) => {
             dest.write_u8(0x41)?;
             leb128::write::signed(&mut dest, val.into())?;
@@ -80,6 +82,11 @@ pub fn emit_code<T: Write>(mut dest: T, op_code: OpCode) -> Result<()> {
             leb128::write::unsigned(&mut dest, i.into())?;
             Ok(())
         }
+        OpCode::CallIndirect(i) => {
+            dest.write_u8(0x11)?;
+            leb128::write::unsigned(&mut dest, i.into())?;
+            dest.write_u8(0x00)
+        }
         OpCode::Unreachable => dest.write_u8(0x00),
         OpCode::Drop => dest.write_u8(0x1a),
         OpCode::End => dest.write_u8(0x0b),
@@ -100,7 +107,9 @@ impl Emitter {
         self.emit_types_section(program.type_section)?;
         self.emit_imports_section(program.import_section)?;
         self.emit_functions_section(program.function_section)?;
+        self.emit_table_section(program.elements_section.elems.len())?;
         self.emit_exports_section(program.exports_section)?;
+        self.emit_elements_section(program.elements_section)?;
         self.emit_code_section(program.code_section)?;
         Ok(())
     }
@@ -130,13 +139,11 @@ impl Emitter {
         self.emit_code(OpCode::Version)
     }
 
-    pub fn emit_types_section(&mut self, types: Vec<Option<FunctionType>>) -> Result<()> {
+    pub fn emit_types_section(&mut self, types: Vec<FunctionType>) -> Result<()> {
         self.emit_code(OpCode::SectionId(1))?;
         // Start with a count for number of type definitions
         let mut opcodes = vec![OpCode::Count(types.len().try_into().unwrap())];
         for type_ in types {
-            // TODO: Give a better error than unwrap
-            let type_ = type_.unwrap();
             opcodes.push(OpCode::Type(WasmType::Function));
             opcodes.push(OpCode::Count(usize_to_u32(type_.param_types.len())?));
             for param in &type_.param_types {
@@ -190,6 +197,17 @@ impl Emitter {
         self.write_section(opcodes)
     }
 
+    fn emit_table_section(&mut self, initial_length: usize) -> Result<()> {
+        self.emit_code(OpCode::SectionId(4))?;
+        let opcodes = vec![
+            OpCode::Count(1),
+            OpCode::Type(WasmType::AnyFunction),
+            OpCode::Bool(false),
+            OpCode::Count(usize_to_u32(initial_length)?),
+        ];
+        self.write_section(opcodes)
+    }
+
     pub fn emit_exports_section(&mut self, exports: Vec<ExportEntry>) -> Result<()> {
         self.emit_code(OpCode::SectionId(7))?;
         let mut opcodes = vec![OpCode::Count(usize_to_u32(exports.len())?)];
@@ -198,6 +216,18 @@ impl Emitter {
             opcodes.push(OpCode::Name(entry.field_str));
             opcodes.push(OpCode::Kind(entry.kind.into()));
             opcodes.push(OpCode::Index(entry.index));
+        }
+        self.write_section(opcodes)
+    }
+
+    fn emit_elements_section(&mut self, mut segment: ElemSegment) -> Result<()> {
+        self.emit_code(OpCode::SectionId(9))?;
+        let mut opcodes = vec![OpCode::Count(1)]; // Only have one element in section
+        opcodes.push(OpCode::Index(0));
+        opcodes.append(&mut segment.offset);
+        opcodes.push(OpCode::Count(usize_to_u32(segment.elems.len())?));
+        for index in segment.elems {
+            opcodes.push(OpCode::Index(usize_to_u32(index)?));
         }
         self.write_section(opcodes)
     }

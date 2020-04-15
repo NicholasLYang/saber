@@ -12,6 +12,7 @@ pub enum OpCode {
     Kind(u8),
     Code(Vec<u8>),
     End,
+    Bool(bool),
     I32Add,
     I32Sub,
     I32Mul,
@@ -32,6 +33,7 @@ pub enum OpCode {
     Else,
     Return,
     Call(u32),
+    CallIndirect(u32),
     Unreachable,
     Drop,
 }
@@ -83,7 +85,7 @@ impl From<WasmType> for u64 {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FunctionType {
     pub param_types: Vec<WasmType>,
     pub return_type: Option<WasmType>,
@@ -126,13 +128,14 @@ pub struct GlobalType {
 
 #[derive(Debug)]
 pub struct ProgramData {
-    pub type_section: Vec<Option<FunctionType>>,
+    pub type_section: Vec<FunctionType>,
     pub import_section: Vec<ImportEntry>,
     pub function_section: Vec<Option<usize>>,
-    pub table_section: Vec<TableType>,
     pub memory_section: Vec<MemoryType>,
     pub global_section: Vec<(GlobalType, Vec<OpCode>)>,
     pub exports_section: Vec<ExportEntry>,
+    // Right now we only have one elem segment
+    pub elements_section: ElemSegment,
     pub code_section: Vec<FunctionBody>,
     pub data_section: Vec<DataSegment>,
 }
@@ -140,17 +143,37 @@ pub struct ProgramData {
 impl ProgramData {
     pub fn new(func_count: usize) -> Self {
         ProgramData {
-            type_section: vec![None; func_count],
+            type_section: Vec::new(),
             import_section: Vec::new(),
             function_section: vec![None; func_count],
-            table_section: Vec::new(),
             memory_section: Vec::new(),
             global_section: Vec::new(),
             exports_section: Vec::new(),
+            elements_section: ElemSegment {
+                offset: vec![OpCode::I32Const(0), OpCode::End],
+                elems: Vec::new(),
+            },
             code_section: Vec::new(),
             data_section: Vec::new(),
         }
     }
+
+    pub fn insert_type(&mut self, func_type: FunctionType) -> usize {
+        for (i, type_) in self.type_section.iter().enumerate() {
+            if &func_type == type_ {
+                return i;
+            }
+        }
+        self.type_section.push(func_type);
+        self.type_section.len() - 1
+    }
+}
+
+#[derive(Debug)]
+pub struct ElemSegment {
+    pub offset: Vec<OpCode>,
+    // List of function indices
+    pub elems: Vec<usize>,
 }
 
 #[derive(Debug)]

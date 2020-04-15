@@ -102,6 +102,7 @@ pub enum ExprT {
         params_type: Arc<Type>,
         return_type: Arc<Type>,
         body: Box<Loc<StmtT>>,
+        name: Name,
         scope_index: usize,
     },
     Field(Box<ExprT>, Name, Arc<Type>),
@@ -245,6 +246,7 @@ impl ExprT {
             ExprT::Function {
                 params: _,
                 body: _,
+                name: _,
                 scope_index: _,
                 params_type,
                 return_type,

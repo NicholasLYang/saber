@@ -6,7 +6,7 @@ use symbol_table::{SymbolTable, SymbolTableEntry};
 use utils::NameTable;
 use wasm::{
     ExportEntry, ExternalKind, FunctionBody, FunctionType, ImportEntry, ImportKind, LocalEntry,
-    OpCode, ProgramData, WasmType,
+    OpCode, ProgramData, TableType, WasmType,
 };
 
 #[derive(Debug, Fail, PartialEq)]
@@ -89,7 +89,7 @@ impl CodeGenerator {
                 params_type: _,
                 return_type: _,
             } => {
-                self.program_data.type_section[*index] = Some(print_type);
+                self.program_data.insert_type(print_type);
                 self.program_data.import_section.push(ImportEntry {
                     module_str: "std".into(),
                     field_str: "print".into(),
@@ -121,7 +121,8 @@ impl CodeGenerator {
             } => {
                 self.param_count = 0;
                 self.local_variables = Vec::new();
-                self.generate_function_binding(*name, *scope, params, return_type, &(*body).inner)
+                self.generate_function_binding(*name, *scope, params, return_type, &(*body).inner)?;
+                Ok(())
             }
             StmtT::Return(_) => Err(GenerationError::TopLevelReturn),
             StmtT::Export(func_name) => {
@@ -148,7 +149,10 @@ impl CodeGenerator {
                     Err(GenerationError::ExportValue)
                 }
             }
-            _ => Err(GenerationError::NotImplemented),
+            s => {
+                println!("{:?}", s);
+                Err(GenerationError::NotImplemented)
+            }
         }
     }
 
@@ -159,8 +163,8 @@ impl CodeGenerator {
         params: &[(Name, Arc<Type>)],
         return_type: &Arc<Type>,
         body: &StmtT,
-    ) -> Result<()> {
-        let entry = self.symbol_table.lookup_name(name).unwrap();
+    ) -> Result<usize> {
+        let entry = self.symbol_table.lookup_name_in_scope(name, scope).unwrap();
         let index = if let SymbolTableEntry::Function {
             index,
             params_type: _,
@@ -173,11 +177,11 @@ impl CodeGenerator {
         };
         let old_scope = self.symbol_table.set_scope(scope);
         let (type_, body) = self.generate_function(return_type, params, body)?;
-        self.program_data.type_section[index] = Some(type_);
+        self.program_data.insert_type(type_);
         self.program_data.code_section.push(body);
         self.program_data.function_section[index] = Some(index);
         self.symbol_table.set_scope(old_scope);
-        Ok(())
+        Ok(index)
     }
 
     pub fn generate_function(
@@ -232,6 +236,22 @@ impl CodeGenerator {
             })
         }
         Ok(FunctionBody { locals, code })
+    }
+
+    fn get_args_type(&self, arg_type: &Arc<Type>) -> Result<Vec<WasmType>> {
+        if let Type::Tuple(elems) = &**arg_type {
+            let mut wasm_types = Vec::new();
+            for elem in elems {
+                wasm_types.append(&mut self.get_args_type(elem)?);
+            }
+            Ok(wasm_types)
+        } else {
+            let wasm_type = match self.generate_wasm_type(arg_type)? {
+                Some(t) => vec![t],
+                None => Vec::new(),
+            };
+            Ok(wasm_type)
+        }
     }
 
     fn generate_wasm_type(&self, sbr_type: &Arc<Type>) -> Result<Option<WasmType>> {
@@ -389,7 +409,7 @@ impl CodeGenerator {
             ExprT::Call {
                 callee,
                 args,
-                type_: _,
+                type_,
             } => {
                 if let ExprT::Var { name, type_: _ } = &callee.inner {
                     let mut opcodes = Vec::new();
@@ -412,6 +432,54 @@ impl CodeGenerator {
                     opcodes.append(&mut self.generate_expr(&args.inner)?);
                     opcodes.push(OpCode::Call((index).try_into().unwrap()));
                     Ok(opcodes)
+                } else {
+                    println!("args: {:?}", args);
+                    println!("callee: {:?}", callee);
+                    println!("type_: {:?}", type_);
+                    let args_wasm_type = self.get_args_type(&args.inner.get_type())?;
+                    let return_wasm_type = self.generate_wasm_type(&type_)?;
+                    let func_type = FunctionType {
+                        param_types: args_wasm_type,
+                        return_type: return_wasm_type,
+                    };
+                    let type_sig_index = self.program_data.insert_type(func_type);
+                    let mut opcodes = self.generate_expr(&args.inner)?;
+                    opcodes.append(&mut self.generate_expr(&callee.inner)?);
+                    opcodes.push(OpCode::CallIndirect(type_sig_index.try_into().unwrap()));
+                    Ok(opcodes)
+                }
+            }
+            ExprT::Function {
+                params,
+                params_type,
+                return_type,
+                body,
+                name,
+                scope_index,
+            } => {
+                let mut old_param_count = 0;
+                let mut old_local_variables = Vec::new();
+                let mut old_var_indices = HashMap::new();
+                std::mem::swap(&mut old_param_count, &mut self.param_count);
+                std::mem::swap(&mut old_local_variables, &mut self.local_variables);
+                std::mem::swap(&mut old_var_indices, &mut self.var_indices);
+                let index = self.generate_function_binding(
+                    *name,
+                    *scope_index,
+                    params,
+                    return_type,
+                    &(*body).inner,
+                )?;
+                std::mem::swap(&mut old_param_count, &mut self.param_count);
+                std::mem::swap(&mut old_local_variables, &mut self.local_variables);
+                std::mem::swap(&mut old_var_indices, &mut self.var_indices);
+                self.program_data.elements_section.elems.push(index);
+                let table_index = self.program_data.elements_section.elems.len() - 1;
+                Ok(vec![OpCode::I32Const(table_index.try_into().unwrap())])
+            }
+            ExprT::Tuple(elems, _) => {
+                if elems.len() == 0 {
+                    Ok(Vec::new())
                 } else {
                     Err(GenerationError::NotImplemented)
                 }

@@ -24,8 +24,12 @@ pub enum TypeError {
         lhs_type: Arc<Type>,
         rhs_type: Arc<Type>,
     },
-    #[fail(display = "Could not unify {} with {}", type1, type2)]
-    UnificationFailure { type1: Arc<Type>, type2: Arc<Type> },
+    #[fail(display = "{}: Could not unify {} with {}", location, type1, type2)]
+    UnificationFailure {
+        location: LocationRange,
+        type1: Arc<Type>,
+        type2: Arc<Type>,
+    },
     #[fail(display = "{}: Type {} does not exist", location, type_name)]
     TypeDoesNotExist {
         location: LocationRange,
@@ -135,6 +139,11 @@ impl TypeChecker {
                 let previous_scope = self.symbol_table.push_scope();
                 let (params, body, return_type) = self.func(params, *body, return_type_sig)?;
                 let func_scope = self.symbol_table.set_scope(previous_scope);
+                self.symbol_table.insert_function(
+                    func_name,
+                    params_type.clone(),
+                    return_type.clone(),
+                );
                 Ok(vec![Loc {
                     location,
                     inner: StmtT::Function {
@@ -153,6 +162,7 @@ impl TypeChecker {
                 let cond_type = typed_cond.inner.get_type();
                 if !self.unify(&cond_type, &Arc::new(Type::Bool)) {
                     return Err(TypeError::UnificationFailure {
+                        location,
                         type1: cond_type,
                         type2: Arc::new(Type::Bool),
                     });
@@ -186,6 +196,7 @@ impl TypeChecker {
                             }])
                         } else {
                             Err(TypeError::UnificationFailure {
+                                location,
                                 type1: typed_exp.inner.get_type(),
                                 type2: return_type.clone(),
                             })
@@ -450,6 +461,7 @@ impl TypeChecker {
             Ok(bindings)
         } else {
             Err(TypeError::UnificationFailure {
+                location,
                 type1: pat_type,
                 type2: typed_rhs.inner.get_type(),
             })
@@ -570,12 +582,23 @@ impl TypeChecker {
             Expr::Function {
                 params,
                 body,
-                return_type,
+                return_type: return_type_sig,
             } => {
+                let name = self.name_table.get_fresh_name();
                 let params_type = self.pat(&params)?;
                 let previous_scope = self.symbol_table.push_scope();
-                let (params, body, return_type) = self.func(params, *body, return_type)?;
+                let this_id = self.name_table.insert("this".into());
+                let return_type = if let Some(type_sig) = &return_type_sig {
+                    self.lookup_type_sig(type_sig)?
+                } else {
+                    self.get_fresh_type_var()
+                };
+                self.symbol_table
+                    .insert_function(this_id, params_type.clone(), return_type);
+                let (params, body, return_type) = self.func(params, *body, return_type_sig)?;
                 let func_scope = self.symbol_table.set_scope(previous_scope);
+                self.symbol_table
+                    .insert_function(name, params_type.clone(), return_type.clone());
                 let func = Loc {
                     location,
                     inner: ExprT::Function {
@@ -583,6 +606,7 @@ impl TypeChecker {
                         params_type,
                         return_type,
                         body,
+                        name,
                         scope_index: func_scope,
                     },
                 };
@@ -635,6 +659,7 @@ impl TypeChecker {
                     })
                 } else {
                     Err(TypeError::UnificationFailure {
+                        location,
                         type1: params_type,
                         type2: args_type,
                     })

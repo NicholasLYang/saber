@@ -8,9 +8,7 @@ const instantiate = async (fileName) => {
     const importObject = { std: { print: arg => console.log(arg) }};
     const instance = await WebAssembly.instantiate(module, importObject);
     let wasm = instance.exports;
-    for (let i = 0; i < 10; i++) {
-	  wasm.foo(i);
-    }
+    wasm.foo(i);
 };
 
 const buildToWasm = (fileName) => {

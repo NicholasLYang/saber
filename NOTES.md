@@ -25,3 +25,13 @@ https://en.wikipedia.org/wiki/Lambda_lifting
 
 Typechecking based on typeclass/trait constraints, then with interop, turn these constraint checks
 into runtime ones.
+
+## WASM WTFs
+The types section determines the function index space, NOT the functions sections. The
+more accurate name for the functions section is the *local* functions section and the
+more accurate name for the types section is the declarations section (a la C headers).
+
+## Call Indirect
+I need the expected function signature as an index. Which means I should probably collect the function signatures
+in a HashSet/HashMap then when I come across a call expression, figure out the expected type of the function, 
+look up in said map and then insert the id.
