@@ -89,11 +89,11 @@ impl CodeGenerator {
                 params_type: _,
                 return_type: _,
             } => {
-                self.program_data.insert_type(print_type);
+                let type_index = self.program_data.insert_type(print_type);
                 self.program_data.import_section.push(ImportEntry {
                     module_str: "std".into(),
                     field_str: "print".into(),
-                    kind: ImportKind::Function { type_: *index },
+                    kind: ImportKind::Function { type_: type_index },
                 });
                 Ok(())
             }
@@ -138,7 +138,6 @@ impl CodeGenerator {
                     return_type: _,
                 } = sym_entry
                 {
-                    println!("NAME: {} INDEX: {}", name_str, index);
                     let entry = ExportEntry {
                         field_str: name_str.as_bytes().to_vec(),
                         kind: ExternalKind::Function,
@@ -451,6 +450,7 @@ impl CodeGenerator {
                 name,
                 scope_index,
             } => {
+                println!("EXPR FUNC NAME: {}", name);
                 let mut old_param_count = 0;
                 let mut old_local_variables = Vec::new();
                 let mut old_var_indices = HashMap::new();

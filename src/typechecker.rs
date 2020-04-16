@@ -602,14 +602,11 @@ impl TypeChecker {
                 let name = self.name_table.get_fresh_name();
                 let params_type = self.pat(&params)?;
                 let previous_scope = self.symbol_table.push_scope();
-                let this_id = self.name_table.insert("this".into());
                 let return_type = if let Some(type_sig) = &return_type_sig {
                     self.lookup_type_sig(type_sig)?
                 } else {
                     self.get_fresh_type_var()
                 };
-                self.symbol_table
-                    .insert_function(this_id, params_type.clone(), return_type);
                 let (params, body, return_type) = self.func(params, *body, return_type_sig)?;
                 let func_scope = self.symbol_table.set_scope(previous_scope);
                 self.symbol_table

@@ -10,8 +10,8 @@ let bar = \(f: int -> int): int => {
   return f(10);
 }
 
-let foo = \(n: int) => {
-  return n + bar(\(m: int) => m + 1);
+let foo = \() => {
+  return bar(\(m: int) => m + 1);
 }
 
 
