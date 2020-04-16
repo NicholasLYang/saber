@@ -6,13 +6,14 @@ let fact = \(n: int): int => {
   }
 }
 
-let foo = \(n: int): int => {
-  let bar = \() => \() => {
-    print(10);
-  }
-  bar()();
-  return 10;
+let bar = \(f: int -> int): int => {
+  return f(10);
 }
+
+let foo = \(n: int) => {
+  return n + bar(\(m: int) => m + 1);
+}
+
 
 export fact;
 export foo;

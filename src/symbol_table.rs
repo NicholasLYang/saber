@@ -83,14 +83,20 @@ impl SymbolTable {
     }
 
     pub fn insert_function(&mut self, name: Name, params_type: Arc<Type>, return_type: Arc<Type>) {
-        self.scopes[self.current_scope].symbols.insert(
-            name,
-            SymbolTableEntry::Function {
-                index: self.function_index,
-                params_type,
-                return_type,
-            },
+        println!(
+            "INDEX: {}, NAME: {}, params: {}, return_type: {}",
+            self.function_index, name, params_type, return_type
         );
-        self.function_index += 1;
+        if self.lookup_name(name).is_none() {
+            self.scopes[self.current_scope].symbols.insert(
+                name,
+                SymbolTableEntry::Function {
+                    index: self.function_index,
+                    params_type,
+                    return_type,
+                },
+            );
+            self.function_index += 1;
+        }
     }
 }

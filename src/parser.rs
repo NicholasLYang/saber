@@ -547,7 +547,6 @@ impl<'input> Parser<'input> {
                     value: Value::String(s),
                 },
             }),
-            Token::LParenBrace => self.record_literal(location),
             // Parsing tuple or grouping
             Token::LParen => {
                 let expr = self.expr()?;
@@ -580,42 +579,6 @@ impl<'input> Parser<'input> {
                     TokenDiscriminants::LParen,
                 ],
             }),
-        }
-    }
-
-    fn record_literal(&mut self, left: LocationRange) -> Result<Loc<Expr>, ParseError> {
-        let mut entries = Vec::new();
-        loop {
-            match self.bump()? {
-                Some((Token::RParenBrace, right)) => {
-                    return Ok(Loc {
-                        location: LocationRange(left.0, right.1),
-                        inner: Expr::Record { entries },
-                    });
-                }
-                Some((Token::Ident(name), _)) => {
-                    let field_val = self.expr()?;
-                    entries.push((name, field_val));
-                }
-                Some((token, location)) => {
-                    return Err(ParseError::UnexpectedToken {
-                        token,
-                        location,
-                        expected_tokens: vec![
-                            TokenDiscriminants::RParenBrace,
-                            TokenDiscriminants::Ident,
-                        ],
-                    })
-                }
-                None => {
-                    return Err(ParseError::EndOfFile {
-                        expected_tokens: vec![
-                            TokenDiscriminants::RParenBrace,
-                            TokenDiscriminants::Ident,
-                        ],
-                    })
-                }
-            }
         }
     }
 
@@ -711,16 +674,36 @@ impl<'input> Parser<'input> {
     fn type_(&mut self) -> Result<Loc<TypeSig>, ParseError> {
         let token = self.bump()?;
         match token {
-            Some((Token::Ident(name), location)) => Ok(Loc {
-                location,
-                inner: TypeSig::Name(name),
-            }),
+            Some((Token::Ident(name), location)) => {
+                let sig = Loc {
+                    location,
+                    inner: TypeSig::Name(name),
+                };
+                if self.match_one(TokenDiscriminants::Arrow)?.is_some() {
+                    let return_type = self.type_()?;
+                    Ok(Loc {
+                        location: LocationRange(location.0, return_type.location.1),
+                        inner: TypeSig::Arrow(vec![sig], Box::new(return_type)),
+                    })
+                } else {
+                    Ok(sig)
+                }
+            }
             Some((Token::LBracket, left)) => {
                 let array_type = self.type_()?;
                 let (_, right) = self.expect(TokenDiscriminants::RBracket)?;
                 Ok(Loc {
                     location: LocationRange(left.0, right.1),
                     inner: TypeSig::Array(Box::new(array_type)),
+                })
+            }
+            Some((Token::LParen, left)) => {
+                let (param_types, _) = self.comma(&Self::type_, Token::RParen)?;
+                self.expect(TokenDiscriminants::Arrow)?;
+                let return_type = self.type_()?;
+                Ok(Loc {
+                    location: LocationRange(left.0, return_type.location.1),
+                    inner: TypeSig::Arrow(param_types, Box::new(return_type)),
                 })
             }
             Some((token, location)) => Err(ParseError::UnexpectedToken {

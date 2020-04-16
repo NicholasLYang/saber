@@ -273,6 +273,21 @@ impl TypeChecker {
                     })
                 }
             }
+            TypeSig::Empty => Ok(Arc::new(Type::Unit)),
+            TypeSig::Arrow(param_sigs, return_sig) => {
+                let param_types = if param_sigs.len() == 1 {
+                    self.lookup_type_sig(&param_sigs[0])?
+                } else {
+                    let mut types = Vec::new();
+                    for param in param_sigs {
+                        types.push(self.lookup_type_sig(param)?);
+                    }
+                    Arc::new(Type::Tuple(types))
+                };
+
+                let return_type = self.lookup_type_sig(return_sig)?;
+                Ok(Arc::new(Type::Arrow(param_types, return_type)))
+            }
         }
     }
 
@@ -725,6 +740,7 @@ impl TypeChecker {
             (Type::Arrow(param_type1, return_type1), Type::Arrow(param_type2, return_type2)) => {
                 self.unify(&param_type1, &param_type2) && self.unify(&return_type1, &return_type2)
             }
+
             (Type::Int, Type::Bool) | (Type::Bool, Type::Int) => true,
             // TODO: We need a way to look up usages of type vars and
             // convert them to the other type with unification

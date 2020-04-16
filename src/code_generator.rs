@@ -6,7 +6,7 @@ use symbol_table::{SymbolTable, SymbolTableEntry};
 use utils::NameTable;
 use wasm::{
     ExportEntry, ExternalKind, FunctionBody, FunctionType, ImportEntry, ImportKind, LocalEntry,
-    OpCode, ProgramData, TableType, WasmType,
+    OpCode, ProgramData, WasmType,
 };
 
 #[derive(Debug, Fail, PartialEq)]
@@ -30,7 +30,7 @@ pub enum GenerationError {
     CouldNotInfer { type_: Arc<Type> },
     #[fail(display = "Code Generator: Not implemented yet!")]
     NotImplemented,
-    #[fail(display = "Not reachable")]
+    #[fail(display = "Code Generator: Not reachable")]
     NotReachable,
     #[fail(display = "Cannot return at top level")]
     TopLevelReturn,
@@ -138,6 +138,7 @@ impl CodeGenerator {
                     return_type: _,
                 } = sym_entry
                 {
+                    println!("NAME: {} INDEX: {}", name_str, index);
                     let entry = ExportEntry {
                         field_str: name_str.as_bytes().to_vec(),
                         kind: ExternalKind::Function,
@@ -177,9 +178,9 @@ impl CodeGenerator {
         };
         let old_scope = self.symbol_table.set_scope(scope);
         let (type_, body) = self.generate_function(return_type, params, body)?;
-        self.program_data.insert_type(type_);
+        let type_index = self.program_data.insert_type(type_);
         self.program_data.code_section.push(body);
-        self.program_data.function_section[index] = Some(index);
+        self.program_data.function_section[index] = Some(type_index);
         self.symbol_table.set_scope(old_scope);
         Ok(index)
     }
@@ -418,40 +419,33 @@ impl CodeGenerator {
                             name: self.name_table.get_str(&name).to_string(),
                         },
                     )?;
-                    let index = if let SymbolTableEntry::Function {
+                    if let SymbolTableEntry::Function {
                         index,
                         params_type: _,
                         return_type: _,
                     } = entry
                     {
-                        *index
-                    } else {
-                        // Should not be reachable since this shouldn't typecheck in the first place
-                        return Err(GenerationError::NotReachable);
+                        let index = *index;
+                        opcodes.append(&mut self.generate_expr(&args.inner)?);
+                        opcodes.push(OpCode::Call((index).try_into().unwrap()));
+                        return Ok(opcodes);
                     };
-                    opcodes.append(&mut self.generate_expr(&args.inner)?);
-                    opcodes.push(OpCode::Call((index).try_into().unwrap()));
-                    Ok(opcodes)
-                } else {
-                    println!("args: {:?}", args);
-                    println!("callee: {:?}", callee);
-                    println!("type_: {:?}", type_);
-                    let args_wasm_type = self.get_args_type(&args.inner.get_type())?;
-                    let return_wasm_type = self.generate_wasm_type(&type_)?;
-                    let func_type = FunctionType {
-                        param_types: args_wasm_type,
-                        return_type: return_wasm_type,
-                    };
-                    let type_sig_index = self.program_data.insert_type(func_type);
-                    let mut opcodes = self.generate_expr(&args.inner)?;
-                    opcodes.append(&mut self.generate_expr(&callee.inner)?);
-                    opcodes.push(OpCode::CallIndirect(type_sig_index.try_into().unwrap()));
-                    Ok(opcodes)
                 }
+                let args_wasm_type = self.get_args_type(&args.inner.get_type())?;
+                let return_wasm_type = self.generate_wasm_type(&type_)?;
+                let func_type = FunctionType {
+                    param_types: args_wasm_type,
+                    return_type: return_wasm_type,
+                };
+                let type_sig_index = self.program_data.insert_type(func_type);
+                let mut opcodes = self.generate_expr(&args.inner)?;
+                opcodes.append(&mut self.generate_expr(&callee.inner)?);
+                opcodes.push(OpCode::CallIndirect(type_sig_index.try_into().unwrap()));
+                Ok(opcodes)
             }
             ExprT::Function {
                 params,
-                params_type,
+                params_type: _,
                 return_type,
                 body,
                 name,

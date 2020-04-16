@@ -23,10 +23,6 @@ pub enum Token {
     RBracket,
     LParen,
     RParen,
-    // ({
-    LParenBrace,
-    // })
-    RParenBrace,
     Semicolon,
     Colon,
     Comma,
@@ -51,6 +47,7 @@ pub enum Token {
     DivEqual,
     Times,
     TimesEqual,
+    Arrow,
     FatArrow,
     Slash,
     String(String),
@@ -80,8 +77,6 @@ impl Display for Token {
                 Token::RBracket => "]".to_string(),
                 Token::LParen => "(".to_string(),
                 Token::RParen => ")".to_string(),
-                Token::LParenBrace => "({".to_string(),
-                Token::RParenBrace => "})".to_string(),
                 Token::Semicolon => ";".to_string(),
                 Token::Colon => ":".to_string(),
                 Token::Comma => ",".to_string(),
@@ -107,6 +102,7 @@ impl Display for Token {
                 Token::Times => "*".to_string(),
                 Token::TimesEqual => "*=".to_string(),
                 Token::FatArrow => "=>".to_string(),
+                Token::Arrow => "->".to_string(),
                 Token::Slash => "\\".to_string(),
                 Token::String(s) => format!("\"{}\"", s),
             }
@@ -367,12 +363,8 @@ impl<'input> Iterator for Lexer<'input> {
             let end_loc = self.get_location();
             match ch {
                 '{' => Some(Ok((Token::LBrace, LocationRange(start_loc, end_loc)))),
-                '}' => {
-                    Some(self.lookahead_match(start_loc, Token::RParenBrace, Token::RBrace, ')'))
-                }
-                '(' => {
-                    Some(self.lookahead_match(start_loc, Token::LParenBrace, Token::LParen, '{'))
-                }
+                '}' => Some(Ok((Token::RBrace, LocationRange(start_loc, end_loc)))),
+                '(' => Some(Ok((Token::LParen, LocationRange(start_loc, end_loc)))),
                 ')' => Some(Ok((Token::RParen, LocationRange(start_loc, end_loc)))),
                 '[' => Some(Ok((Token::LBracket, LocationRange(start_loc, end_loc)))),
                 ']' => Some(Ok((Token::RBracket, LocationRange(start_loc, end_loc)))),
@@ -382,7 +374,23 @@ impl<'input> Iterator for Lexer<'input> {
                 '\\' => Some(Ok((Token::Slash, LocationRange(start_loc, end_loc)))),
                 ':' => Some(Ok((Token::Colon, LocationRange(start_loc, end_loc)))),
                 '+' => Some(self.lookahead_match(start_loc, Token::PlusEqual, Token::Plus, '=')),
-                '-' => Some(self.lookahead_match(start_loc, Token::MinusEqual, Token::Minus, '=')),
+                '-' => match self.lookahead {
+                    Some((_, '>')) => {
+                        self.bump();
+                        Some(Ok((
+                            Token::Arrow,
+                            LocationRange(start_loc, self.get_location()),
+                        )))
+                    }
+                    Some((_, '=')) => {
+                        self.bump();
+                        Some(Ok((
+                            Token::MinusEqual,
+                            LocationRange(start_loc, self.get_location()),
+                        )))
+                    }
+                    _ => Some(Ok((Token::Minus, LocationRange(start_loc, end_loc)))),
+                },
                 '*' => Some(self.lookahead_match(start_loc, Token::TimesEqual, Token::Times, '=')),
                 '/' => match self.lookahead {
                     Some((_, '/')) => {

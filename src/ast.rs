@@ -204,7 +204,14 @@ impl fmt::Display for Type {
                 Type::Var(name) => format!("var({})", name),
                 Type::Array(t) => format!("[{}]", t),
                 Type::Record(_) => "{ Record }".into(),
-                Type::Tuple(_) => "(Tuple)".into(),
+                Type::Tuple(ts) => {
+                    let elems = ts
+                        .iter()
+                        .map(|t| format!("{}", t))
+                        .collect::<Vec<String>>()
+                        .join(", ");
+                    format!("({})", elems)
+                }
                 Type::Arrow(t1, t2) => format!("{} => {}", t1, t2),
             }
         )
@@ -215,6 +222,8 @@ impl fmt::Display for Type {
 pub enum TypeSig {
     Array(Box<Loc<TypeSig>>),
     Name(Name),
+    Empty,
+    Arrow(Vec<Loc<TypeSig>>, Box<Loc<TypeSig>>),
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
