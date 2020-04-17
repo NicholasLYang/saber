@@ -1,6 +1,6 @@
 use std::fmt;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum OpCode {
     MagicNumber,
     Version,
@@ -136,7 +136,7 @@ pub struct ProgramData {
     pub exports_section: Vec<ExportEntry>,
     // Right now we only have one elem segment
     pub elements_section: ElemSegment,
-    pub code_section: Vec<FunctionBody>,
+    pub code_section: Vec<Option<FunctionBody>>,
     pub data_section: Vec<DataSegment>,
 }
 
@@ -153,7 +153,7 @@ impl ProgramData {
                 offset: vec![OpCode::I32Const(0), OpCode::End],
                 elems: Vec::new(),
             },
-            code_section: Vec::new(),
+            code_section: vec![None; func_count],
             data_section: Vec::new(),
         }
     }
@@ -210,13 +210,13 @@ pub struct ExportEntry {
     pub index: u32,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct FunctionBody {
     pub locals: Vec<LocalEntry>,
     pub code: Vec<OpCode>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct LocalEntry {
     pub count: u32,
     pub type_: WasmType,

@@ -1,19 +1,9 @@
-let fact = \(n: int): int => {
-  if (n == 0) {
-    return 1;
-  } else {
-    return n * fact(n - 1);
-  }
-}
-
 let bar = \(f: int -> int): int => {
-  return f(10);
+  return f(20);
 }
 
 let foo = \() => {
   return bar(\(m: int) => m + 1);
 }
 
-
-export fact;
 export foo;

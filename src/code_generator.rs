@@ -149,10 +149,7 @@ impl CodeGenerator {
                     Err(GenerationError::ExportValue)
                 }
             }
-            s => {
-                println!("{:?}", s);
-                Err(GenerationError::NotImplemented)
-            }
+            s => Err(GenerationError::NotImplemented),
         }
     }
 
@@ -178,7 +175,7 @@ impl CodeGenerator {
         let old_scope = self.symbol_table.set_scope(scope);
         let (type_, body) = self.generate_function(return_type, params, body)?;
         let type_index = self.program_data.insert_type(type_);
-        self.program_data.code_section.push(body);
+        self.program_data.code_section[index] = Some(body);
         self.program_data.function_section[index] = Some(type_index);
         self.symbol_table.set_scope(old_scope);
         Ok(index)
@@ -450,7 +447,6 @@ impl CodeGenerator {
                 name,
                 scope_index,
             } => {
-                println!("EXPR FUNC NAME: {}", name);
                 let mut old_param_count = 0;
                 let mut old_local_variables = Vec::new();
                 let mut old_var_indices = HashMap::new();

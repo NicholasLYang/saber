@@ -11,7 +11,6 @@ impl NameTable {
             *id
         } else {
             let id = self.1;
-            println!("{}: {}", sym, id);
             self.0.insert(sym, id);
             self.1 += 1;
             id

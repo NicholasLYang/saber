@@ -84,7 +84,6 @@ impl SymbolTable {
 
     pub fn insert_function(&mut self, name: Name, params_type: Arc<Type>, return_type: Arc<Type>) {
         if self.lookup_name(name).is_none() {
-            println!("INDEX: {}, NAME: {}", self.function_index, name);
             self.scopes[self.current_scope].symbols.insert(
                 name,
                 SymbolTableEntry::Function {

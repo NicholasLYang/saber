@@ -110,7 +110,7 @@ impl Emitter {
         self.emit_table_section(program.elements_section.elems.len())?;
         self.emit_exports_section(program.exports_section)?;
         self.emit_elements_section(program.elements_section)?;
-        self.emit_code_section(program.code_section)?;
+        self.emit_code_section(program.code_section.into_iter().filter_map(|t| t).collect())?;
         Ok(())
     }
 
@@ -140,7 +140,6 @@ impl Emitter {
     }
 
     pub fn emit_types_section(&mut self, types: Vec<FunctionType>) -> Result<()> {
-        println!("TYPES: {:?}", types);
         self.emit_code(OpCode::SectionId(1))?;
         // Start with a count for number of type definitions
         let mut opcodes = vec![OpCode::Count(types.len().try_into().unwrap())];
@@ -186,12 +185,10 @@ impl Emitter {
         &mut self,
         function_type_indices: Vec<Option<usize>>,
     ) -> Result<()> {
-        println!("{:?}", function_type_indices);
         let function_type_indices: Vec<_> = function_type_indices
             .iter()
             .filter_map(|t| t.as_ref())
             .collect();
-        println!("{:?}", function_type_indices);
         self.emit_code(OpCode::SectionId(3))?;
         let mut opcodes = vec![OpCode::Count(usize_to_u32(function_type_indices.len())?)];
         for index in function_type_indices {
