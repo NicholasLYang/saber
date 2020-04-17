@@ -186,27 +186,27 @@ impl TypeChecker {
                 }])
             }
             Stmt::Return(expr) => {
-                let typed_exp = self.expr(expr)?;
+                let typed_expr = self.expr(expr)?;
                 match self.return_type.clone() {
                     Some(ref return_type) => {
-                        if self.unify(&typed_exp.inner.get_type(), return_type) {
+                        if self.unify(&typed_expr.inner.get_type(), return_type) {
                             Ok(vec![Loc {
                                 location,
-                                inner: StmtT::Return(typed_exp),
+                                inner: StmtT::Return(typed_expr),
                             }])
                         } else {
                             Err(TypeError::UnificationFailure {
                                 location,
-                                type1: typed_exp.inner.get_type(),
+                                type1: typed_expr.inner.get_type(),
                                 type2: return_type.clone(),
                             })
                         }
                     }
                     None => {
-                        self.return_type = Some(typed_exp.inner.get_type());
+                        self.return_type = Some(typed_expr.inner.get_type());
                         Ok(vec![Loc {
                             location,
-                            inner: StmtT::Return(typed_exp),
+                            inner: StmtT::Return(typed_expr),
                         }])
                     }
                 }

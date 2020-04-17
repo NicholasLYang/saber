@@ -25,10 +25,11 @@ hopefully I'll be able to port it to other platforms.
   - ~~Add local variables~~
   - ~~Add control flow~~ (Kinda)
   - ~~Add function calls~~ (Kinda)
-  - ~~Add nested functions~~  
+  - ~~Add nested functions~~ 
+  - ~~Add first class functions~~
 - Tests/Debugging
-  - Write some tests
-  - Add locations in errors with row/col
+  - ~~Write some tests~~
+  - ~~Add locations in errors with row/col~~
 
 ## Design
 
