@@ -53,6 +53,7 @@ pub struct CodeGenerator {
     param_count: usize,
     // All the generated code
     program_data: ProgramData,
+    return_type: Option<WasmType>,
 }
 
 type Result<T> = std::result::Result<T, GenerationError>;
@@ -67,6 +68,7 @@ impl CodeGenerator {
             local_variables: Vec::new(),
             param_count: 0,
             program_data: ProgramData::new(func_count),
+            return_type: None,
         }
     }
 
@@ -188,8 +190,9 @@ impl CodeGenerator {
         body: &StmtT,
     ) -> Result<(FunctionType, FunctionBody)> {
         let return_type = self.generate_wasm_type(&return_type)?;
+        self.return_type = return_type.clone();
         let function_type = self.generate_function_type(&return_type, params)?;
-        let function_body = self.generate_function_body(body, return_type)?;
+        let function_body = self.generate_function_body(body)?;
         Ok((function_type, function_body))
     }
 
@@ -217,12 +220,8 @@ impl CodeGenerator {
         })
     }
 
-    fn generate_function_body(
-        &mut self,
-        body: &StmtT,
-        return_type: Option<WasmType>,
-    ) -> Result<FunctionBody> {
-        let code = self.generate_stmt(body, true, &return_type)?;
+    fn generate_function_body(&mut self, body: &StmtT) -> Result<FunctionBody> {
+        let code = self.generate_stmt(body, true)?;
         let mut locals = Vec::new();
         // We want to generate only the locals not params so we skip
         // to after the params
@@ -276,12 +275,7 @@ impl CodeGenerator {
             })?)
     }
 
-    fn generate_stmt(
-        &mut self,
-        stmt: &StmtT,
-        is_last: bool,
-        return_type: &Option<WasmType>,
-    ) -> Result<Vec<OpCode>> {
+    fn generate_stmt(&mut self, stmt: &StmtT, is_last: bool) -> Result<Vec<OpCode>> {
         match stmt {
             StmtT::Function {
                 name,
@@ -327,19 +321,15 @@ impl CodeGenerator {
                 // For now we say false because allowing the blocks to
                 // implicitly return by leaving on the stack means we have to
                 // change the block return type.
-                opcodes.append(&mut self.generate_stmt(&then_block.inner, false, return_type)?);
+                opcodes.append(&mut self.generate_stmt(&then_block.inner, false)?);
                 if let Some(else_block) = else_block {
                     opcodes.push(OpCode::Else);
-                    opcodes.append(&mut self.generate_stmt(
-                        &else_block.inner,
-                        false,
-                        return_type,
-                    )?);
+                    opcodes.append(&mut self.generate_stmt(&else_block.inner, false)?);
                 }
                 opcodes.push(OpCode::End);
                 // If this is the last instruction and the function is
                 // supposed to return a value, push on an unreachable
-                if return_type.is_some() && is_last {
+                if self.return_type.is_some() && is_last {
                     opcodes.push(OpCode::Unreachable)
                 }
                 Ok(opcodes)
@@ -358,11 +348,9 @@ impl CodeGenerator {
             StmtT::Block(stmts) => {
                 let mut opcodes = Vec::new();
                 for (i, stmt) in stmts.iter().enumerate() {
-                    opcodes.append(&mut self.generate_stmt(
-                        &stmt.inner,
-                        is_last && i == stmts.len() - 1,
-                        return_type,
-                    )?);
+                    opcodes.append(
+                        &mut self.generate_stmt(&stmt.inner, is_last && i == stmts.len() - 1)?,
+                    );
                 }
                 Ok(opcodes)
             }
@@ -473,6 +461,21 @@ impl CodeGenerator {
                 } else {
                     Err(GenerationError::NotImplemented)
                 }
+            }
+            ExprT::Block {
+                stmts,
+                end_expr,
+                type_: _,
+                scope_index: _,
+            } => {
+                let mut opcodes = Vec::new();
+                for stmt in stmts {
+                    opcodes.append(&mut self.generate_stmt(&stmt.inner, false)?);
+                }
+                if let Some(expr) = end_expr {
+                    opcodes.append(&mut self.generate_expr(&expr.inner)?);
+                }
+                Ok(opcodes)
             }
             ExprT::BinOp {
                 op,

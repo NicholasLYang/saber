@@ -1,9 +1,9 @@
-let bar = \(n: int): int -> int => {
-
-}
-
 let foo = \(n: int): int => {
-  return bar(n)(n);
+  let m = {
+    let q = 10;
+    n * q + 1
+  };
+  return m;
 }
 
 export foo;
