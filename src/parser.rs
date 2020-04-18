@@ -293,10 +293,49 @@ impl<'input> Parser<'input> {
     }
 
     fn expr(&mut self) -> Result<Loc<Expr>, ParseError> {
-        if let Some((_, left)) = self.match_one(TokenDiscriminants::Slash)? {
-            self.function(left)
-        } else {
-            self.equality()
+        match self.bump()? {
+            Some((Token::Slash, left)) => self.function(left),
+            Some((Token::LBrace, left)) => self.expr_block(left),
+            Some(span) => {
+                self.pushback(span);
+                self.equality()
+            }
+            None => self.equality(),
+        }
+    }
+
+    fn expr_block(&mut self, left: LocationRange) -> Result<Loc<Expr>, ParseError> {
+        let mut stmts = Vec::new();
+        loop {
+            if let Some((_, right)) = self.match_one(TokenDiscriminants::RBrace)? {
+                return Ok(Loc {
+                    location: LocationRange(left.0, right.1),
+                    inner: Expr::Block(stmts, None),
+                });
+            }
+            // If we're undeniably starting a statement then
+            // parse it and push onto the vec
+            if let Some(span) =
+                self.match_multiple(vec![Token::Let, Token::Return, Token::Export])?
+            {
+                self.pushback(span);
+                stmts.push(self.stmt()?);
+            } else {
+                // Otherwise we could either be in an expr stmt or an ending expr situation
+                let expr = self.expr()?;
+                if let Some((_, right)) = self.match_one(TokenDiscriminants::Semicolon)? {
+                    stmts.push(Loc {
+                        location: LocationRange(expr.location.0, right.1),
+                        inner: Stmt::Expr(expr),
+                    });
+                } else {
+                    let (_, right) = self.expect(TokenDiscriminants::RBrace)?;
+                    return Ok(Loc {
+                        location: LocationRange(left.0, right.1),
+                        inner: Expr::Block(stmts, Some(Box::new(expr))),
+                    });
+                }
+            }
         }
     }
 

@@ -43,6 +43,8 @@ pub enum StmtT {
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum Expr {
+    Block(Vec<Loc<Stmt>>, Option<Box<Loc<Expr>>>),
+    //If(Box<Loc<Expr>>, Box<Loc<Expr>>, Box<Loc<Expr>>),
     Primary {
         value: Value,
     },
@@ -76,6 +78,12 @@ pub enum Expr {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum ExprT {
+    Block {
+        stmts: Vec<Loc<StmtT>>,
+        end_expr: Option<Box<Loc<ExprT>>>,
+        scope_index: usize,
+        type_: Arc<Type>,
+    },
     Primary {
         value: Value,
         type_: Arc<Type>,
@@ -264,6 +272,12 @@ impl ExprT {
             ExprT::Call {
                 callee: _,
                 args: _,
+                type_,
+            } => type_.clone(),
+            ExprT::Block {
+                stmts: _,
+                end_expr: _,
+                scope_index: _,
                 type_,
             } => type_.clone(),
         }

@@ -12,8 +12,8 @@ pub enum TypeError {
         location: LocationRange,
         name: String,
     },
-    #[fail(display = "Not implemented yet")]
-    NotImplemented,
+    #[fail(display = "{}: Not implemented yet", location)]
+    NotImplemented { location: LocationRange },
     #[fail(
         display = "{}: Could not find operation {} with arguments of type {} and {}",
         location, op, lhs_type, rhs_type
@@ -602,11 +602,6 @@ impl TypeChecker {
                 let name = self.name_table.get_fresh_name();
                 let params_type = self.pat(&params)?;
                 let previous_scope = self.symbol_table.push_scope();
-                let return_type = if let Some(type_sig) = &return_type_sig {
-                    self.lookup_type_sig(type_sig)?
-                } else {
-                    self.get_fresh_type_var()
-                };
                 let (params, body, return_type) = self.func(params, *body, return_type_sig)?;
                 let func_scope = self.symbol_table.set_scope(previous_scope);
                 self.symbol_table
@@ -677,7 +672,30 @@ impl TypeChecker {
                     })
                 }
             }
-            _ => Err(TypeError::NotImplemented),
+            Expr::Block(stmts, end_expr) => {
+                let mut typed_stmts = Vec::new();
+                let previous_scope = self.symbol_table.push_scope();
+                for stmt in stmts {
+                    typed_stmts.append(&mut self.stmt(stmt)?)
+                }
+                let (type_, typed_end_expr) = if let Some(expr) = end_expr {
+                    let typed_expr = self.expr(*expr)?;
+                    (typed_expr.inner.get_type(), Some(Box::new(typed_expr)))
+                } else {
+                    (Arc::new(Type::Unit), None)
+                };
+                let scope_index = self.symbol_table.set_scope(previous_scope);
+                Ok(Loc {
+                    location,
+                    inner: ExprT::Block {
+                        stmts: typed_stmts,
+                        end_expr: typed_end_expr,
+                        scope_index,
+                        type_,
+                    },
+                })
+            }
+            _ => Err(TypeError::NotImplemented { location: location }),
         }
     }
 

@@ -85,7 +85,7 @@ impl CodeGenerator {
             .expect("Print is not in symbol table");
         match print_entry {
             SymbolTableEntry::Function {
-                index,
+                index: _,
                 params_type: _,
                 return_type: _,
             } => {
@@ -149,7 +149,7 @@ impl CodeGenerator {
                     Err(GenerationError::ExportValue)
                 }
             }
-            s => Err(GenerationError::NotImplemented),
+            _ => Err(GenerationError::NotImplemented),
         }
     }
 

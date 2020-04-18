@@ -1,8 +1,5 @@
 let bar = \(n: int): int -> int => {
-  if n > 5 {
-    return \(i: int): int => i * 2;
-  }
-  return \(i: int): int => i * 5;
+
 }
 
 let foo = \(n: int): int => {
