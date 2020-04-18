@@ -137,8 +137,9 @@ impl TypeChecker {
                 self.symbol_table
                     .insert_function(func_name, params_type.clone(), return_type);
                 let previous_scope = self.symbol_table.push_scope();
-                let (params, body, return_type) = self.func(params, *body, return_type_sig)?;
-                let func_scope = self.symbol_table.set_scope(previous_scope);
+                let (params, body, return_type, local_variables) =
+                    self.func(params, *body, return_type_sig)?;
+                let func_scope = self.symbol_table.restore_scope(previous_scope);
                 self.symbol_table.insert_function(
                     func_name,
                     params_type.clone(),
@@ -152,6 +153,7 @@ impl TypeChecker {
                         params_type,
                         return_type,
                         body,
+                        local_variables,
                         scope: func_scope,
                     },
                 }])
@@ -168,21 +170,31 @@ impl TypeChecker {
                     });
                 }
                 let then_location = then_stmt.location;
-                let typed_then = self.stmt(*then_stmt)?;
-                let typed_else = match else_stmt {
-                    Some(else_stmt) => Some(Box::new(Loc {
-                        location: else_stmt.location,
-                        inner: StmtT::Block(self.stmt(*else_stmt)?),
-                    })),
-                    None => None,
+                let typed_then = {
+                    let previous_scope = self.symbol_table.push_scope();
+                    let typed_then = self.stmt(*then_stmt)?;
+                    self.symbol_table.restore_scope(previous_scope);
+                    Loc {
+                        location: then_location,
+                        inner: StmtT::Block(typed_then),
+                    }
                 };
-                let then = Loc {
-                    location: then_location,
-                    inner: StmtT::Block(typed_then),
+                let typed_else = match else_stmt {
+                    Some(else_stmt) => {
+                        let else_location = else_stmt.location;
+                        let previous_scope = self.symbol_table.push_scope();
+                        let typed_else = self.stmt(*else_stmt)?;
+                        self.symbol_table.restore_scope(previous_scope);
+                        Some(Box::new(Loc {
+                            location: else_location,
+                            inner: StmtT::Block(typed_else),
+                        }))
+                    }
+                    None => None,
                 };
                 Ok(vec![Loc {
                     location,
-                    inner: StmtT::If(typed_cond, Box::new(then), typed_else),
+                    inner: StmtT::If(typed_cond, Box::new(typed_then), typed_else),
                 }])
             }
             Stmt::Return(expr) => {
@@ -486,9 +498,9 @@ impl TypeChecker {
     /**
      *
      * BEFORE calling this function, please set up a new scope. Why before?
-     * Because if we're calling this with a function binding, i.e. TypedStmt::Function,
+     * Because if we're calling this with a function binding, i.e. StmtT::Function,
      * then we need to insert the name into the scope, but if we're calling this with
-     * an anonymous function, i.e. TypedExpr::Function, then we can't do that
+     * an anonymous function, i.e. ExprT::Function, then we can't do that
      *
      **/
     fn func(
@@ -496,7 +508,16 @@ impl TypeChecker {
         params: Pat,
         body: Loc<Stmt>,
         return_type: Option<Loc<TypeSig>>,
-    ) -> Result<(Vec<(Name, Arc<Type>)>, Box<Loc<StmtT>>, Arc<Type>), TypeError> {
+    ) -> Result<
+        (
+            Vec<(Name, Arc<Type>)>,
+            Box<Loc<StmtT>>,
+            Arc<Type>,
+            Vec<Arc<Type>>,
+        ),
+        TypeError,
+    > {
+        let old_var_types = self.symbol_table.reset_vars();
         let func_params = self.get_func_params(&params)?;
         for (name, type_) in &func_params {
             self.symbol_table.insert_var(name.clone(), type_.clone());
@@ -512,6 +533,7 @@ impl TypeChecker {
         let mut return_type = None;
         std::mem::swap(&mut return_type, &mut self.return_type);
         let return_type = return_type.unwrap_or_else(|| Arc::new(Type::Unit));
+        let func_var_types = self.symbol_table.restore_vars(old_var_types);
         Ok((
             func_params,
             Box::new(Loc {
@@ -519,6 +541,7 @@ impl TypeChecker {
                 inner: StmtT::Block(body),
             }),
             return_type,
+            func_var_types,
         ))
     }
 
@@ -549,7 +572,7 @@ impl TypeChecker {
                             type_: Arc::new(Type::Arrow(params_type.clone(), return_type.clone())),
                         },
                     }),
-                    SymbolTableEntry::Var { var_type } => Ok(Loc {
+                    SymbolTableEntry::Var { var_type, index: _ } => Ok(Loc {
                         location,
                         inner: ExprT::Var {
                             name,
@@ -602,8 +625,9 @@ impl TypeChecker {
                 let name = self.name_table.get_fresh_name();
                 let params_type = self.pat(&params)?;
                 let previous_scope = self.symbol_table.push_scope();
-                let (params, body, return_type) = self.func(params, *body, return_type_sig)?;
-                let func_scope = self.symbol_table.set_scope(previous_scope);
+                let (params, body, return_type, local_variables) =
+                    self.func(params, *body, return_type_sig)?;
+                let func_scope = self.symbol_table.restore_scope(previous_scope);
                 self.symbol_table
                     .insert_function(name, params_type.clone(), return_type.clone());
                 let func = Loc {
@@ -614,6 +638,7 @@ impl TypeChecker {
                         return_type,
                         body,
                         name,
+                        local_variables,
                         scope_index: func_scope,
                     },
                 };
@@ -684,7 +709,7 @@ impl TypeChecker {
                 } else {
                     (Arc::new(Type::Unit), None)
                 };
-                let scope_index = self.symbol_table.set_scope(previous_scope);
+                let scope_index = self.symbol_table.restore_scope(previous_scope);
                 Ok(Loc {
                     location,
                     inner: ExprT::Block {

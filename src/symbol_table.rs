@@ -11,6 +11,11 @@ pub struct Scope {
 pub struct SymbolTable {
     scopes: Vec<Scope>,
     function_index: usize,
+    // As we collect variables, we insert
+    // them into a vec, then when we finish
+    // typechecking the function, we reset and spit out
+    // the variable types
+    var_types: Vec<Arc<Type>>,
     current_scope: usize,
 }
 
@@ -24,6 +29,7 @@ pub enum SymbolTableEntry {
     },
     Var {
         var_type: Arc<Type>,
+        index: usize,
     },
 }
 
@@ -35,12 +41,25 @@ impl SymbolTable {
                 parent: None,
             }],
             function_index: 0,
+            var_types: Vec::new(),
             current_scope: 0,
         }
     }
 
     pub fn get_function_index(&self) -> usize {
         self.function_index
+    }
+
+    pub fn reset_vars(&mut self) -> Vec<Arc<Type>> {
+        let mut var_types = Vec::new();
+        std::mem::swap(&mut var_types, &mut self.var_types);
+        var_types
+    }
+
+    pub fn restore_vars(&mut self, var_types: Vec<Arc<Type>>) -> Vec<Arc<Type>> {
+        let mut var_types = var_types;
+        std::mem::swap(&mut self.var_types, &mut var_types);
+        var_types
     }
 
     pub fn push_scope(&mut self) -> usize {
@@ -54,7 +73,7 @@ impl SymbolTable {
         previous_scope
     }
 
-    pub fn set_scope(&mut self, previous_scope: usize) -> usize {
+    pub fn restore_scope(&mut self, previous_scope: usize) -> usize {
         let old_scope = self.current_scope;
         self.current_scope = previous_scope;
         old_scope
@@ -77,9 +96,14 @@ impl SymbolTable {
     }
 
     pub fn insert_var(&mut self, name: Name, var_type: Arc<Type>) {
-        self.scopes[self.current_scope]
-            .symbols
-            .insert(name, SymbolTableEntry::Var { var_type });
+        self.var_types.push(var_type.clone());
+        self.scopes[self.current_scope].symbols.insert(
+            name,
+            SymbolTableEntry::Var {
+                var_type,
+                index: self.var_types.len() - 1,
+            },
+        );
     }
 
     pub fn insert_function(&mut self, name: Name, params_type: Arc<Type>, return_type: Arc<Type>) {

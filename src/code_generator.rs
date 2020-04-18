@@ -1,5 +1,4 @@
 use ast::{ExprT, Loc, Name, Op, StmtT, Type, Value};
-use im::hashmap::HashMap;
 use std::convert::TryInto;
 use std::sync::Arc;
 use symbol_table::{SymbolTable, SymbolTableEntry};
@@ -45,12 +44,6 @@ pub enum GenerationError {
 pub struct CodeGenerator {
     symbol_table: SymbolTable,
     name_table: NameTable,
-    var_indices: HashMap<Name, usize>,
-    // The local variables for current function.
-    local_variables: Vec<WasmType>,
-    // Parameter count. Important for computing offsets and generating
-    // local_entries
-    param_count: usize,
     // All the generated code
     program_data: ProgramData,
     return_type: Option<WasmType>,
@@ -64,9 +57,6 @@ impl CodeGenerator {
         CodeGenerator {
             symbol_table,
             name_table,
-            var_indices: HashMap::new(),
-            local_variables: Vec::new(),
-            param_count: 0,
             program_data: ProgramData::new(func_count),
             return_type: None,
         }
@@ -118,12 +108,18 @@ impl CodeGenerator {
                 params,
                 params_type: _,
                 return_type,
+                local_variables,
                 body,
                 scope,
             } => {
-                self.param_count = 0;
-                self.local_variables = Vec::new();
-                self.generate_function_binding(*name, *scope, params, return_type, &(*body).inner)?;
+                self.generate_function_binding(
+                    *name,
+                    *scope,
+                    params,
+                    return_type,
+                    local_variables,
+                    &(*body).inner,
+                )?;
                 Ok(())
             }
             StmtT::Return(_) => Err(GenerationError::TopLevelReturn),
@@ -161,6 +157,7 @@ impl CodeGenerator {
         scope: usize,
         params: &[(Name, Arc<Type>)],
         return_type: &Arc<Type>,
+        local_variables: &Vec<Arc<Type>>,
         body: &StmtT,
     ) -> Result<usize> {
         let entry = self.symbol_table.lookup_name_in_scope(name, scope).unwrap();
@@ -174,12 +171,12 @@ impl CodeGenerator {
         } else {
             return Err(GenerationError::NotReachable);
         };
-        let old_scope = self.symbol_table.set_scope(scope);
-        let (type_, body) = self.generate_function(return_type, params, body)?;
+        let old_scope = self.symbol_table.restore_scope(scope);
+        let (type_, body) = self.generate_function(return_type, params, local_variables, body)?;
         let type_index = self.program_data.insert_type(type_);
         self.program_data.code_section[index] = Some(body);
         self.program_data.function_section[index] = Some(type_index);
-        self.symbol_table.set_scope(old_scope);
+        self.symbol_table.restore_scope(old_scope);
         Ok(index)
     }
 
@@ -187,12 +184,13 @@ impl CodeGenerator {
         &mut self,
         return_type: &Arc<Type>,
         params: &[(Name, Arc<Type>)],
+        local_variables: &Vec<Arc<Type>>,
         body: &StmtT,
     ) -> Result<(FunctionType, FunctionBody)> {
         let return_type = self.generate_wasm_type(&return_type)?;
         self.return_type = return_type.clone();
         let function_type = self.generate_function_type(&return_type, params)?;
-        let function_body = self.generate_function_body(body)?;
+        let function_body = self.generate_function_body(body, local_variables, params.len())?;
         Ok((function_type, function_body))
     }
 
@@ -204,14 +202,10 @@ impl CodeGenerator {
         params: &[(Name, Arc<Type>)],
     ) -> Result<FunctionType> {
         let mut wasm_param_types = Vec::new();
-        for (param_name, param_type) in params {
+        for (_, param_type) in params {
             let wasm_type = self
                 .generate_wasm_type(param_type)?
                 .ok_or(GenerationError::EmptyType)?;
-            self.local_variables.push(wasm_type.clone());
-            self.var_indices
-                .insert(*param_name, self.local_variables.len() - 1);
-            self.param_count += 1;
             wasm_param_types.push(wasm_type);
         }
         Ok(FunctionType {
@@ -220,18 +214,29 @@ impl CodeGenerator {
         })
     }
 
-    fn generate_function_body(&mut self, body: &StmtT) -> Result<FunctionBody> {
+    fn generate_function_body(
+        &mut self,
+        body: &StmtT,
+        local_variables: &[Arc<Type>],
+        param_count: usize,
+    ) -> Result<FunctionBody> {
         let code = self.generate_stmt(body, true)?;
-        let mut locals = Vec::new();
+        let mut local_entries = Vec::new();
         // We want to generate only the locals not params so we skip
         // to after the params
-        for local_type in &self.local_variables[self.param_count..] {
-            locals.push(LocalEntry {
+        for local_type in &local_variables[param_count..] {
+            let wasm_type = self
+                .generate_wasm_type(local_type)?
+                .ok_or(GenerationError::EmptyType)?;
+            local_entries.push(LocalEntry {
                 count: 1,
-                type_: local_type.clone(),
+                type_: wasm_type,
             })
         }
-        Ok(FunctionBody { locals, code })
+        Ok(FunctionBody {
+            locals: local_entries,
+            code,
+        })
     }
 
     fn get_args_type(&self, arg_type: &Arc<Type>) -> Result<Vec<WasmType>> {
@@ -266,13 +271,19 @@ impl CodeGenerator {
         }
     }
 
-    fn get_params_index(&mut self, var: Name) -> Result<usize> {
-        Ok(*self
-            .var_indices
-            .get(&var)
-            .ok_or(GenerationError::UndefinedVar {
-                name: self.name_table.get_str(&var).to_string(),
-            })?)
+    fn get_var_index(&mut self, var: Name) -> Result<usize> {
+        match self
+            .symbol_table
+            .lookup_name(var)
+            .expect("Variable must be in scope")
+        {
+            SymbolTableEntry::Function {
+                index: _,
+                params_type: _,
+                return_type: _,
+            } => Err(GenerationError::NotReachable),
+            SymbolTableEntry::Var { index, var_type: _ } => Ok(*index),
+        }
     }
 
     fn generate_stmt(&mut self, stmt: &StmtT, is_last: bool) -> Result<Vec<OpCode>> {
@@ -282,19 +293,19 @@ impl CodeGenerator {
                 params,
                 params_type: _,
                 return_type,
+                local_variables,
                 body,
                 scope,
             } => {
-                let mut old_param_count = 0;
-                let mut old_local_variables = Vec::new();
-                let mut old_var_indices = HashMap::new();
-                std::mem::swap(&mut old_param_count, &mut self.param_count);
-                std::mem::swap(&mut old_local_variables, &mut self.local_variables);
-                std::mem::swap(&mut old_var_indices, &mut self.var_indices);
-                self.generate_function_binding(*name, *scope, params, return_type, &(*body).inner)?;
-                std::mem::swap(&mut old_param_count, &mut self.param_count);
-                std::mem::swap(&mut old_local_variables, &mut self.local_variables);
-                std::mem::swap(&mut old_var_indices, &mut self.var_indices);
+                self.symbol_table.restore_scope(*scope);
+                self.generate_function_binding(
+                    *name,
+                    *scope,
+                    params,
+                    return_type,
+                    local_variables,
+                    &(*body).inner,
+                )?;
                 Ok(Vec::new())
             }
             StmtT::Expr(expr) => {
@@ -335,14 +346,9 @@ impl CodeGenerator {
                 Ok(opcodes)
             }
             StmtT::Asgn(name, expr) => {
-                let wasm_type = self
-                    .generate_wasm_type(&expr.inner.get_type())?
-                    .ok_or(GenerationError::EmptyType)?;
-                self.local_variables.push(wasm_type);
-                let local_index = self.local_variables.len() - 1;
-                self.var_indices.insert(*name, local_index);
+                let index = self.get_var_index(*name)?;
                 let mut opcodes = self.generate_expr(&expr.inner)?;
-                opcodes.push(OpCode::SetLocal(local_index.try_into().unwrap()));
+                opcodes.push(OpCode::SetLocal(index.try_into().unwrap()));
                 Ok(opcodes)
             }
             StmtT::Block(stmts) => {
@@ -388,7 +394,7 @@ impl CodeGenerator {
         match expr {
             ExprT::Primary { value, type_: _ } => Ok(vec![self.generate_primary(value)?]),
             ExprT::Var { name, type_: _ } => {
-                let index = self.get_params_index(*name)?;
+                let index = self.get_var_index(*name)?;
                 Ok(vec![OpCode::GetLocal(index.try_into().unwrap())])
             }
             ExprT::Call {
@@ -433,24 +439,18 @@ impl CodeGenerator {
                 return_type,
                 body,
                 name,
+                local_variables,
                 scope_index,
             } => {
-                let mut old_param_count = 0;
-                let mut old_local_variables = Vec::new();
-                let mut old_var_indices = HashMap::new();
-                std::mem::swap(&mut old_param_count, &mut self.param_count);
-                std::mem::swap(&mut old_local_variables, &mut self.local_variables);
-                std::mem::swap(&mut old_var_indices, &mut self.var_indices);
+                self.symbol_table.restore_scope(*scope_index);
                 let index = self.generate_function_binding(
                     *name,
                     *scope_index,
                     params,
                     return_type,
+                    local_variables,
                     &(*body).inner,
                 )?;
-                std::mem::swap(&mut old_param_count, &mut self.param_count);
-                std::mem::swap(&mut old_local_variables, &mut self.local_variables);
-                std::mem::swap(&mut old_var_indices, &mut self.var_indices);
                 self.program_data.elements_section.elems.push(index);
                 let table_index = self.program_data.elements_section.elems.len() - 1;
                 Ok(vec![OpCode::I32Const(table_index.try_into().unwrap())])
@@ -466,8 +466,9 @@ impl CodeGenerator {
                 stmts,
                 end_expr,
                 type_: _,
-                scope_index: _,
+                scope_index,
             } => {
+                self.symbol_table.restore_scope(*scope_index);
                 let mut opcodes = Vec::new();
                 for stmt in stmts {
                     opcodes.append(&mut self.generate_stmt(&stmt.inner, false)?);

@@ -1,6 +1,6 @@
 let foo = \(n: int): int => {
-  let m = {
-    let q = 10;
+  let m: int = {
+    let q: int = 10;
     n * q + 1
   };
   return m;
