@@ -1,5 +1,6 @@
 use bimap::BiMap;
 
+#[derive(Debug)]
 pub struct NameTable(BiMap<String, usize>, usize);
 
 impl NameTable {

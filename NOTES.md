@@ -7,8 +7,14 @@ should be generated in the typechecker (prevents having to make
 indices optional, but kinda breaks modularity) or generated in the
 code generator (a little messier with types but more self contained)
 
+Update: I went with indices generated in the typechecker. Since the
+semantic analysis already was doing a lot of the work, I figured
+why not. 
+
 ## References
 https://en.wikipedia.org/wiki/Lambda_lifting
+https://boats.gitlab.io/blog/post/the-problem-of-effects/
+https://gafter.blogspot.com/2006/08/tennents-correspondence-principle-and.html
 
 ## Feature Ideas
 
@@ -35,3 +41,12 @@ more accurate name for the types section is the declarations section (a la C hea
 I need the expected function signature as an index. Which means I should probably collect the function signatures
 in a HashSet/HashMap then when I come across a call expression, figure out the expected type of the function, 
 look up in said map and then insert the id.
+
+Update: I originally started with a HashMap, then I figured that a HashMap was an overoptimization and
+went with just an array. Honestly once the language starts being used by someone semi-seriously, I'll optimize
+that.
+
+## Closures
+
+Should closures copy or reference variables? If they're copied that makes my life a lot easier. But it's probably
+super inefficient, so I'd probably need to make it copy-on-write, but that'd also be hard. 

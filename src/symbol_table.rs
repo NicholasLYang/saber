@@ -4,10 +4,19 @@ use std::sync::Arc;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Scope {
-    pub symbols: HashMap<Name, SymbolTableEntry>,
+    pub symbols: HashMap<Name, SymbolEntry>,
+    pub is_function_scope: bool,
     pub parent: Option<usize>,
 }
 
+#[derive(Debug, PartialEq, Clone)]
+pub struct SymbolEntry {
+    // Is the variable captured by a function?
+    pub is_enclosed_var: bool,
+    pub entry_type: EntryType,
+}
+
+#[derive(Debug)]
 pub struct SymbolTable {
     scopes: Vec<Scope>,
     function_index: usize,
@@ -20,7 +29,7 @@ pub struct SymbolTable {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub enum SymbolTableEntry {
+pub enum EntryType {
     Function {
         // Index into function array
         index: usize,
@@ -38,6 +47,7 @@ impl SymbolTable {
         SymbolTable {
             scopes: vec![Scope {
                 symbols: HashMap::new(),
+                is_function_scope: false,
                 parent: None,
             }],
             function_index: 0,
@@ -62,9 +72,10 @@ impl SymbolTable {
         var_types
     }
 
-    pub fn push_scope(&mut self) -> usize {
+    pub fn push_scope(&mut self, is_function_scope: bool) -> usize {
         let new_scope = Scope {
             symbols: HashMap::new(),
+            is_function_scope,
             parent: Some(self.current_scope),
         };
         self.scopes.push(new_scope);
@@ -79,16 +90,32 @@ impl SymbolTable {
         old_scope
     }
 
-    pub fn lookup_name(&self, name: usize) -> Option<&SymbolTableEntry> {
+    pub fn lookup_name(&mut self, name: usize) -> Option<&SymbolEntry> {
         self.lookup_name_in_scope(name, self.current_scope)
     }
 
     // Looks up name in scope
-    pub fn lookup_name_in_scope(&self, name: usize, scope: usize) -> Option<&SymbolTableEntry> {
+    pub fn lookup_name_in_scope(&mut self, name: usize, scope: usize) -> Option<&SymbolEntry> {
         let mut index = Some(scope);
+        // If we cross a function boundary, i.e. we find the var in a scope outside the current
+        // function scope, then we modify the symbol table entry to say that it's
+        // an enclosed var and therefore must be boxed
+        let mut is_enclosed_var = false;
+        let mut func_scope = None;
         while let Some(i) = index {
-            if let Some(entry) = self.scopes[i].symbols.get(&name) {
-                return Some(entry);
+            if self.scopes[i].is_function_scope {
+                if func_scope.is_some() {
+                    is_enclosed_var = true;
+                } else {
+                    func_scope = Some(i)
+                }
+            }
+            if self.scopes[i].symbols.contains_key(&name) {
+                {
+                    let entry = self.scopes[i].symbols.get_mut(&name).unwrap();
+                    entry.is_enclosed_var = is_enclosed_var;
+                }
+                return self.scopes[i].symbols.get(&name);
             }
             index = self.scopes[i].parent;
         }
@@ -99,9 +126,12 @@ impl SymbolTable {
         self.var_types.push(var_type.clone());
         self.scopes[self.current_scope].symbols.insert(
             name,
-            SymbolTableEntry::Var {
-                var_type,
-                index: self.var_types.len() - 1,
+            SymbolEntry {
+                is_enclosed_var: false,
+                entry_type: EntryType::Var {
+                    var_type,
+                    index: self.var_types.len() - 1,
+                },
             },
         );
     }
@@ -110,10 +140,13 @@ impl SymbolTable {
         if self.lookup_name(name).is_none() {
             self.scopes[self.current_scope].symbols.insert(
                 name,
-                SymbolTableEntry::Function {
-                    index: self.function_index,
-                    params_type,
-                    return_type,
+                SymbolEntry {
+                    is_enclosed_var: false,
+                    entry_type: EntryType::Function {
+                        index: self.function_index,
+                        params_type,
+                        return_type,
+                    },
                 },
             );
             self.function_index += 1;

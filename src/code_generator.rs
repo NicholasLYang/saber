@@ -1,7 +1,7 @@
 use ast::{ExprT, Loc, Name, Op, StmtT, Type, Value};
 use std::convert::TryInto;
 use std::sync::Arc;
-use symbol_table::{SymbolTable, SymbolTableEntry};
+use symbol_table::{EntryType, SymbolTable};
 use utils::NameTable;
 use wasm::{
     ExportEntry, ExternalKind, FunctionBody, FunctionType, ImportEntry, ImportKind, LocalEntry,
@@ -75,8 +75,8 @@ impl CodeGenerator {
             .symbol_table
             .lookup_name_in_scope(*print_id, 0)
             .expect("Print is not in symbol table");
-        match print_entry {
-            SymbolTableEntry::Function {
+        match print_entry.entry_type {
+            EntryType::Function {
                 index: _,
                 params_type: _,
                 return_type: _,
@@ -130,11 +130,11 @@ impl CodeGenerator {
                         name: name_str.to_string(),
                     },
                 )?;
-                if let SymbolTableEntry::Function {
+                if let EntryType::Function {
                     index,
                     params_type: _,
                     return_type: _,
-                } = sym_entry
+                } = &sym_entry.entry_type
                 {
                     let entry = ExportEntry {
                         field_str: name_str.as_bytes().to_vec(),
@@ -161,11 +161,11 @@ impl CodeGenerator {
         body: &StmtT,
     ) -> Result<usize> {
         let entry = self.symbol_table.lookup_name_in_scope(name, scope).unwrap();
-        let index = if let SymbolTableEntry::Function {
+        let index = if let EntryType::Function {
             index,
             params_type: _,
             return_type: _,
-        } = entry
+        } = &entry.entry_type
         {
             *index
         } else {
@@ -276,13 +276,14 @@ impl CodeGenerator {
             .symbol_table
             .lookup_name(var)
             .expect("Variable must be in scope")
+            .entry_type
         {
-            SymbolTableEntry::Function {
+            EntryType::Function {
                 index: _,
                 params_type: _,
                 return_type: _,
             } => Err(GenerationError::NotReachable),
-            SymbolTableEntry::Var { index, var_type: _ } => Ok(*index),
+            EntryType::Var { index, var_type: _ } => Ok(index),
         }
     }
 
@@ -409,11 +410,11 @@ impl CodeGenerator {
                             name: self.name_table.get_str(&name).to_string(),
                         },
                     )?;
-                    if let SymbolTableEntry::Function {
+                    if let EntryType::Function {
                         index,
                         params_type: _,
                         return_type: _,
-                    } = entry
+                    } = &entry.entry_type
                     {
                         let index = *index;
                         opcodes.append(&mut self.generate_expr(&args.inner)?);

@@ -2,7 +2,7 @@ use ast::{Expr, ExprT, Loc, Name, Op, Pat, Stmt, StmtT, Type, TypeSig, Value};
 use im::hashmap::HashMap;
 use lexer::LocationRange;
 use std::sync::Arc;
-use symbol_table::{SymbolTable, SymbolTableEntry};
+use symbol_table::{EntryType, SymbolTable};
 use utils::NameTable;
 
 #[derive(Debug, Fail, PartialEq)]
@@ -136,7 +136,7 @@ impl TypeChecker {
                 };
                 self.symbol_table
                     .insert_function(func_name, params_type.clone(), return_type);
-                let previous_scope = self.symbol_table.push_scope();
+                let previous_scope = self.symbol_table.push_scope(true);
                 let (params, body, return_type, local_variables) =
                     self.func(params, *body, return_type_sig)?;
                 let func_scope = self.symbol_table.restore_scope(previous_scope);
@@ -171,7 +171,7 @@ impl TypeChecker {
                 }
                 let then_location = then_stmt.location;
                 let typed_then = {
-                    let previous_scope = self.symbol_table.push_scope();
+                    let previous_scope = self.symbol_table.push_scope(false);
                     let typed_then = self.stmt(*then_stmt)?;
                     self.symbol_table.restore_scope(previous_scope);
                     Loc {
@@ -182,7 +182,7 @@ impl TypeChecker {
                 let typed_else = match else_stmt {
                     Some(else_stmt) => {
                         let else_location = else_stmt.location;
-                        let previous_scope = self.symbol_table.push_scope();
+                        let previous_scope = self.symbol_table.push_scope(false);
                         let typed_else = self.stmt(*else_stmt)?;
                         self.symbol_table.restore_scope(previous_scope);
                         Some(Box::new(Loc {
@@ -560,8 +560,8 @@ impl TypeChecker {
                             location,
                             name: self.name_table.get_str(&name).to_string(),
                         })?;
-                match entry {
-                    SymbolTableEntry::Function {
+                match &entry.entry_type {
+                    EntryType::Function {
                         index: _,
                         params_type,
                         return_type,
@@ -572,7 +572,7 @@ impl TypeChecker {
                             type_: Arc::new(Type::Arrow(params_type.clone(), return_type.clone())),
                         },
                     }),
-                    SymbolTableEntry::Var { var_type, index: _ } => Ok(Loc {
+                    EntryType::Var { var_type, index: _ } => Ok(Loc {
                         location,
                         inner: ExprT::Var {
                             name,
@@ -624,7 +624,7 @@ impl TypeChecker {
             } => {
                 let name = self.name_table.get_fresh_name();
                 let params_type = self.pat(&params)?;
-                let previous_scope = self.symbol_table.push_scope();
+                let previous_scope = self.symbol_table.push_scope(true);
                 let (params, body, return_type, local_variables) =
                     self.func(params, *body, return_type_sig)?;
                 let func_scope = self.symbol_table.restore_scope(previous_scope);
@@ -699,7 +699,7 @@ impl TypeChecker {
             }
             Expr::Block(stmts, end_expr) => {
                 let mut typed_stmts = Vec::new();
-                let previous_scope = self.symbol_table.push_scope();
+                let previous_scope = self.symbol_table.push_scope(false);
                 for stmt in stmts {
                     typed_stmts.append(&mut self.stmt(stmt)?)
                 }
