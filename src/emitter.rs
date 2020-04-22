@@ -57,6 +57,7 @@ pub fn emit_code<T: Write>(mut dest: T, op_code: OpCode) -> Result<()> {
         OpCode::I32Sub => dest.write_u8(0x6b),
         OpCode::I32Mul => dest.write_u8(0x6c),
         OpCode::I32Div => dest.write_u8(0x6d),
+        OpCode::I32Xor => dest.write_u8(0x73),
         OpCode::I32Eq => dest.write_u8(0x46),
         OpCode::I32GreaterSigned => dest.write_u8(0x4a),
         OpCode::F32Add => dest.write_u8(0x92),

@@ -1,4 +1,4 @@
-use ast::{Expr, ExprT, Loc, Name, Op, Pat, Stmt, StmtT, Type, TypeSig, Value};
+use ast::{Expr, ExprT, Loc, Name, Op, Pat, Stmt, StmtT, Type, TypeSig, UnaryOp, Value};
 use im::hashmap::HashMap;
 use lexer::LocationRange;
 use std::sync::Arc;
@@ -159,44 +159,6 @@ impl TypeChecker {
                 }])
             }
             Stmt::Asgn(pat, rhs) => Ok(self.asgn(pat, rhs, location)?),
-            Stmt::If(cond, then_stmt, else_stmt) => {
-                let typed_cond = self.expr(cond)?;
-                let cond_type = typed_cond.inner.get_type();
-                if !self.unify(&cond_type, &Arc::new(Type::Bool)) {
-                    return Err(TypeError::UnificationFailure {
-                        location,
-                        type1: cond_type,
-                        type2: Arc::new(Type::Bool),
-                    });
-                }
-                let then_location = then_stmt.location;
-                let typed_then = {
-                    let previous_scope = self.symbol_table.push_scope(false);
-                    let typed_then = self.stmt(*then_stmt)?;
-                    self.symbol_table.restore_scope(previous_scope);
-                    Loc {
-                        location: then_location,
-                        inner: StmtT::Block(typed_then),
-                    }
-                };
-                let typed_else = match else_stmt {
-                    Some(else_stmt) => {
-                        let else_location = else_stmt.location;
-                        let previous_scope = self.symbol_table.push_scope(false);
-                        let typed_else = self.stmt(*else_stmt)?;
-                        self.symbol_table.restore_scope(previous_scope);
-                        Some(Box::new(Loc {
-                            location: else_location,
-                            inner: StmtT::Block(typed_else),
-                        }))
-                    }
-                    None => None,
-                };
-                Ok(vec![Loc {
-                    location,
-                    inner: StmtT::If(typed_cond, Box::new(typed_then), typed_else),
-                }])
-            }
             Stmt::Return(expr) => {
                 let typed_expr = self.expr(expr)?;
                 match self.return_type.clone() {
@@ -644,30 +606,32 @@ impl TypeChecker {
                 };
                 Ok(func)
             }
-            Expr::UnaryOp { op, rhs } => match op {
-                Op::Minus | Op::Plus => {
-                    let typed_rhs = self.expr(*rhs)?;
-                    if self.unify(&typed_rhs.inner.get_type(), &Arc::new(Type::Int))
-                        || self.unify(&typed_rhs.inner.get_type(), &Arc::new(Type::Float))
-                    {
-                        let type_ = typed_rhs.inner.get_type();
-                        Ok(Loc {
-                            location,
-                            inner: ExprT::UnaryOp {
-                                op,
-                                rhs: Box::new(typed_rhs),
-                                type_,
-                            },
-                        })
-                    } else {
-                        Err(TypeError::InvalidUnaryExpr {
-                            location: typed_rhs.location,
-                            expr: typed_rhs.inner,
-                        })
+            Expr::UnaryOp { op, rhs } => {
+                let typed_rhs = self.expr(*rhs)?;
+                let rhs_type = typed_rhs.inner.get_type();
+                let is_valid_types = match op {
+                    UnaryOp::Minus => {
+                        self.unify(&rhs_type, &Arc::new(Type::Int))
+                            || self.unify(&rhs_type, &Arc::new(Type::Float))
                     }
+                    UnaryOp::Not => self.unify(&rhs_type, &Arc::new(Type::Bool)),
+                };
+                if is_valid_types {
+                    Ok(Loc {
+                        location,
+                        inner: ExprT::UnaryOp {
+                            op,
+                            rhs: Box::new(typed_rhs),
+                            type_: rhs_type,
+                        },
+                    })
+                } else {
+                    Err(TypeError::InvalidUnaryExpr {
+                        location: typed_rhs.location,
+                        expr: typed_rhs.inner,
+                    })
                 }
-                op => Err(TypeError::InvalidUnaryOp { op }),
-            },
+            }
             Expr::Call { callee, args } => {
                 let typed_callee = self.expr(*callee)?;
                 let callee_type = typed_callee.inner.get_type();
@@ -719,6 +683,47 @@ impl TypeChecker {
                         type_,
                     },
                 })
+            }
+            Expr::If(cond, then_block, else_block) => {
+                let typed_cond = self.expr(*cond)?;
+                let typed_then_block = self.expr(*then_block)?;
+                let then_type = typed_then_block.inner.get_type();
+                if let Some(else_block) = else_block {
+                    let typed_else_block = self.expr(*else_block)?;
+                    let else_type = typed_else_block.inner.get_type();
+                    if !self.unify(&then_type, &else_type) {
+                        return Err(TypeError::UnificationFailure {
+                            location,
+                            type1: then_type,
+                            type2: else_type,
+                        });
+                    }
+                    Ok(Loc {
+                        location,
+                        inner: ExprT::If(
+                            Box::new(typed_cond),
+                            Box::new(typed_then_block),
+                            Some(Box::new(typed_else_block)),
+                            then_type,
+                        ),
+                    })
+                } else if !self.unify(&Arc::new(Type::Unit), &then_type) {
+                    Err(TypeError::UnificationFailure {
+                        location,
+                        type1: Arc::new(Type::Unit),
+                        type2: then_type,
+                    })
+                } else {
+                    Ok(Loc {
+                        location,
+                        inner: ExprT::If(
+                            Box::new(typed_cond),
+                            Box::new(typed_then_block),
+                            None,
+                            Arc::new(Type::Unit),
+                        ),
+                    })
+                }
             }
             _ => Err(TypeError::NotImplemented { location: location }),
         }

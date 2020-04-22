@@ -18,7 +18,6 @@ pub enum Stmt {
     Expr(Loc<Expr>),
     Return(Loc<Expr>),
     Block(Vec<Loc<Stmt>>),
-    If(Loc<Expr>, Box<Loc<Stmt>>, Option<Box<Loc<Stmt>>>),
     Function(Name, Pat, Option<Loc<TypeSig>>, Box<Loc<Stmt>>),
     Export(Name),
 }
@@ -29,7 +28,6 @@ pub enum StmtT {
     Expr(Loc<ExprT>),
     Return(Loc<ExprT>),
     Block(Vec<Loc<StmtT>>),
-    If(Loc<ExprT>, Box<Loc<StmtT>>, Option<Box<Loc<StmtT>>>),
     Function {
         name: Name,
         params: Vec<(Name, Arc<Type>)>,
@@ -45,7 +43,7 @@ pub enum StmtT {
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum Expr {
     Block(Vec<Loc<Stmt>>, Option<Box<Loc<Expr>>>),
-    //If(Box<Loc<Expr>>, Box<Loc<Expr>>, Box<Loc<Expr>>),
+    If(Box<Loc<Expr>>, Box<Loc<Expr>>, Option<Box<Loc<Expr>>>),
     Primary {
         value: Value,
     },
@@ -58,7 +56,7 @@ pub enum Expr {
         rhs: Box<Loc<Expr>>,
     },
     UnaryOp {
-        op: Op,
+        op: UnaryOp,
         rhs: Box<Loc<Expr>>,
     },
     Function {
@@ -85,6 +83,12 @@ pub enum ExprT {
         scope_index: usize,
         type_: Arc<Type>,
     },
+    If(
+        Box<Loc<ExprT>>,
+        Box<Loc<ExprT>>,
+        Option<Box<Loc<ExprT>>>,
+        Arc<Type>,
+    ),
     Primary {
         value: Value,
         type_: Arc<Type>,
@@ -100,7 +104,7 @@ pub enum ExprT {
         type_: Arc<Type>,
     },
     UnaryOp {
-        op: Op,
+        op: UnaryOp,
         rhs: Box<Loc<ExprT>>,
         type_: Arc<Type>,
     },
@@ -146,6 +150,12 @@ impl fmt::Display for Value {
             }
         )
     }
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum UnaryOp {
+    Minus,
+    Not,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -283,6 +293,7 @@ impl ExprT {
                 scope_index: _,
                 type_,
             } => type_.clone(),
+            ExprT::If(_, _, _, type_) => type_.clone(),
         }
     }
 }

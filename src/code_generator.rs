@@ -1,4 +1,4 @@
-use ast::{ExprT, Loc, Name, Op, StmtT, Type, Value};
+use ast::{ExprT, Loc, Name, Op, StmtT, Type, UnaryOp, Value};
 use std::convert::TryInto;
 use std::sync::Arc;
 use symbol_table::{EntryType, SymbolTable};
@@ -33,8 +33,6 @@ pub enum GenerationError {
     NotReachable,
     #[fail(display = "Cannot return at top level")]
     TopLevelReturn,
-    #[fail(display = "Cannot find variable with name '{}'", name)]
-    UndefinedVar { name: String },
     #[fail(display = "Cannot convert type {} to type {}", t1, t2)]
     CannotConvert { t1: Type, t2: Type },
     #[fail(display = "Cannot export value")]
@@ -314,7 +312,21 @@ impl CodeGenerator {
                 if expr.inner.get_type() != Arc::new(Type::Unit) {
                     opcodes.push(OpCode::Drop);
                 }
-                Ok(opcodes)
+                if is_last {
+                    // If the return type is empty, we can safely return
+                    if let Some(WasmType::Empty) = self.return_type {
+                        Ok(opcodes)
+                    } else {
+                        // But otherwise, we need to push on an unreachable to assure
+                        // wasm that we're not going to just end without returning
+                        // anything.
+                        // TODO: Actually check if we're returning nothing
+                        opcodes.push(OpCode::Unreachable);
+                        Ok(opcodes)
+                    }
+                } else {
+                    Ok(opcodes)
+                }
             }
             StmtT::Return(expr) => {
                 if is_last {
@@ -324,27 +336,6 @@ impl CodeGenerator {
                     opcodes.push(OpCode::Return);
                     Ok(opcodes)
                 }
-            }
-            StmtT::If(cond, then_block, else_block) => {
-                // Start with the cond opcodes
-                let mut opcodes = self.generate_expr(&cond.inner)?;
-                opcodes.push(OpCode::If);
-                opcodes.push(OpCode::Type(WasmType::Empty));
-                // For now we say false because allowing the blocks to
-                // implicitly return by leaving on the stack means we have to
-                // change the block return type.
-                opcodes.append(&mut self.generate_stmt(&then_block.inner, false)?);
-                if let Some(else_block) = else_block {
-                    opcodes.push(OpCode::Else);
-                    opcodes.append(&mut self.generate_stmt(&else_block.inner, false)?);
-                }
-                opcodes.push(OpCode::End);
-                // If this is the last instruction and the function is
-                // supposed to return a value, push on an unreachable
-                if self.return_type.is_some() && is_last {
-                    opcodes.push(OpCode::Unreachable)
-                }
-                Ok(opcodes)
             }
             StmtT::Asgn(name, expr) => {
                 let index = self.get_var_index(*name)?;
@@ -479,6 +470,21 @@ impl CodeGenerator {
                 }
                 Ok(opcodes)
             }
+            ExprT::If(cond, then_block, else_block, type_) => {
+                // Start with the cond opcodes
+                let mut opcodes = self.generate_expr(&cond.inner)?;
+                opcodes.push(OpCode::If);
+                opcodes.push(OpCode::Type(
+                    self.generate_wasm_type(type_)?.unwrap_or(WasmType::Empty),
+                ));
+                opcodes.append(&mut self.generate_expr(&then_block.inner)?);
+                if let Some(else_block) = else_block {
+                    opcodes.push(OpCode::Else);
+                    opcodes.append(&mut self.generate_expr(&else_block.inner)?);
+                }
+                opcodes.push(OpCode::End);
+                Ok(opcodes)
+            }
             ExprT::BinOp {
                 op,
                 lhs,
@@ -496,7 +502,24 @@ impl CodeGenerator {
                 lhs_ops.push(self.generate_operator(&op, &type_, &promoted_type)?);
                 Ok(lhs_ops)
             }
-            _ => Err(GenerationError::NotImplemented),
+            ExprT::UnaryOp { op, rhs, type_: _ } => match op {
+                UnaryOp::Minus => {
+                    let mut opcodes = vec![OpCode::I32Const(0)];
+                    opcodes.append(&mut self.generate_expr(&rhs.inner)?);
+                    opcodes.push(OpCode::I32Sub);
+                    Ok(opcodes)
+                }
+                UnaryOp::Not => {
+                    let mut opcodes = self.generate_expr(&rhs.inner)?;
+                    opcodes.push(OpCode::I32Const(-1));
+                    opcodes.push(OpCode::I32Xor);
+                    Ok(opcodes)
+                }
+            },
+            e => {
+                println!("{:?}", e);
+                Err(GenerationError::NotImplemented)
+            }
         }
     }
 

@@ -1,9 +1,9 @@
-let foo = \(n: int): int -> int => {
-  let m: int = 10;
-  let bar = \(n: int): int => {
-    return n * n;
-  }
-  return bar;
+let foo = \(n: int): int => {
+  if n > 5 {
+    return -1;
+  } else {
+    return 1;
+  };
 }
 
 export foo;

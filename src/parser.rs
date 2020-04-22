@@ -1,6 +1,6 @@
 use crate::ast::{Expr, Name, Op, Pat, Stmt, TypeSig, Value};
 use crate::lexer::{Lexer, LexicalError, LocationRange, Token, TokenDiscriminants};
-use ast::Loc;
+use ast::{Loc, UnaryOp};
 use std::fmt::Debug;
 use utils::NameTable;
 
@@ -179,7 +179,6 @@ impl<'input> Parser<'input> {
             Some((Token::Let, loc)) => self.let_stmt(loc),
             Some((Token::Return, loc)) => Ok(self.return_stmt(loc)?),
             Some((Token::Export, loc)) => Ok(self.export_stmt(loc)?),
-            Some((Token::If, loc)) => Ok(self.if_stmt(loc)?),
             Some((token, loc)) => {
                 self.pushback((token, loc));
                 Ok(self.expression_stmt()?)
@@ -191,29 +190,6 @@ impl<'input> Parser<'input> {
                     TokenDiscriminants::Export,
                 ],
             }),
-        }
-    }
-
-    fn if_stmt(&mut self, left: LocationRange) -> Result<Loc<Stmt>, ParseError> {
-        let cond = self.expr()?;
-        let (_, block_left) = self.expect(TokenDiscriminants::LBrace)?;
-        let result_block = self.block(block_left)?;
-        if self.match_one(TokenDiscriminants::Else)?.is_some() {
-            let else_block = if let Some((_, left)) = self.match_one(TokenDiscriminants::If)? {
-                self.if_stmt(left)?
-            } else {
-                let (_, block_left) = self.expect(TokenDiscriminants::LBrace)?;
-                self.block(block_left)?
-            };
-            Ok(Loc {
-                location: LocationRange(left.0, else_block.location.1),
-                inner: Stmt::If(cond, Box::new(result_block), Some(Box::new(else_block))),
-            })
-        } else {
-            Ok(Loc {
-                location: LocationRange(left.0, result_block.location.1),
-                inner: Stmt::If(cond, Box::new(result_block), None),
-            })
         }
     }
 
@@ -296,12 +272,36 @@ impl<'input> Parser<'input> {
         match self.bump()? {
             Some((Token::Slash, left)) => self.function(left),
             Some((Token::LBrace, left)) => self.expr_block(left),
+            Some((Token::If, left)) => self.if_expr(left),
             Some(span) => {
                 self.pushback(span);
                 self.equality()
             }
             None => self.equality(),
         }
+    }
+
+    fn if_expr(&mut self, left: LocationRange) -> Result<Loc<Expr>, ParseError> {
+        // Yeah...I'm not allowing functions or blocks in the cond spot
+        let cond = self.equality()?;
+        let (_, block_left) = self.expect(TokenDiscriminants::LBrace)?;
+        let then_block = self.expr_block(block_left)?;
+        let else_block = if let Some((_, else_left)) = self.match_one(TokenDiscriminants::Else)? {
+            self.expect(TokenDiscriminants::LBrace)?;
+            Some(Box::new(self.expr_block(else_left)?))
+        } else {
+            None
+        };
+        Ok(Loc {
+            location: LocationRange(
+                left.0,
+                (&else_block)
+                    .as_ref()
+                    .map(|else_block| else_block.location.1)
+                    .unwrap_or(then_block.location.1),
+            ),
+            inner: Expr::If(Box::new(cond), Box::new(then_block), else_block),
+        })
     }
 
     fn expr_block(&mut self, left: LocationRange) -> Result<Loc<Expr>, ParseError> {
@@ -468,7 +468,11 @@ impl<'input> Parser<'input> {
 
     fn unary(&mut self) -> Result<Loc<Expr>, ParseError> {
         if let Some((token, left)) = self.match_multiple(vec![Token::Bang, Token::Minus])? {
-            let op = self.lookup_op_token(token)?;
+            let op = match token {
+                Token::Bang => UnaryOp::Not,
+                Token::Minus => UnaryOp::Minus,
+                _ => return Err(ParseError::NotReachable),
+            };
             let rhs = self.unary()?;
             Ok(Loc {
                 location: LocationRange(left.0, rhs.location.1),
