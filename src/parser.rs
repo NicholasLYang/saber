@@ -1,15 +1,17 @@
 use crate::ast::{Expr, Name, Op, Pat, Stmt, TypeSig, Value};
 use crate::lexer::{Lexer, LexicalError, LocationRange, Token, TokenDiscriminants};
-use ast::{Loc, UnaryOp};
+use ast::{Loc, Program, TypeDef, UnaryOp};
+use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use utils::NameTable;
 
 pub struct Parser<'input> {
     pub lexer: Lexer<'input>,
+    errors: Vec<ParseError>,
     pushedback_tokens: Vec<(Token, LocationRange)>,
 }
 
-#[derive(Debug, Fail, PartialEq)]
+#[derive(Debug, Fail, PartialEq, Clone, Serialize, Deserialize)]
 pub enum ParseError {
     #[fail(
         display = "ParseError: Reached end of file without completing parse. Expected these tokens: {:?}",
@@ -19,7 +21,7 @@ pub enum ParseError {
         expected_tokens: Vec<TokenDiscriminants>,
     },
     #[fail(
-        display = "({}): Unexpected token {:?}, expected {:?}",
+        display = "{}: Unexpected token {:?}, expected {:?}",
         location, token, expected_tokens
     )]
     UnexpectedToken {
@@ -27,7 +29,7 @@ pub enum ParseError {
         expected_tokens: Vec<TokenDiscriminants>,
         location: LocationRange,
     },
-    #[fail(display = "({}): Cannot destructure a function", location)]
+    #[fail(display = "{}: Cannot destructure a function", location)]
     DestructureFunction { location: LocationRange },
     #[fail(
         display = "Cannot have a type signature on a let function binding (use type signatures in the function!)"
@@ -49,6 +51,7 @@ impl<'input> Parser<'input> {
     pub fn new(lexer: Lexer) -> Parser {
         Parser {
             lexer,
+            errors: Vec::new(),
             pushedback_tokens: Vec::new(),
         }
     }
@@ -133,6 +136,17 @@ impl<'input> Parser<'input> {
         Ok(())
     }
 
+    // Pop tokens until we reach the end token. For example, when parsing a stmt
+    // this is semicolon
+    fn recover_from_error(&mut self, end_token: TokenDiscriminants) -> Result<(), ParseError> {
+        while let Some((token, _)) = self.bump()? {
+            if end_token == token.into() {
+                return Ok(());
+            }
+        }
+        Ok(())
+    }
+
     fn lookup_op_token(&mut self, token: Token) -> Result<Op, ParseError> {
         match token {
             Token::EqualEqual => Ok(Op::EqualEqual),
@@ -158,38 +172,124 @@ impl<'input> Parser<'input> {
                     inner: Stmt::Block(stmts),
                 });
             }
-            stmts.push(self.stmt()?);
+            self.stmt()?.map(|stmt| stmts.push(stmt));
         }
     }
 
-    pub fn stmts(&mut self) -> Result<Vec<Loc<Stmt>>, ParseError> {
+    pub fn program(&mut self) -> Result<Program, ParseError> {
         let mut stmts = Vec::new();
+        let mut type_defs = Vec::new();
         loop {
+            if let Some((_, left)) = self.match_one(TokenDiscriminants::Struct)? {
+                match self.type_def(left) {
+                    Ok(def) => type_defs.push(def),
+                    Err(err) => {
+                        self.errors.push(err);
+                        // Our recover token for type defs is RBrace. This isn't ideal
+                        // cause if the bug is that there is no RBrace, then we basically
+                        // fail at parsing the rest of the code. But w/e
+                        self.recover_from_error(TokenDiscriminants::RBrace)?;
+                    }
+                }
+            }
             match self.stmt() {
-                Ok(stmt) => stmts.push(stmt),
-                Err(ParseError::EndOfFile { expected_tokens: _ }) => return Ok(stmts),
-                Err(err) => return Err(err),
+                Ok(Some(stmt)) => stmts.push(stmt),
+                Ok(None) => {}
+                Err(ParseError::EndOfFile { expected_tokens: _ }) => {
+                    let mut errors = Vec::new();
+                    std::mem::swap(&mut errors, &mut self.errors);
+                    return Ok(Program {
+                        stmts,
+                        type_defs,
+                        errors,
+                    });
+                }
+                Err(err) => {
+                    self.errors.push(err);
+                }
             }
         }
     }
 
-    pub fn stmt(&mut self) -> Result<Loc<Stmt>, ParseError> {
+    fn id(&mut self) -> Result<(Name, LocationRange), ParseError> {
+        match self.bump()? {
+            Some((Token::Ident(id), loc)) => Ok((id, loc)),
+            Some((token, location)) => Err(ParseError::UnexpectedToken {
+                location,
+                token,
+                expected_tokens: vec![TokenDiscriminants::Ident],
+            }),
+            None => Err(ParseError::EndOfFile {
+                expected_tokens: vec![TokenDiscriminants::Ident],
+            }),
+        }
+    }
+
+    fn type_def(&mut self, left: LocationRange) -> Result<Loc<TypeDef>, ParseError> {
+        let (id, _) = self.id()?;
+        self.expect(TokenDiscriminants::LBrace)?;
+        let (fields, right) =
+            self.comma::<(Name, Loc<TypeSig>)>(&Self::struct_field, Token::RBrace)?;
+        Ok(Loc {
+            location: LocationRange(left.0, right.1),
+            inner: TypeDef::Struct(id, fields),
+        })
+    }
+
+    fn struct_field(&mut self) -> Result<(Name, Loc<TypeSig>), ParseError> {
+        let (id, _) = self.id()?;
+        self.expect(TokenDiscriminants::Colon)?;
+        let type_sig = self.type_()?;
+        Ok((id, type_sig))
+    }
+
+    pub fn stmt(&mut self) -> Result<Option<Loc<Stmt>>, ParseError> {
         let tok = self.bump()?;
-        match tok {
+        let res = match tok {
             Some((Token::Let, loc)) => self.let_stmt(loc),
-            Some((Token::Return, loc)) => Ok(self.return_stmt(loc)?),
-            Some((Token::Export, loc)) => Ok(self.export_stmt(loc)?),
+            Some((Token::Return, loc)) => self.return_stmt(loc),
+            Some((Token::Export, loc)) => self.export_stmt(loc),
+            Some((Token::If, loc)) => {
+                let if_expr = self.if_expr(loc)?;
+                Ok(Loc {
+                    location: if_expr.location,
+                    inner: Stmt::Expr(if_expr),
+                })
+            }
             Some((token, loc)) => {
                 self.pushback((token, loc));
-                Ok(self.expression_stmt()?)
+                self.expression_stmt()
             }
-            None => Err(ParseError::EndOfFile {
-                expected_tokens: vec![
-                    TokenDiscriminants::Let,
-                    TokenDiscriminants::Return,
-                    TokenDiscriminants::Export,
-                ],
-            }),
+            None => {
+                return Err(ParseError::EndOfFile {
+                    expected_tokens: vec![
+                        TokenDiscriminants::Let,
+                        TokenDiscriminants::Return,
+                        TokenDiscriminants::Export,
+                    ],
+                })
+            }
+        };
+        match res {
+            Ok(res) => Ok(Some(res)),
+            err @ Err(ParseError::EndOfFile { expected_tokens: _ }) => return err.map(Some),
+            Err(err) => {
+                // Special case if the unexpected token is a semicolon
+                // since that's our recovery token
+                if let ParseError::UnexpectedToken {
+                    token,
+                    location: _,
+                    expected_tokens: _,
+                } = &err
+                {
+                    if token == &Token::Semicolon {
+                        self.errors.push(err);
+                        return Ok(None);
+                    }
+                }
+                self.recover_from_error(TokenDiscriminants::Semicolon)?;
+                Ok(None)
+            }
         }
     }
 
@@ -319,7 +419,7 @@ impl<'input> Parser<'input> {
                 self.match_multiple(vec![Token::Let, Token::Return, Token::Export])?
             {
                 self.pushback(span);
-                stmts.push(self.stmt()?);
+                self.stmt()?.map(|stmt| stmts.push(stmt));
             } else {
                 // Otherwise we could either be in an expr stmt or an ending expr situation
                 let expr = self.expr()?;
@@ -799,7 +899,7 @@ mod tests {
                 let source = fs::read_to_string(entry)?;
                 let lexer = Lexer::new(&source);
                 let mut parser = Parser::new(lexer);
-                let output = match parser.stmts() {
+                let output = match parser.program() {
                     Ok(stmts) => serde_json::to_string_pretty(&stmts)?,
                     Err(err) => err.to_string(),
                 };

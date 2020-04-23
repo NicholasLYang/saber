@@ -1,4 +1,4 @@
-use ast::{Expr, ExprT, Loc, Name, Op, Pat, Stmt, StmtT, Type, TypeSig, UnaryOp, Value};
+use ast::{Expr, ExprT, Loc, Name, Op, Pat, Program, Stmt, StmtT, Type, TypeSig, UnaryOp, Value};
 use im::hashmap::HashMap;
 use lexer::LocationRange;
 use std::sync::Arc;
@@ -109,9 +109,9 @@ impl TypeChecker {
         Arc::new(type_var)
     }
 
-    pub fn check_program(&mut self, program: Vec<Loc<Stmt>>) -> Result<Vec<Loc<StmtT>>, TypeError> {
+    pub fn check_program(&mut self, program: Program) -> Result<Vec<Loc<StmtT>>, TypeError> {
         let mut typed_stmts = Vec::new();
-        for stmt in program {
+        for stmt in program.stmts {
             typed_stmts.push(self.stmt(stmt)?);
         }
         Ok(typed_stmts.into_iter().flatten().collect())

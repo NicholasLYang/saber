@@ -53,9 +53,12 @@ fn read_file(file_name: &str) -> Result<()> {
     let contents = fs::read_to_string(file_name)?;
     let lexer = lexer::Lexer::new(&contents);
     let mut parser = Parser::new(lexer);
-    let parser_out = parser.stmts()?;
+    let program = parser.program()?;
+    for error in &program.errors {
+        println!("{}", error);
+    }
     let mut typechecker = TypeChecker::new(parser.get_name_table());
-    let typed_program = typechecker.check_program(parser_out)?;
+    let typed_program = typechecker.check_program(program)?;
     let (name_table, symbol_table) = typechecker.get_tables();
     let code_generator = CodeGenerator::new(name_table, symbol_table);
     let program = code_generator.generate_program(typed_program)?;
@@ -78,10 +81,11 @@ fn run_repl() -> Result<()> {
             .expect("Couldn't read line");
         let lexer = lexer::Lexer::new(&input);
         let mut parser = Parser::new(lexer);
-        let parser_out = parser.stmt()?;
-        let name_table = parser.get_name_table();
-        let mut typechecker = TypeChecker::new(name_table);
-        let typed_stmt = typechecker.stmt(parser_out)?;
-        println!("{:#?}", typed_stmt);
+        if let Some(parser_out) = parser.stmt()? {
+            let name_table = parser.get_name_table();
+            let mut typechecker = TypeChecker::new(name_table);
+            let typed_stmt = typechecker.stmt(parser_out)?;
+            println!("{:#?}", typed_stmt);
+        }
     }
 }

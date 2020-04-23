@@ -1,4 +1,5 @@
 use lexer::LocationRange;
+use parser::ParseError;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::sync::Arc;
@@ -10,6 +11,13 @@ pub type Name = usize;
 pub struct Loc<T> {
     pub location: LocationRange,
     pub inner: T,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct Program {
+    pub stmts: Vec<Loc<Stmt>>,
+    pub type_defs: Vec<Loc<TypeDef>>,
+    pub errors: Vec<ParseError>,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -244,6 +252,11 @@ pub enum TypeSig {
     Name(Name),
     Empty,
     Arrow(Vec<Loc<TypeSig>>, Box<Loc<TypeSig>>),
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum TypeDef {
+    Struct(Name, Vec<(Name, Loc<TypeSig>)>),
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]

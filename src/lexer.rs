@@ -3,7 +3,8 @@ use std::fmt::{self, Debug, Display, Formatter};
 use std::str::CharIndices;
 use utils::NameTable;
 
-#[derive(Clone, Debug, PartialEq, EnumDiscriminants)]
+#[derive(Clone, Debug, PartialEq, EnumDiscriminants, Serialize, Deserialize)]
+#[strum_discriminants(derive(Serialize, Deserialize))]
 pub enum Token {
     False,
     True,
@@ -12,6 +13,7 @@ pub enum Token {
     For,
     If,
     Return,
+    Struct,
     Let,
     While,
     Ident(usize),
@@ -66,6 +68,7 @@ impl Display for Token {
                 Token::For => "for".to_string(),
                 Token::If => "if".to_string(),
                 Token::Return => "return".to_string(),
+                Token::Struct => "struct".to_string(),
                 Token::Let => "let".to_string(),
                 Token::While => "while".to_string(),
                 Token::Ident(i) => format!("<{}>", i),
@@ -154,7 +157,7 @@ fn is_id_body(ch: char) -> bool {
     ch == '_' || ch.is_ascii_digit() || ch.is_ascii_alphabetic()
 }
 
-#[derive(Debug, Fail, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Fail, PartialEq, Clone, Serialize, Deserialize)]
 pub enum LexicalError {
     #[fail(display = "{}: Invalid character '{}'", location, ch)]
     InvalidCharacter { ch: char, location: LocationRange },
@@ -330,26 +333,28 @@ impl<'input> Lexer<'input> {
             .take_while(|ch| is_id_start(ch) || is_id_body(ch))
             .unwrap_or_else(|| self.source.len());
         let end_loc = self.get_location();
-        match &self.source[start_index..end_index] {
-            "else" => Ok((Token::Else, LocationRange(start_loc, end_loc))),
-            "false" => Ok((Token::False, LocationRange(start_loc, end_loc))),
-            "for" => Ok((Token::For, LocationRange(start_loc, end_loc))),
-            "if" => Ok((Token::If, LocationRange(start_loc, end_loc))),
-            "return" => Ok((Token::Return, LocationRange(start_loc, end_loc))),
-            "true" => Ok((Token::True, LocationRange(start_loc, end_loc))),
-            "let" => Ok((Token::Let, LocationRange(start_loc, end_loc))),
-            "while" => Ok((Token::While, LocationRange(start_loc, end_loc))),
-            "export" => Ok((Token::Export, LocationRange(start_loc, end_loc))),
+        let token = match &self.source[start_index..end_index] {
+            "else" => Token::Else,
+            "false" => Token::False,
+            "for" => Token::For,
+            "if" => Token::If,
+            "struct" => Token::Struct,
+            "return" => Token::Return,
+            "true" => Token::True,
+            "let" => Token::Let,
+            "while" => Token::While,
+            "export" => Token::Export,
             ident => {
                 let ident = ident.to_string();
                 if let Some(id) = self.name_table.get_id(&ident) {
-                    Ok((Token::Ident(*id), LocationRange(start_loc, end_loc)))
+                    Token::Ident(*id)
                 } else {
                     let id = self.name_table.insert(ident);
-                    Ok((Token::Ident(id), LocationRange(start_loc, end_loc)))
+                    Token::Ident(id)
                 }
             }
-        }
+        };
+        Ok((token, LocationRange(start_loc, end_loc)))
     }
 }
 
