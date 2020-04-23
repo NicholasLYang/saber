@@ -1,6 +1,6 @@
 let foo = \(n: int): int => {
   if n > 5 {
-    let foo = 10 - 10;
+    let foo = 10 * 2;
     return -1;
   } else {
     return 1;

@@ -25,7 +25,7 @@ pub enum GenerationError {
     UnsupportedValue,
     #[fail(display = "Cannot have () as type")]
     EmptyType,
-    #[fail(display = "Could not infer type var {:?}", type_)]
+    #[fail(display = "Code Generator: Could not infer type var {:?}", type_)]
     CouldNotInfer { type_: Arc<Type> },
     #[fail(display = "Code Generator: Not implemented yet!")]
     NotImplemented,
@@ -296,6 +296,7 @@ impl CodeGenerator {
                 body,
                 scope,
             } => {
+                println!("LOCAL VARIABLES: {:?}", local_variables);
                 self.symbol_table.restore_scope(*scope);
                 self.generate_function_binding(
                     *name,

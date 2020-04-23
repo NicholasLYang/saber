@@ -163,7 +163,7 @@ impl TypeChecker {
                 let typed_expr = self.expr(expr)?;
                 match self.return_type.clone() {
                     Some(ref return_type) => {
-                        if self.unify(&typed_expr.inner.get_type(), return_type) {
+                        if self.is_unifiable(&typed_expr.inner.get_type(), return_type) {
                             Ok(vec![Loc {
                                 location,
                                 inner: StmtT::Return(typed_expr),
@@ -271,9 +271,8 @@ impl TypeChecker {
                 let type_ = self.lookup_type_sig(&type_sig)?;
                 Ok(type_)
             }
-            Pat::Id(name, None, _) => {
+            Pat::Id(_, None, _) => {
                 let type_ = self.get_fresh_type_var();
-                self.symbol_table.insert_var(*name, type_.clone());
                 Ok(type_)
             }
             Pat::Tuple(pats, _) => {
@@ -432,14 +431,13 @@ impl TypeChecker {
     ) -> Result<Vec<Loc<StmtT>>, TypeError> {
         let pat_type = self.pat(&pat)?;
         let typed_rhs = self.expr(rhs)?;
-        if self.unify(&pat_type, &typed_rhs.inner.get_type()) {
+        if let Some(type_) = self.unify(&pat_type, &typed_rhs.inner.get_type()) {
             let name = if let Pat::Id(name, _, _) = pat {
                 name
             } else {
                 self.name_table.get_fresh_name()
             };
-            self.symbol_table
-                .insert_var(name, typed_rhs.inner.get_type());
+            self.symbol_table.insert_var(name, type_);
             let mut pat_bindings =
                 self.generate_pattern_bindings(&pat, name, &typed_rhs.inner.get_type(), location)?;
             let mut bindings = vec![Loc {
@@ -611,10 +609,10 @@ impl TypeChecker {
                 let rhs_type = typed_rhs.inner.get_type();
                 let is_valid_types = match op {
                     UnaryOp::Minus => {
-                        self.unify(&rhs_type, &Arc::new(Type::Int))
-                            || self.unify(&rhs_type, &Arc::new(Type::Float))
+                        self.is_unifiable(&rhs_type, &Arc::new(Type::Int))
+                            || self.is_unifiable(&rhs_type, &Arc::new(Type::Float))
                     }
-                    UnaryOp::Not => self.unify(&rhs_type, &Arc::new(Type::Bool)),
+                    UnaryOp::Not => self.is_unifiable(&rhs_type, &Arc::new(Type::Bool)),
                 };
                 if is_valid_types {
                     Ok(Loc {
@@ -644,7 +642,7 @@ impl TypeChecker {
                 };
                 let typed_args = self.expr(*args)?;
                 let args_type = typed_args.inner.get_type();
-                if self.unify(&params_type, &args_type) {
+                if self.is_unifiable(&params_type, &args_type) {
                     Ok(Loc {
                         location,
                         inner: ExprT::Call {
@@ -691,7 +689,7 @@ impl TypeChecker {
                 if let Some(else_block) = else_block {
                     let typed_else_block = self.expr(*else_block)?;
                     let else_type = typed_else_block.inner.get_type();
-                    if !self.unify(&then_type, &else_type) {
+                    if !self.is_unifiable(&then_type, &else_type) {
                         return Err(TypeError::UnificationFailure {
                             location,
                             type1: then_type,
@@ -707,7 +705,7 @@ impl TypeChecker {
                             then_type,
                         ),
                     })
-                } else if !self.unify(&Arc::new(Type::Unit), &then_type) {
+                } else if !self.is_unifiable(&Arc::new(Type::Unit), &then_type) {
                     Err(TypeError::UnificationFailure {
                         location,
                         type1: Arc::new(Type::Unit),
@@ -739,7 +737,7 @@ impl TypeChecker {
                 _ => None,
             },
             Op::BangEqual | Op::EqualEqual => {
-                if self.unify(&lhs_type, &rhs_type) {
+                if self.is_unifiable(&lhs_type, &rhs_type) {
                     Some(Type::Bool)
                 } else {
                     None
@@ -748,9 +746,9 @@ impl TypeChecker {
             Op::GreaterEqual | Op::Greater | Op::Less | Op::LessEqual => {
                 // If we can unify lhs and rhs, and lhs with Int or Float then
                 // by transitivity we can unify everything with float
-                let is_num = self.unify(&lhs_type, &Arc::new(Type::Float))
-                    || self.unify(&lhs_type, &Arc::new(Type::Int));
-                if self.unify(&lhs_type, &rhs_type) && is_num {
+                let is_num = self.is_unifiable(&lhs_type, &Arc::new(Type::Float))
+                    || self.is_unifiable(&lhs_type, &Arc::new(Type::Int));
+                if self.is_unifiable(&lhs_type, &rhs_type) && is_num {
                     Some(Type::Bool)
                 } else {
                     None
@@ -763,34 +761,63 @@ impl TypeChecker {
         &mut self,
         type_vector1: &[Arc<Type>],
         type_vector2: &[Arc<Type>],
-    ) -> bool {
+    ) -> Option<Vec<Arc<Type>>> {
         if type_vector1.len() != type_vector2.len() {
-            return false;
+            return None;
         }
+        let mut types = Vec::new();
         for (t1, t2) in type_vector1.iter().zip(type_vector2.iter()) {
-            if !self.unify(t1, t2) {
-                return false;
+            if let Some(t) = self.unify(t1, t2) {
+                types.push(t.clone())
+            } else {
+                return None;
             }
         }
-        true
+        Some(types)
     }
 
-    fn unify(&mut self, type1: &Arc<Type>, type2: &Arc<Type>) -> bool {
+    fn unify<'a>(&mut self, type1: &Arc<Type>, type2: &Arc<Type>) -> Option<Arc<Type>> {
         if Arc::ptr_eq(type1, type2) || type1 == type2 {
-            return true;
+            return Some(type1.clone());
         }
         match (&**type1, &**type2) {
-            (Type::Tuple(ts), Type::Unit) | (Type::Unit, Type::Tuple(ts)) => ts.is_empty(),
-            (Type::Tuple(t1), Type::Tuple(t2)) => self.unify_type_vectors(&t1, &t2),
+            (Type::Tuple(ts), Type::Unit) | (Type::Unit, Type::Tuple(ts)) => {
+                if ts.is_empty() {
+                    Some(type2.clone())
+                } else {
+                    None
+                }
+            }
+            (Type::Tuple(t1), Type::Tuple(t2)) => {
+                if let Some(types) = self.unify_type_vectors(&t1, &t2) {
+                    Some(Arc::new(Type::Tuple(types)))
+                } else {
+                    None
+                }
+            }
             (Type::Arrow(param_type1, return_type1), Type::Arrow(param_type2, return_type2)) => {
-                self.unify(&param_type1, &param_type2) && self.unify(&return_type1, &return_type2)
+                match (
+                    self.unify(&param_type1, &param_type2),
+                    self.unify(&return_type1, &return_type2),
+                ) {
+                    (Some(param_type), Some(return_type)) => Some(Arc::new(Type::Arrow(
+                        param_type.clone(),
+                        return_type.clone(),
+                    ))),
+                    _ => None,
+                }
             }
 
-            (Type::Int, Type::Bool) | (Type::Bool, Type::Int) => true,
+            (Type::Int, Type::Bool) | (Type::Bool, Type::Int) => Some(Arc::new(Type::Int)),
             // TODO: We need a way to look up usages of type vars and
             // convert them to the other type with unification
-            (Type::Var(_), _) | (_, Type::Var(_)) => true,
-            _ => false,
+            (Type::Var(_), _) => Some(type2.clone()),
+            (_, Type::Var(_)) => Some(type1.clone()),
+            _ => None,
         }
+    }
+
+    fn is_unifiable(&mut self, type1: &Arc<Type>, type2: &Arc<Type>) -> bool {
+        self.unify(type1, type2).is_some()
     }
 }
