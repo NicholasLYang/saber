@@ -1,4 +1,6 @@
-use ast::{Expr, ExprT, Loc, Name, Op, Pat, Program, Stmt, StmtT, Type, TypeSig, UnaryOp, Value};
+use ast::{
+    Expr, ExprT, Loc, Name, Op, Pat, Program, Stmt, StmtT, Type, TypeDef, TypeSig, UnaryOp, Value,
+};
 use im::hashmap::HashMap;
 use lexer::LocationRange;
 use std::sync::Arc;
@@ -110,11 +112,29 @@ impl TypeChecker {
     }
 
     pub fn check_program(&mut self, program: Program) -> Result<Vec<Loc<StmtT>>, TypeError> {
+        for type_def in program.type_defs {
+            self.type_def(type_def)?;
+        }
         let mut typed_stmts = Vec::new();
         for stmt in program.stmts {
             typed_stmts.push(self.stmt(stmt)?);
         }
         Ok(typed_stmts.into_iter().flatten().collect())
+    }
+
+    fn type_def(&mut self, type_def: Loc<TypeDef>) -> Result<(), TypeError> {
+        match type_def.inner {
+            TypeDef::Struct(name, fields) => {
+                let mut typed_fields = Vec::new();
+                for (name, type_sig) in fields {
+                    let field_type = self.lookup_type_sig(&type_sig)?;
+                    typed_fields.push((name, field_type));
+                }
+                self.type_names
+                    .insert(name, Arc::new(Type::Record(typed_fields)));
+                Ok(())
+            }
+        }
     }
 
     pub fn stmt(&mut self, stmt: Loc<Stmt>) -> Result<Vec<Loc<StmtT>>, TypeError> {
