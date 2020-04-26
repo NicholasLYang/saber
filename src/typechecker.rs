@@ -158,7 +158,7 @@ impl TypeChecker {
                     .insert_function(func_name, params_type.clone(), return_type);
                 let previous_scope = self.symbol_table.push_scope(true);
                 let (params, body, return_type, local_variables) =
-                    self.func(params, *body, return_type_sig)?;
+                    self.function(params, *body, return_type_sig)?;
                 let func_scope = self.symbol_table.restore_scope(previous_scope);
                 self.symbol_table.insert_function(
                     func_name,
@@ -483,15 +483,15 @@ impl TypeChecker {
      * an anonymous function, i.e. ExprT::Function, then we can't do that
      *
      **/
-    fn func(
+    fn function(
         &mut self,
         params: Pat,
-        body: Loc<Stmt>,
+        body: Loc<Expr>,
         return_type: Option<Loc<TypeSig>>,
     ) -> Result<
         (
             Vec<(Name, Arc<Type>)>,
-            Box<Loc<StmtT>>,
+            Box<Loc<ExprT>>,
             Arc<Type>,
             Vec<Arc<Type>>,
         ),
@@ -504,25 +504,26 @@ impl TypeChecker {
         }
         // Insert return type into typechecker so that
         // typechecker can verify return statements.
-        if let Some(return_type_sig) = return_type {
-            self.return_type = Some(self.lookup_type_sig(&return_type_sig)?);
-        }
+        self.return_type = if let Some(return_type_sig) = return_type {
+            Some(self.lookup_type_sig(&return_type_sig)?)
+        } else {
+            Some(self.get_fresh_type_var())
+        };
         let body_location = body.location;
         // Check body
-        let body = self.stmt(body)?;
+        let body = self.expr(body)?;
+        let body_type = body.inner.get_type();
         let mut return_type = None;
         std::mem::swap(&mut return_type, &mut self.return_type);
-        let return_type = return_type.unwrap_or_else(|| Arc::new(Type::Unit));
-        let func_var_types = self.symbol_table.restore_vars(old_var_types);
-        Ok((
-            func_params,
-            Box::new(Loc {
+        let return_type = self
+            .unify(&(&return_type).as_ref().unwrap(), &body_type)
+            .ok_or(TypeError::UnificationFailure {
                 location: body_location,
-                inner: StmtT::Block(body),
-            }),
-            return_type,
-            func_var_types,
-        ))
+                type1: (&return_type).clone().unwrap(),
+                type2: body_type,
+            })?;
+        let func_var_types = self.symbol_table.restore_vars(old_var_types);
+        Ok((func_params, Box::new(body), return_type, func_var_types))
     }
 
     fn expr(&mut self, expr: Loc<Expr>) -> Result<Loc<ExprT>, TypeError> {
@@ -606,7 +607,7 @@ impl TypeChecker {
                 let params_type = self.pat(&params)?;
                 let previous_scope = self.symbol_table.push_scope(true);
                 let (params, body, return_type, local_variables) =
-                    self.func(params, *body, return_type_sig)?;
+                    self.function(params, *body, return_type_sig)?;
                 let func_scope = self.symbol_table.restore_scope(previous_scope);
                 self.symbol_table
                     .insert_function(name, params_type.clone(), return_type.clone());

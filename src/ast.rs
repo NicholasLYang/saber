@@ -26,7 +26,7 @@ pub enum Stmt {
     Expr(Loc<Expr>),
     Return(Loc<Expr>),
     Block(Vec<Loc<Stmt>>),
-    Function(Name, Pat, Option<Loc<TypeSig>>, Box<Loc<Stmt>>),
+    Function(Name, Pat, Option<Loc<TypeSig>>, Box<Loc<Expr>>),
     Export(Name),
 }
 
@@ -41,7 +41,7 @@ pub enum StmtT {
         params: Vec<(Name, Arc<Type>)>,
         params_type: Arc<Type>,
         return_type: Arc<Type>,
-        body: Box<Loc<StmtT>>,
+        body: Box<Loc<ExprT>>,
         local_variables: Vec<Arc<Type>>,
         scope: usize,
     },
@@ -70,7 +70,7 @@ pub enum Expr {
     Function {
         params: Pat,
         return_type: Option<Loc<TypeSig>>,
-        body: Box<Loc<Stmt>>,
+        body: Box<Loc<Expr>>,
     },
     Call {
         callee: Box<Loc<Expr>>,
@@ -122,7 +122,7 @@ pub enum ExprT {
         params: Vec<(Name, Arc<Type>)>,
         params_type: Arc<Type>,
         return_type: Arc<Type>,
-        body: Box<Loc<StmtT>>,
+        body: Box<Loc<ExprT>>,
         local_variables: Vec<Arc<Type>>,
         name: Name,
         scope_index: usize,

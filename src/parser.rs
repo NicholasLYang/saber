@@ -445,22 +445,16 @@ impl<'input> Parser<'input> {
         self.expect(TokenDiscriminants::FatArrow)?;
         let token = self.bump()?;
         let body = match token {
-            Some((Token::LBrace, left)) => self.block(left)?,
+            Some((Token::LBrace, left)) => self.expr_block(left)?,
             Some((Token::LParen, left)) => {
-                let expr = self.expr()?;
+                let mut expr = self.expr()?;
                 let (_, right) = self.expect(TokenDiscriminants::RParen)?;
-                Loc {
-                    location: LocationRange(left.0, right.1),
-                    inner: Stmt::Return(expr),
-                }
+                expr.location = LocationRange(left.0, right.1);
+                expr
             }
             Some((token, left)) => {
                 self.pushback((token, left));
-                let expr = self.expr()?;
-                Loc {
-                    location: LocationRange(left.0, expr.location.1),
-                    inner: Stmt::Return(expr),
-                }
+                self.expr()?
             }
             // TODO: Streamline error reporting. I should group the
             // tokens into ones expected for each kind of syntax rule.

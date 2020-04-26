@@ -156,7 +156,7 @@ impl CodeGenerator {
         params: &[(Name, Arc<Type>)],
         return_type: &Arc<Type>,
         local_variables: &Vec<Arc<Type>>,
-        body: &StmtT,
+        body: &ExprT,
     ) -> Result<usize> {
         let entry = self.symbol_table.lookup_name_in_scope(name, scope).unwrap();
         let index = if let EntryType::Function {
@@ -183,7 +183,7 @@ impl CodeGenerator {
         return_type: &Arc<Type>,
         params: &[(Name, Arc<Type>)],
         local_variables: &Vec<Arc<Type>>,
-        body: &StmtT,
+        body: &ExprT,
     ) -> Result<(FunctionType, FunctionBody)> {
         let return_type = self.generate_wasm_type(&return_type)?;
         self.return_type = return_type.clone();
@@ -214,11 +214,11 @@ impl CodeGenerator {
 
     fn generate_function_body(
         &mut self,
-        body: &StmtT,
+        body: &ExprT,
         local_variables: &[Arc<Type>],
         param_count: usize,
     ) -> Result<FunctionBody> {
-        let code = self.generate_stmt(body, true)?;
+        let code = self.generate_expr(body)?;
         let mut local_entries = Vec::new();
         // We want to generate only the locals not params so we skip
         // to after the params
@@ -296,7 +296,6 @@ impl CodeGenerator {
                 body,
                 scope,
             } => {
-                println!("LOCAL VARIABLES: {:?}", local_variables);
                 self.symbol_table.restore_scope(*scope);
                 self.generate_function_binding(
                     *name,
