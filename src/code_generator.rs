@@ -65,30 +65,13 @@ impl CodeGenerator {
             param_types: vec![WasmType::i32],
             return_type: None,
         };
-        let print_id = self
-            .name_table
-            .get_id(&"print".to_string())
-            .expect("Print must be defined");
-        let print_entry = self
-            .symbol_table
-            .lookup_name_in_scope(*print_id, 0)
-            .expect("Print is not in symbol table");
-        match print_entry.entry_type {
-            EntryType::Function {
-                index: _,
-                params_type: _,
-                return_type: _,
-            } => {
-                let type_index = self.program_data.insert_type(print_type);
-                self.program_data.import_section.push(ImportEntry {
-                    module_str: "std".into(),
-                    field_str: "print".into(),
-                    kind: ImportKind::Function { type_: type_index },
-                });
-                Ok(())
-            }
-            _ => Err(GenerationError::NotReachable),
-        }
+        let type_index = self.program_data.insert_type(print_type);
+        self.program_data.import_section.push(ImportEntry {
+            module_str: "std".into(),
+            field_str: "print".into(),
+            kind: ImportKind::Function { type_: type_index },
+        });
+        Ok(())
     }
 
     pub fn generate_program(mut self, program: Vec<Loc<StmtT>>) -> Result<ProgramData> {
@@ -516,6 +499,29 @@ impl CodeGenerator {
                     Ok(opcodes)
                 }
             },
+            ExprT::Record { fields, type_ } => {
+                // Since all types are either pointers or 32 bit ints/floats,
+                // we can do one field == 4 bytes
+                let mut opcodes = Vec::new();
+                opcodes.push(OpCode::CurrentMemory);
+                let print_id = self
+                    .name_table
+                    .get_id(&"print".to_string())
+                    .expect("Print must be defined");
+                let print_entry = self
+                    .symbol_table
+                    .lookup_name_in_scope(*print_id, 0)
+                    .expect("Print is not in symbol table");
+                match print_entry.entry_type {
+                    EntryType::Function {
+                        index,
+                        params_type: _,
+                        return_type: _,
+                    } => opcodes.push(OpCode::Call(index.try_into().unwrap())),
+                    _ => return Err(GenerationError::NotReachable),
+                }
+                Ok(opcodes)
+            }
             e => {
                 println!("{:?}", e);
                 Err(GenerationError::NotImplemented)

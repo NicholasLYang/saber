@@ -163,19 +163,6 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn block(&mut self, left: LocationRange) -> Result<Loc<Stmt>, ParseError> {
-        let mut stmts = Vec::new();
-        loop {
-            if let Some((_, right)) = self.match_one(TokenDiscriminants::RBrace)? {
-                return Ok(Loc {
-                    location: LocationRange(left.0, right.1),
-                    inner: Stmt::Block(stmts),
-                });
-            }
-            self.stmt()?.map(|stmt| stmts.push(stmt));
-        }
-    }
-
     pub fn program(&mut self) -> Result<Program, ParseError> {
         let mut stmts = Vec::new();
         let mut type_defs = Vec::new();
@@ -229,14 +216,14 @@ impl<'input> Parser<'input> {
         let (id, _) = self.id()?;
         self.expect(TokenDiscriminants::LBrace)?;
         let (fields, right) =
-            self.comma::<(Name, Loc<TypeSig>)>(&Self::struct_field, Token::RBrace)?;
+            self.comma::<(Name, Loc<TypeSig>)>(&Self::record_type_field, Token::RBrace)?;
         Ok(Loc {
             location: LocationRange(left.0, right.1),
             inner: TypeDef::Struct(id, fields),
         })
     }
 
-    fn struct_field(&mut self) -> Result<(Name, Loc<TypeSig>), ParseError> {
+    fn record_type_field(&mut self) -> Result<(Name, Loc<TypeSig>), ParseError> {
         let (id, _) = self.id()?;
         self.expect(TokenDiscriminants::Colon)?;
         let type_sig = self.type_()?;
@@ -700,10 +687,16 @@ impl<'input> Parser<'input> {
                     Ok(expr)
                 }
             }
-            Token::Ident(name) => Ok(Loc {
-                location,
-                inner: Expr::Var { name },
-            }),
+            Token::Ident(name) => {
+                if self.match_one(TokenDiscriminants::LBrace)?.is_some() {
+                    self.record_literal(name, location)
+                } else {
+                    Ok(Loc {
+                        location,
+                        inner: Expr::Var { name },
+                    })
+                }
+            }
             token => Err(ParseError::UnexpectedToken {
                 token,
                 location,
@@ -717,6 +710,34 @@ impl<'input> Parser<'input> {
                 ],
             }),
         }
+    }
+
+    fn record_literal(
+        &mut self,
+        name: Name,
+        name_loc: LocationRange,
+    ) -> Result<Loc<Expr>, ParseError> {
+        let (fields, end_loc) =
+            self.comma::<(Name, Loc<Expr>)>(&Self::record_field, Token::RBrace)?;
+        Ok(Loc {
+            location: LocationRange(name_loc.0, end_loc.1),
+            inner: Expr::Record { fields },
+        })
+    }
+
+    fn record_field(&mut self) -> Result<(Name, Loc<Expr>), ParseError> {
+        let (field_name, name_loc) = self.id()?;
+        // If we find a comma, we treat `foo,` as `foo: foo,`
+        let expr = if self.match_one(TokenDiscriminants::Comma)?.is_some() {
+            Loc {
+                location: name_loc,
+                inner: Expr::Var { name: field_name },
+            }
+        } else {
+            self.expect(TokenDiscriminants::Colon)?;
+            self.expr()?
+        };
+        Ok((field_name, expr))
     }
 
     fn pattern(&mut self) -> Result<Pat, ParseError> {

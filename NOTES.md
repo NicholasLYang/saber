@@ -50,3 +50,10 @@ that.
 
 Should closures copy or reference variables? If they're copied that makes my life a lot easier. But it's probably
 super inefficient, so I'd probably need to make it copy-on-write, but that'd also be hard. 
+
+## Errors
+Use a crate? https://github.com/brendanzab/codespan
+
+## Memory Allocation
+
+Global #0 is gonna be pointer to current heap max

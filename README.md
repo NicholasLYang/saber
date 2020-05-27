@@ -15,7 +15,7 @@ hopefully I'll be able to port it to other platforms.
   - Convert to expression based syntax
 - Typechecking
   - Typecheck functions
-  - Typecheck records
+  - ~~Typecheck records~~
   - Add named types
   - Constraint solve type variables
 - Lexical Analysis

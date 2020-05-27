@@ -37,6 +37,8 @@ pub enum OpCode {
     CallIndirect(u32),
     Unreachable,
     Drop,
+    GrowMemory,
+    CurrentMemory,
 }
 
 #[derive(Debug, Clone, PartialEq)]

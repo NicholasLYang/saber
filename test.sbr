@@ -1,6 +1,12 @@
-let foo = \(n: int): int => {
-  let m = 2;
-  10 + n * m
+struct Person {
+  age: int
+}
+
+let foo = \() => {
+  print(10);
+  Person {
+    age: 10
+  };
 }
 
 export foo;

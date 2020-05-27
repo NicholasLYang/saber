@@ -116,7 +116,15 @@ impl TypeChecker {
             self.type_def(type_def)?;
         }
         let mut typed_stmts = Vec::new();
+        let mut deferred_stmts = Vec::new();
         for stmt in program.stmts {
+            if let Stmt::Function(_, _, _, _) = stmt.inner {
+                typed_stmts.push(self.stmt(stmt)?);
+            } else {
+                deferred_stmts.push(stmt);
+            }
+        }
+        for stmt in deferred_stmts {
             typed_stmts.push(self.stmt(stmt)?);
         }
         Ok(typed_stmts.into_iter().flatten().collect())
@@ -743,6 +751,22 @@ impl TypeChecker {
                         ),
                     })
                 }
+            }
+            Expr::Record { fields } => {
+                let mut field_types = Vec::new();
+                let mut fields_t = Vec::new();
+                for (name, expr) in fields {
+                    let expr_t = self.expr(expr)?;
+                    field_types.push((name, expr_t.inner.get_type()));
+                    fields_t.push((name, expr_t));
+                }
+                Ok(Loc {
+                    location,
+                    inner: ExprT::Record {
+                        fields: fields_t,
+                        type_: Arc::new(Type::Record(field_types)),
+                    },
+                })
             }
             _ => Err(TypeError::NotImplemented { location: location }),
         }

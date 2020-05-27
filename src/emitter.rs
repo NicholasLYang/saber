@@ -91,6 +91,8 @@ pub fn emit_code<T: Write>(mut dest: T, op_code: OpCode) -> Result<()> {
         OpCode::Unreachable => dest.write_u8(0x00),
         OpCode::Drop => dest.write_u8(0x1a),
         OpCode::End => dest.write_u8(0x0b),
+        OpCode::GrowMemory => dest.write_u8(0x40),
+        OpCode::CurrentMemory => dest.write_u8(0x3f),
     }?;
     Ok(())
 }
