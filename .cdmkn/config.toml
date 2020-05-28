@@ -1,8 +1,0 @@
-id = "d379b526-7bec-4876-b082-1371177a49e1"
-
-[token_credentials]
-token = "QycL6gvDEnDZDZ9L9yXdJA"
-client = "QXTTZqtp0vLQuRuAuFxqyA"
-expiry = "1591843672"
-token_type = "Bearer"
-uid = "nick@nicholasyang.com"
