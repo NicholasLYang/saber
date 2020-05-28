@@ -1,4 +1,5 @@
 use ast::{ExprT, Loc, Name, Op, StmtT, Type, UnaryOp, Value};
+use lexer::LocationRange;
 use std::convert::TryInto;
 use std::sync::Arc;
 use symbol_table::{EntryType, SymbolTable};
@@ -35,6 +36,8 @@ pub enum GenerationError {
     TopLevelReturn,
     #[fail(display = "Cannot convert type {} to type {}", t1, t2)]
     CannotConvert { t1: Type, t2: Type },
+    #[fail(display = "{}: Record cannot have more than 64 fields", location)]
+    RecordTooLarge { location: LocationRange },
     #[fail(display = "Cannot export value")]
     ExportValue,
 }
@@ -99,7 +102,7 @@ impl CodeGenerator {
                     params,
                     return_type,
                     local_variables,
-                    &(*body).inner,
+                    body,
                 )?;
                 Ok(())
             }
@@ -132,6 +135,7 @@ impl CodeGenerator {
         }
     }
 
+    // Generates a Stmt::Function
     pub fn generate_function_binding(
         &mut self,
         name: Name,
@@ -139,7 +143,7 @@ impl CodeGenerator {
         params: &[(Name, Arc<Type>)],
         return_type: &Arc<Type>,
         local_variables: &Vec<Arc<Type>>,
-        body: &ExprT,
+        body: &Loc<ExprT>,
     ) -> Result<usize> {
         let entry = self.symbol_table.lookup_name_in_scope(name, scope).unwrap();
         let index = if let EntryType::Function {
@@ -166,7 +170,7 @@ impl CodeGenerator {
         return_type: &Arc<Type>,
         params: &[(Name, Arc<Type>)],
         local_variables: &Vec<Arc<Type>>,
-        body: &ExprT,
+        body: &Loc<ExprT>,
     ) -> Result<(FunctionType, FunctionBody)> {
         let return_type = self.generate_wasm_type(&return_type)?;
         self.return_type = return_type.clone();
@@ -197,7 +201,7 @@ impl CodeGenerator {
 
     fn generate_function_body(
         &mut self,
-        body: &ExprT,
+        body: &Loc<ExprT>,
         local_variables: &[Arc<Type>],
         param_count: usize,
     ) -> Result<FunctionBody> {
@@ -286,12 +290,12 @@ impl CodeGenerator {
                     params,
                     return_type,
                     local_variables,
-                    &(*body).inner,
+                    body,
                 )?;
                 Ok(Vec::new())
             }
             StmtT::Expr(expr) => {
-                let mut opcodes = self.generate_expr(&expr.inner)?;
+                let mut opcodes = self.generate_expr(expr)?;
                 if expr.inner.get_type() != Arc::new(Type::Unit) {
                     opcodes.push(OpCode::Drop);
                 }
@@ -313,16 +317,16 @@ impl CodeGenerator {
             }
             StmtT::Return(expr) => {
                 if is_last {
-                    self.generate_expr(&expr.inner)
+                    self.generate_expr(expr)
                 } else {
-                    let mut opcodes = self.generate_expr(&expr.inner)?;
+                    let mut opcodes = self.generate_expr(expr)?;
                     opcodes.push(OpCode::Return);
                     Ok(opcodes)
                 }
             }
             StmtT::Asgn(name, expr) => {
                 let index = self.get_var_index(*name)?;
-                let mut opcodes = self.generate_expr(&expr.inner)?;
+                let mut opcodes = self.generate_expr(&expr)?;
                 opcodes.push(OpCode::SetLocal(index.try_into().unwrap()));
                 Ok(opcodes)
             }
@@ -365,8 +369,8 @@ impl CodeGenerator {
         }
     }
 
-    fn generate_expr(&mut self, expr: &ExprT) -> Result<Vec<OpCode>> {
-        match expr {
+    fn generate_expr(&mut self, expr: &Loc<ExprT>) -> Result<Vec<OpCode>> {
+        match &expr.inner {
             ExprT::Primary { value, type_: _ } => Ok(vec![self.generate_primary(value)?]),
             ExprT::Var { name, type_: _ } => {
                 let index = self.get_var_index(*name)?;
@@ -391,7 +395,7 @@ impl CodeGenerator {
                     } = &entry.entry_type
                     {
                         let index = *index;
-                        opcodes.append(&mut self.generate_expr(&args.inner)?);
+                        opcodes.append(&mut self.generate_expr(args)?);
                         opcodes.push(OpCode::Call((index).try_into().unwrap()));
                         return Ok(opcodes);
                     };
@@ -403,8 +407,8 @@ impl CodeGenerator {
                     return_type: return_wasm_type,
                 };
                 let type_sig_index = self.program_data.insert_type(func_type);
-                let mut opcodes = self.generate_expr(&args.inner)?;
-                opcodes.append(&mut self.generate_expr(&callee.inner)?);
+                let mut opcodes = self.generate_expr(args)?;
+                opcodes.append(&mut self.generate_expr(callee)?);
                 opcodes.push(OpCode::CallIndirect(type_sig_index.try_into().unwrap()));
                 Ok(opcodes)
             }
@@ -424,7 +428,7 @@ impl CodeGenerator {
                     params,
                     return_type,
                     local_variables,
-                    &(*body).inner,
+                    body,
                 )?;
                 self.program_data.elements_section.elems.push(index);
                 let table_index = self.program_data.elements_section.elems.len() - 1;
@@ -449,21 +453,21 @@ impl CodeGenerator {
                     opcodes.append(&mut self.generate_stmt(&stmt.inner, false)?);
                 }
                 if let Some(expr) = end_expr {
-                    opcodes.append(&mut self.generate_expr(&expr.inner)?);
+                    opcodes.append(&mut self.generate_expr(expr)?);
                 }
                 Ok(opcodes)
             }
             ExprT::If(cond, then_block, else_block, type_) => {
                 // Start with the cond opcodes
-                let mut opcodes = self.generate_expr(&cond.inner)?;
+                let mut opcodes = self.generate_expr(cond)?;
                 opcodes.push(OpCode::If);
                 opcodes.push(OpCode::Type(
                     self.generate_wasm_type(type_)?.unwrap_or(WasmType::Empty),
                 ));
-                opcodes.append(&mut self.generate_expr(&then_block.inner)?);
+                opcodes.append(&mut self.generate_expr(then_block)?);
                 if let Some(else_block) = else_block {
                     opcodes.push(OpCode::Else);
-                    opcodes.append(&mut self.generate_expr(&else_block.inner)?);
+                    opcodes.append(&mut self.generate_expr(else_block)?);
                 }
                 opcodes.push(OpCode::End);
                 Ok(opcodes)
@@ -474,9 +478,9 @@ impl CodeGenerator {
                 rhs,
                 type_,
             } => {
-                let mut lhs_ops = self.generate_expr(&lhs.inner)?;
+                let mut lhs_ops = self.generate_expr(lhs)?;
                 let lhs_type = lhs.inner.get_type();
-                let mut rhs_ops = self.generate_expr(&rhs.inner)?;
+                let mut rhs_ops = self.generate_expr(rhs)?;
                 let rhs_type = rhs.inner.get_type();
 
                 let promoted_type =
@@ -488,38 +492,89 @@ impl CodeGenerator {
             ExprT::UnaryOp { op, rhs, type_: _ } => match op {
                 UnaryOp::Minus => {
                     let mut opcodes = vec![OpCode::I32Const(0)];
-                    opcodes.append(&mut self.generate_expr(&rhs.inner)?);
+                    opcodes.append(&mut self.generate_expr(rhs)?);
                     opcodes.push(OpCode::I32Sub);
                     Ok(opcodes)
                 }
                 UnaryOp::Not => {
-                    let mut opcodes = self.generate_expr(&rhs.inner)?;
+                    let mut opcodes = self.generate_expr(rhs)?;
                     opcodes.push(OpCode::I32Const(-1));
                     opcodes.push(OpCode::I32Xor);
                     Ok(opcodes)
                 }
             },
-            ExprT::Record { fields, type_ } => {
+            ExprT::Record {
+                name: _,
+                fields,
+                type_: _,
+            } => {
                 // Since all types are either pointers or 32 bit ints/floats,
                 // we can do one field == 4 bytes
-                let mut opcodes = Vec::new();
-                opcodes.push(OpCode::CurrentMemory);
-                let print_id = self
-                    .name_table
-                    .get_id(&"print".to_string())
-                    .expect("Print must be defined");
-                let print_entry = self
-                    .symbol_table
-                    .lookup_name_in_scope(*print_id, 0)
-                    .expect("Print is not in symbol table");
-                match print_entry.entry_type {
-                    EntryType::Function {
-                        index,
-                        params_type: _,
-                        return_type: _,
-                    } => opcodes.push(OpCode::Call(index.try_into().unwrap())),
-                    _ => return Err(GenerationError::NotReachable),
+                if fields.len() >= 64 {
+                    return Err(GenerationError::RecordTooLarge {
+                        location: expr.location,
+                    });
                 }
+                // Size of record in bytes
+                let record_size: i32 = (4 * fields.len()).try_into().unwrap();
+                let mut opcodes = Vec::new();
+                opcodes.push(OpCode::I32Const(record_size));
+                // Global 0 is current heap pointer
+                opcodes.push(OpCode::GetGlobal(0));
+                // Add record size to current memory size
+                opcodes.push(OpCode::I32Add);
+
+                // Get current memory allocated in pages
+                opcodes.push(OpCode::CurrentMemory);
+                // 64 * 1024 = 65536 bytes per page
+                opcodes.push(OpCode::I32Const(65536));
+                opcodes.push(OpCode::I32Mul);
+
+                // Currently on stack: [heap_ptr + sizeof(record), pages_allocated * PAGE_SIZE]
+                // If heap_ptr + sizeof(record) > pages_allocated * PAGE_SIZE...
+                opcodes.push(OpCode::I32GreaterUnsigned);
+                opcodes.push(OpCode::If);
+                opcodes.push(OpCode::Type(WasmType::Empty));
+                // ...we call GrowMemory
+                // Right now we only grow in increments of one page. In the future we can grow
+                // beyond that to store large values
+                opcodes.push(OpCode::GrowMemory);
+                // Error handling. If the result is equal to -1, we trap
+                opcodes.push(OpCode::I32Const(-1));
+                opcodes.push(OpCode::I32Eq);
+                opcodes.push(OpCode::If);
+                opcodes.push(OpCode::Type(WasmType::Empty));
+                opcodes.push(OpCode::Unreachable);
+                opcodes.push(OpCode::End);
+                opcodes.push(OpCode::End);
+
+                // Cool, we've finished the allocation step. Now we need to write the
+                // struct to memory. This consists of looping through entries, generating
+                // the opcodes and storing them in the heap
+
+                for (_, expr) in fields {
+                    // Address for store
+                    opcodes.push(OpCode::GetGlobal(0));
+                    opcodes.append(&mut self.generate_expr(expr)?);
+                    let wasm_type = self
+                        .generate_wasm_type(&expr.inner.get_type())?
+                        .unwrap_or(WasmType::Empty);
+                    let store_code = match wasm_type {
+                        WasmType::i32 => OpCode::I32Store,
+                        WasmType::f32 => OpCode::F32Store,
+                        _ => return Err(GenerationError::NotImplemented),
+                    };
+                    opcodes.push(store_code);
+                    // heap_ptr = heap_ptr + 4;
+                    opcodes.push(OpCode::GetGlobal(0));
+                    opcodes.push(OpCode::I32Const(4));
+                    opcodes.push(OpCode::I32Add);
+                    opcodes.push(OpCode::SetGlobal(0));
+                }
+                // return heap_ptr - sizeof(record)
+                opcodes.push(OpCode::GetGlobal(0));
+                opcodes.push(OpCode::I32Const(record_size));
+                opcodes.push(OpCode::I32Sub);
                 Ok(opcodes)
             }
             e => {

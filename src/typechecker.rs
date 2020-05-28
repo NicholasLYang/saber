@@ -752,7 +752,7 @@ impl TypeChecker {
                     })
                 }
             }
-            Expr::Record { fields } => {
+            Expr::Record { name, fields } => {
                 let mut field_types = Vec::new();
                 let mut fields_t = Vec::new();
                 for (name, expr) in fields {
@@ -763,6 +763,7 @@ impl TypeChecker {
                 Ok(Loc {
                     location,
                     inner: ExprT::Record {
+                        name,
                         fields: fields_t,
                         type_: Arc::new(Type::Record(field_types)),
                     },

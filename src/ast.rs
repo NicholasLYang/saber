@@ -78,6 +78,7 @@ pub enum Expr {
     },
     Field(Box<Loc<Expr>>, Name),
     Record {
+        name: Name,
         fields: Vec<(Name, Loc<Expr>)>,
     },
     Tuple(Vec<Loc<Expr>>),
@@ -128,6 +129,7 @@ pub enum ExprT {
         scope_index: usize,
     },
     Record {
+        name: Name,
         fields: Vec<(Name, Loc<ExprT>)>,
         type_: Arc<Type>,
     },
@@ -310,7 +312,11 @@ impl ExprT {
                 scope_index: _,
                 type_,
             } => type_.clone(),
-            ExprT::Record { fields: _, type_ } => type_.clone(),
+            ExprT::Record {
+                name: _,
+                fields: _,
+                type_,
+            } => type_.clone(),
             ExprT::If(_, _, _, type_) => type_.clone(),
         }
     }

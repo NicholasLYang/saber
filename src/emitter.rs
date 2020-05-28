@@ -4,8 +4,8 @@ use std::convert::TryInto;
 use std::fs::File;
 use std::io::prelude::*;
 use wasm::{
-    ElemSegment, ExportEntry, FunctionBody, FunctionType, ImportEntry, ImportKind, OpCode,
-    ProgramData, WasmType,
+    ElemSegment, ExportEntry, FunctionBody, FunctionType, GlobalType, ImportEntry, ImportKind,
+    MemoryType, OpCode, ProgramData, WasmType,
 };
 
 pub struct Emitter {
@@ -60,21 +60,34 @@ pub fn emit_code<T: Write>(mut dest: T, op_code: OpCode) -> Result<()> {
         OpCode::I32Xor => dest.write_u8(0x73),
         OpCode::I32Eq => dest.write_u8(0x46),
         OpCode::I32GreaterSigned => dest.write_u8(0x4a),
+        OpCode::I32GreaterUnsigned => dest.write_u8(0x4b),
         OpCode::F32Add => dest.write_u8(0x92),
         OpCode::F32Sub => dest.write_u8(0x93),
         OpCode::F32Mul => dest.write_u8(0x94),
         OpCode::F32Div => dest.write_u8(0x95),
         OpCode::F32ConvertI32 => dest.write_u8(0xb2),
-        OpCode::SetLocal(i) => {
-            dest.write_u8(0x21)?;
-            leb128::write::unsigned(&mut dest, i.into())?;
-            Ok(())
-        }
         OpCode::GetLocal(i) => {
             dest.write_u8(0x20)?;
             leb128::write::unsigned(&mut dest, i.into())?;
             Ok(())
         }
+        OpCode::SetLocal(i) => {
+            dest.write_u8(0x21)?;
+            leb128::write::unsigned(&mut dest, i.into())?;
+            Ok(())
+        }
+        OpCode::GetGlobal(i) => {
+            dest.write_u8(0x23)?;
+            leb128::write::unsigned(&mut dest, i.into())?;
+            Ok(())
+        }
+        OpCode::SetGlobal(i) => {
+            dest.write_u8(0x24)?;
+            leb128::write::unsigned(&mut dest, i.into())?;
+            Ok(())
+        }
+        OpCode::I32Store => dest.write_u8(0x36),
+        OpCode::F32Store => dest.write_u8(0x38),
         OpCode::If => dest.write_u8(0x04),
         OpCode::Else => dest.write_u8(0x05),
         OpCode::Return => dest.write_u8(0x0f),
@@ -92,7 +105,11 @@ pub fn emit_code<T: Write>(mut dest: T, op_code: OpCode) -> Result<()> {
         OpCode::Drop => dest.write_u8(0x1a),
         OpCode::End => dest.write_u8(0x0b),
         OpCode::GrowMemory => dest.write_u8(0x40),
-        OpCode::CurrentMemory => dest.write_u8(0x3f),
+        OpCode::CurrentMemory => {
+            dest.write_u8(0x3f)?;
+            leb128::write::unsigned(&mut dest, 0)?;
+            Ok(())
+        }
     }?;
     Ok(())
 }
@@ -111,6 +128,8 @@ impl Emitter {
         self.emit_imports_section(program.import_section)?;
         self.emit_functions_section(program.function_section)?;
         self.emit_table_section(program.elements_section.elems.len())?;
+        self.emit_memory_section(program.memory_section)?;
+        self.emit_global_section(program.global_section)?;
         self.emit_exports_section(program.exports_section)?;
         self.emit_elements_section(program.elements_section)?;
         self.emit_code_section(program.code_section.into_iter().filter_map(|t| t).collect())?;
@@ -208,6 +227,31 @@ impl Emitter {
             OpCode::Bool(false),
             OpCode::Count(usize_to_u32(initial_length)?),
         ];
+        self.write_section(opcodes)
+    }
+
+    fn emit_memory_section(&mut self, memory_type: MemoryType) -> Result<()> {
+        self.emit_code(OpCode::SectionId(5))?;
+        let is_max_present = memory_type.limits.1.is_some();
+        let mut opcodes = vec![
+            OpCode::Count(1),
+            OpCode::Bool(is_max_present),
+            OpCode::Count(memory_type.limits.0),
+        ];
+        if let Some(max) = memory_type.limits.1 {
+            opcodes.push(OpCode::Count(max));
+        }
+        self.write_section(opcodes)
+    }
+
+    fn emit_global_section(&mut self, globals: Vec<(GlobalType, Vec<OpCode>)>) -> Result<()> {
+        self.emit_code(OpCode::SectionId(6))?;
+        let mut opcodes = vec![OpCode::Count(usize_to_u32(globals.len())?)];
+        for (global_type, mut global_opcodes) in globals {
+            opcodes.push(OpCode::Type(global_type.content_type));
+            opcodes.push(OpCode::Bool(global_type.mutability));
+            opcodes.append(&mut global_opcodes);
+        }
         self.write_section(opcodes)
     }
 

@@ -3,7 +3,6 @@ struct Person {
 }
 
 let foo = \() => {
-  print(10);
   Person {
     age: 10
   };

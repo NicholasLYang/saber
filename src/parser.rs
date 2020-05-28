@@ -721,7 +721,7 @@ impl<'input> Parser<'input> {
             self.comma::<(Name, Loc<Expr>)>(&Self::record_field, Token::RBrace)?;
         Ok(Loc {
             location: LocationRange(name_loc.0, end_loc.1),
-            inner: Expr::Record { fields },
+            inner: Expr::Record { name, fields },
         })
     }
 
