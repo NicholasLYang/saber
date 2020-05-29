@@ -86,8 +86,30 @@ pub fn emit_code<T: Write>(mut dest: T, op_code: OpCode) -> Result<()> {
             leb128::write::unsigned(&mut dest, i.into())?;
             Ok(())
         }
-        OpCode::I32Store => dest.write_u8(0x36),
-        OpCode::F32Store => dest.write_u8(0x38),
+        OpCode::I32Load(alignment, offset) => {
+            dest.write_u8(0x28)?;
+            leb128::write::unsigned(&mut dest, alignment.into())?;
+            leb128::write::unsigned(&mut dest, offset.into())?;
+            Ok(())
+        }
+        OpCode::F32Load(alignment, offset) => {
+            dest.write_u8(0x2a)?;
+            leb128::write::unsigned(&mut dest, alignment.into())?;
+            leb128::write::unsigned(&mut dest, offset.into())?;
+            Ok(())
+        }
+        OpCode::I32Store(alignment, offset) => {
+            dest.write_u8(0x36)?;
+            leb128::write::unsigned(&mut dest, alignment.into())?;
+            leb128::write::unsigned(&mut dest, offset.into())?;
+            Ok(())
+        }
+        OpCode::F32Store(alignment, offset) => {
+            dest.write_u8(0x38)?;
+            leb128::write::unsigned(&mut dest, alignment.into())?;
+            leb128::write::unsigned(&mut dest, offset.into())?;
+            Ok(())
+        }
         OpCode::If => dest.write_u8(0x04),
         OpCode::Else => dest.write_u8(0x05),
         OpCode::Return => dest.write_u8(0x0f),
@@ -104,7 +126,11 @@ pub fn emit_code<T: Write>(mut dest: T, op_code: OpCode) -> Result<()> {
         OpCode::Unreachable => dest.write_u8(0x00),
         OpCode::Drop => dest.write_u8(0x1a),
         OpCode::End => dest.write_u8(0x0b),
-        OpCode::GrowMemory => dest.write_u8(0x40),
+        OpCode::GrowMemory => {
+            dest.write_u8(0x40)?;
+            leb128::write::unsigned(&mut dest, 0)?;
+            Ok(())
+        }
         OpCode::CurrentMemory => {
             dest.write_u8(0x3f)?;
             leb128::write::unsigned(&mut dest, 0)?;
@@ -197,7 +223,6 @@ impl Emitter {
                     opcodes.push(OpCode::Kind(0));
                     opcodes.push(OpCode::Index(usize_to_u32(type_)?));
                 }
-                _ => unimplemented!(),
             };
         }
         self.write_section(opcodes)
@@ -251,6 +276,7 @@ impl Emitter {
             opcodes.push(OpCode::Type(global_type.content_type));
             opcodes.push(OpCode::Bool(global_type.mutability));
             opcodes.append(&mut global_opcodes);
+            opcodes.push(OpCode::End);
         }
         self.write_section(opcodes)
     }

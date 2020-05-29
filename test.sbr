@@ -3,9 +3,10 @@ struct Person {
 }
 
 let foo = \() => {
-  Person {
+  let p = Person {
     age: 10
   };
+  print(p.age);
 }
 
 export foo;

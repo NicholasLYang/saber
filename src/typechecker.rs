@@ -14,7 +14,7 @@ pub enum TypeError {
         location: LocationRange,
         name: String,
     },
-    #[fail(display = "{}: Not implemented yet", location)]
+    #[fail(display = "{}: Typechecker - Not implemented yet", location)]
     NotImplemented { location: LocationRange },
     #[fail(
         display = "{}: Could not find operation {} with arguments of type {} and {}",
@@ -41,8 +41,6 @@ pub enum TypeError {
     FieldDoesNotExist { name: String },
     #[fail(display = "Type {} is not a record", type_)]
     NotARecord { type_: Arc<Type> },
-    #[fail(display = "Invalid unary operator: {}", op)]
-    InvalidUnaryOp { op: Op },
     #[fail(display = "{} Cannot apply unary operator to {:?}", location, expr)]
     InvalidUnaryExpr {
         location: LocationRange,
@@ -407,9 +405,12 @@ impl TypeChecker {
                             Loc {
                                 location,
                                 inner: ExprT::Field(
-                                    Box::new(ExprT::Var {
-                                        name: owner_name,
-                                        type_: rhs_type.clone(),
+                                    Box::new(Loc {
+                                        location,
+                                        inner: ExprT::Var {
+                                            name: owner_name,
+                                            type_: rhs_type.clone(),
+                                        },
                                     }),
                                     *name,
                                     self.get_field_type(rhs_type, *name)?,
@@ -432,9 +433,12 @@ impl TypeChecker {
                             Loc {
                                 location,
                                 inner: ExprT::Field(
-                                    Box::new(ExprT::Var {
-                                        name: owner_name,
-                                        type_: rhs_type.clone(),
+                                    Box::new(Loc {
+                                        location,
+                                        inner: ExprT::Var {
+                                            name: owner_name,
+                                            type_: rhs_type.clone(),
+                                        },
                                     }),
                                     i,
                                     self.get_fresh_type_var(),
@@ -606,6 +610,7 @@ impl TypeChecker {
                     inner: ExprT::Tuple(typed_elems, Arc::new(Type::Tuple(types))),
                 })
             }
+
             Expr::Function {
                 params,
                 body,
@@ -753,6 +758,15 @@ impl TypeChecker {
                 }
             }
             Expr::Record { name, fields } => {
+                let type_ = if let Some(type_) = self.type_names.get(&name) {
+                    type_
+                } else {
+                    let name_str = self.name_table.get_str(&name);
+                    return Err(TypeError::TypeDoesNotExist {
+                        location,
+                        type_name: name_str.to_string(),
+                    });
+                };
                 let mut field_types = Vec::new();
                 let mut fields_t = Vec::new();
                 for (name, expr) in fields {
@@ -767,6 +781,13 @@ impl TypeChecker {
                         fields: fields_t,
                         type_: Arc::new(Type::Record(field_types)),
                     },
+                })
+            }
+            Expr::Field(lhs, name) => {
+                let lhs_t = self.expr(*lhs)?;
+                Ok(Loc {
+                    location,
+                    inner: ExprT::Field(Box::new(lhs_t), name, self.get_fresh_type_var()),
                 })
             }
             _ => Err(TypeError::NotImplemented { location: location }),
@@ -827,6 +848,18 @@ impl TypeChecker {
             return Some(type1.clone());
         }
         match (&**type1, &**type2) {
+            (Type::Record(fields), Type::Record(other_fields)) => {
+                if fields.len() != other_fields.len() {
+                    return None;
+                }
+                // We're not gonna try to unify fields because I'm preeeeetty sure that won't be sound
+                for ((n1, t1), (n2, t2)) in fields.iter().zip(other_fields.iter()) {
+                    if *n1 != *n2 || t1 != t2 {
+                        return None;
+                    }
+                }
+                return Some(type1.clone());
+            }
             (Type::Tuple(ts), Type::Unit) | (Type::Unit, Type::Tuple(ts)) => {
                 if ts.is_empty() {
                     Some(type2.clone())

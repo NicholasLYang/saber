@@ -133,7 +133,7 @@ pub enum ExprT {
         fields: Vec<(Name, Loc<ExprT>)>,
         type_: Arc<Type>,
     },
-    Field(Box<ExprT>, Name, Arc<Type>),
+    Field(Box<Loc<ExprT>>, Name, Arc<Type>),
     Call {
         callee: Box<Loc<ExprT>>,
         args: Box<Loc<ExprT>>,

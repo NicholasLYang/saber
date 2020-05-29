@@ -28,8 +28,8 @@ pub enum GenerationError {
     EmptyType,
     #[fail(display = "Code Generator: Could not infer type var {:?}", type_)]
     CouldNotInfer { type_: Arc<Type> },
-    #[fail(display = "Code Generator: Not implemented yet!")]
-    NotImplemented,
+    #[fail(display = "Code Generator: Not implemented yet! {}", reason)]
+    NotImplemented { reason: &'static str },
     #[fail(display = "Code Generator: Not reachable")]
     NotReachable,
     #[fail(display = "Cannot return at top level")]
@@ -131,7 +131,9 @@ impl CodeGenerator {
                     Err(GenerationError::ExportValue)
                 }
             }
-            _ => Err(GenerationError::NotImplemented),
+            _ => Err(GenerationError::NotImplemented {
+                reason: "Top level statements aren't done yet",
+            }),
         }
     }
 
@@ -438,7 +440,9 @@ impl CodeGenerator {
                 if elems.len() == 0 {
                     Ok(Vec::new())
                 } else {
-                    Err(GenerationError::NotImplemented)
+                    Err(GenerationError::NotImplemented {
+                        reason: "Tuple code gen isn't done",
+                    })
                 }
             }
             ExprT::Block {
@@ -503,85 +507,117 @@ impl CodeGenerator {
                     Ok(opcodes)
                 }
             },
+            ExprT::Field(lhs, name, _) => {
+                let mut opcodes = self.generate_expr(&**lhs)?;
+                let lhs_type = lhs.inner.get_type();
+                if let Type::Record(fields) = &*lhs_type {
+                    let field_position = fields
+                        .iter()
+                        .position(|(field_name, _)| *field_name == *name)
+                        .ok_or(GenerationError::NotImplemented {
+                            reason: "Field doesn't exist: Should be caught by typechecker",
+                        })?;
+                    let field_wasm_type = self
+                        .generate_wasm_type(&fields[field_position].1)?
+                        .unwrap_or(WasmType::Empty);
+                    let offset: u32 = (4 * field_position).try_into().unwrap();
+                    let load_code = match field_wasm_type {
+                        WasmType::i32 => OpCode::I32Load(2, offset),
+                        WasmType::f32 => OpCode::F32Load(2, offset),
+                        WasmType::Empty => OpCode::Drop,
+                        _ => return Err(GenerationError::NotReachable),
+                    };
+                    opcodes.push(load_code);
+                    Ok(opcodes)
+                } else {
+                    Err(GenerationError::NotReachable)
+                }
+            }
             ExprT::Record {
                 name: _,
                 fields,
                 type_: _,
-            } => {
-                // Since all types are either pointers or 32 bit ints/floats,
-                // we can do one field == 4 bytes
-                if fields.len() >= 64 {
-                    return Err(GenerationError::RecordTooLarge {
-                        location: expr.location,
-                    });
-                }
-                // Size of record in bytes
-                let record_size: i32 = (4 * fields.len()).try_into().unwrap();
-                let mut opcodes = Vec::new();
-                opcodes.push(OpCode::I32Const(record_size));
-                // Global 0 is current heap pointer
-                opcodes.push(OpCode::GetGlobal(0));
-                // Add record size to current memory size
-                opcodes.push(OpCode::I32Add);
-
-                // Get current memory allocated in pages
-                opcodes.push(OpCode::CurrentMemory);
-                // 64 * 1024 = 65536 bytes per page
-                opcodes.push(OpCode::I32Const(65536));
-                opcodes.push(OpCode::I32Mul);
-
-                // Currently on stack: [heap_ptr + sizeof(record), pages_allocated * PAGE_SIZE]
-                // If heap_ptr + sizeof(record) > pages_allocated * PAGE_SIZE...
-                opcodes.push(OpCode::I32GreaterUnsigned);
-                opcodes.push(OpCode::If);
-                opcodes.push(OpCode::Type(WasmType::Empty));
-                // ...we call GrowMemory
-                // Right now we only grow in increments of one page. In the future we can grow
-                // beyond that to store large values
-                opcodes.push(OpCode::GrowMemory);
-                // Error handling. If the result is equal to -1, we trap
-                opcodes.push(OpCode::I32Const(-1));
-                opcodes.push(OpCode::I32Eq);
-                opcodes.push(OpCode::If);
-                opcodes.push(OpCode::Type(WasmType::Empty));
-                opcodes.push(OpCode::Unreachable);
-                opcodes.push(OpCode::End);
-                opcodes.push(OpCode::End);
-
-                // Cool, we've finished the allocation step. Now we need to write the
-                // struct to memory. This consists of looping through entries, generating
-                // the opcodes and storing them in the heap
-
-                for (_, expr) in fields {
-                    // Address for store
-                    opcodes.push(OpCode::GetGlobal(0));
-                    opcodes.append(&mut self.generate_expr(expr)?);
-                    let wasm_type = self
-                        .generate_wasm_type(&expr.inner.get_type())?
-                        .unwrap_or(WasmType::Empty);
-                    let store_code = match wasm_type {
-                        WasmType::i32 => OpCode::I32Store,
-                        WasmType::f32 => OpCode::F32Store,
-                        _ => return Err(GenerationError::NotImplemented),
-                    };
-                    opcodes.push(store_code);
-                    // heap_ptr = heap_ptr + 4;
-                    opcodes.push(OpCode::GetGlobal(0));
-                    opcodes.push(OpCode::I32Const(4));
-                    opcodes.push(OpCode::I32Add);
-                    opcodes.push(OpCode::SetGlobal(0));
-                }
-                // return heap_ptr - sizeof(record)
-                opcodes.push(OpCode::GetGlobal(0));
-                opcodes.push(OpCode::I32Const(record_size));
-                opcodes.push(OpCode::I32Sub);
-                Ok(opcodes)
-            }
-            e => {
-                println!("{:?}", e);
-                Err(GenerationError::NotImplemented)
-            }
+            } => self.generate_record_literal(fields, expr.location),
         }
+    }
+
+    fn generate_record_literal(
+        &mut self,
+        fields: &Vec<(Name, Loc<ExprT>)>,
+        location: LocationRange,
+    ) -> Result<Vec<OpCode>> {
+        // Since all types are either pointers or 32 bit ints/floats,
+        // we can do one field == 4 bytes
+        if fields.len() >= 64 {
+            return Err(GenerationError::RecordTooLarge { location });
+        }
+        // Size of record in bytes
+        let record_size: i32 = (4 * fields.len()).try_into().unwrap();
+        let mut opcodes = Vec::new();
+        opcodes.push(OpCode::I32Const(record_size));
+        // Global 0 is current heap pointer
+        opcodes.push(OpCode::GetGlobal(0));
+        // Add record size to current memory size
+        opcodes.push(OpCode::I32Add);
+
+        // Get current memory allocated in pages
+        opcodes.push(OpCode::CurrentMemory);
+        // 64 * 1024 = 65536 bytes per page
+        opcodes.push(OpCode::I32Const(65536));
+        opcodes.push(OpCode::I32Mul);
+
+        // Currently on stack: [heap_ptr + sizeof(record), pages_allocated * PAGE_SIZE]
+        // If heap_ptr + sizeof(record) > pages_allocated * PAGE_SIZE...
+        opcodes.push(OpCode::I32GreaterUnsigned);
+        opcodes.push(OpCode::If);
+        opcodes.push(OpCode::Type(WasmType::Empty));
+        // ...we call GrowMemory
+        // Right now we only grow in increments of one page. In the future we can grow
+        // beyond that to store large values
+        opcodes.push(OpCode::I32Const(1));
+        opcodes.push(OpCode::GrowMemory);
+        // Error handling. If the result is equal to -1, we trap
+        opcodes.push(OpCode::I32Const(-1));
+        opcodes.push(OpCode::I32Eq);
+        opcodes.push(OpCode::If);
+        opcodes.push(OpCode::Type(WasmType::Empty));
+        opcodes.push(OpCode::Unreachable);
+        opcodes.push(OpCode::End);
+        opcodes.push(OpCode::End);
+
+        // Cool, we've finished the allocation step. Now we need to write the
+        // struct to memory. This consists of looping through entries, generating
+        // the opcodes and storing them in the heap
+
+        for (_, expr) in fields {
+            // Address for store
+            opcodes.push(OpCode::GetGlobal(0));
+            opcodes.append(&mut self.generate_expr(expr)?);
+            let wasm_type = self
+                .generate_wasm_type(&expr.inner.get_type())?
+                .unwrap_or(WasmType::Empty);
+            let store_code = match wasm_type {
+                // Alignment of 2, offset of 0
+                WasmType::i32 => OpCode::I32Store(2, 0),
+                WasmType::f32 => OpCode::F32Store(2, 0),
+                _ => {
+                    return Err(GenerationError::NotImplemented {
+                        reason: "Cannot generate code to store types other than i32 and f32",
+                    })
+                }
+            };
+            opcodes.push(store_code);
+            // heap_ptr = heap_ptr + 4;
+            opcodes.push(OpCode::GetGlobal(0));
+            opcodes.push(OpCode::I32Const(4));
+            opcodes.push(OpCode::I32Add);
+            opcodes.push(OpCode::SetGlobal(0));
+        }
+        // return heap_ptr - sizeof(record)
+        opcodes.push(OpCode::GetGlobal(0));
+        opcodes.push(OpCode::I32Const(record_size));
+        opcodes.push(OpCode::I32Sub);
+        Ok(opcodes)
     }
 
     fn generate_primary(&self, value: &Value) -> Result<OpCode> {
