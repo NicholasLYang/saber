@@ -398,6 +398,8 @@ impl TypeChecker {
             Pat::Id(_, _, _) | Pat::Empty(_) => Ok(Vec::new()),
             Pat::Record(names, _, _) => {
                 for name in names {
+                    let type_ = self.get_field_type(rhs_type, *name)?;
+                    self.symbol_table.insert_var(*name, type_.clone());
                     bindings.push(Loc {
                         location,
                         inner: StmtT::Asgn(
@@ -413,7 +415,7 @@ impl TypeChecker {
                                         },
                                     }),
                                     *name,
-                                    self.get_field_type(rhs_type, *name)?,
+                                    type_,
                                 ),
                             },
                         ),
@@ -759,7 +761,7 @@ impl TypeChecker {
             }
             Expr::Record { name, fields } => {
                 let type_ = if let Some(type_) = self.type_names.get(&name) {
-                    type_
+                    type_.clone()
                 } else {
                     let name_str = self.name_table.get_str(&name);
                     return Err(TypeError::TypeDoesNotExist {
@@ -767,6 +769,7 @@ impl TypeChecker {
                         type_name: name_str.to_string(),
                     });
                 };
+
                 let mut field_types = Vec::new();
                 let mut fields_t = Vec::new();
                 for (name, expr) in fields {
@@ -774,12 +777,20 @@ impl TypeChecker {
                     field_types.push((name, expr_t.inner.get_type()));
                     fields_t.push((name, expr_t));
                 }
+                let expr_type = Arc::new(Type::Record(field_types));
+                let type_ =
+                    self.unify(&expr_type, &type_)
+                        .ok_or(TypeError::UnificationFailure {
+                            type1: expr_type,
+                            type2: type_.clone(),
+                            location,
+                        })?;
                 Ok(Loc {
                     location,
                     inner: ExprT::Record {
                         name,
                         fields: fields_t,
-                        type_: Arc::new(Type::Record(field_types)),
+                        type_,
                     },
                 })
             }
@@ -790,7 +801,6 @@ impl TypeChecker {
                     inner: ExprT::Field(Box::new(lhs_t), name, self.get_fresh_type_var()),
                 })
             }
-            _ => Err(TypeError::NotImplemented { location: location }),
         }
     }
 
@@ -852,13 +862,18 @@ impl TypeChecker {
                 if fields.len() != other_fields.len() {
                     return None;
                 }
-                // We're not gonna try to unify fields because I'm preeeeetty sure that won't be sound
+                let mut unified_fields = Vec::new();
                 for ((n1, t1), (n2, t2)) in fields.iter().zip(other_fields.iter()) {
-                    if *n1 != *n2 || t1 != t2 {
+                    if *n1 != *n2 {
+                        return None;
+                    }
+                    if let Some(t) = self.unify(t1, t2) {
+                        unified_fields.push((*n1, t));
+                    } else {
                         return None;
                     }
                 }
-                return Some(type1.clone());
+                return Some(Arc::new(Type::Record(unified_fields)));
             }
             (Type::Tuple(ts), Type::Unit) | (Type::Unit, Type::Tuple(ts)) => {
                 if ts.is_empty() {

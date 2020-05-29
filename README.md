@@ -12,9 +12,10 @@ hopefully I'll be able to port it to other platforms.
   - ~~Probably add a ref count for types (really no need to copy them
     since they're relatively immutable)~~
 - Parsing
-  - Convert to expression based syntax
+  - ~~Convert to expression based syntax~~
+  - Trailing comma?
 - Typechecking
-  - Typecheck functions
+  - ~~Typecheck functions~~
   - ~~Typecheck records~~
   - Add named types
   - Constraint solve type variables
@@ -24,9 +25,11 @@ hopefully I'll be able to port it to other platforms.
   - ~~Get something working.~~
   - ~~Add local variables~~
   - ~~Add control flow~~ (Kinda)
-  - ~~Add function calls~~ (Kinda)
+  - ~~Add function calls~~
   - ~~Add nested functions~~ 
   - ~~Add first class functions~~
+  - ~~Add structs/records~~
+  - Garbage collection!
 - Tests/Debugging
   - ~~Write some tests~~
   - ~~Add locations in errors with row/col~~

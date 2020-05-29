@@ -237,7 +237,14 @@ impl fmt::Display for Type {
                 Type::String => "string".into(),
                 Type::Var(name) => format!("var({})", name),
                 Type::Array(t) => format!("[{}]", t),
-                Type::Record(_) => "{ Record }".into(),
+                Type::Record(fields) => {
+                    let elems = fields
+                        .iter()
+                        .map(|(n, t)| format!("{}: {}", n, t))
+                        .collect::<Vec<String>>()
+                        .join(", ");
+                    format!("({})", elems)
+                }
                 Type::Tuple(ts) => {
                     let elems = ts
                         .iter()

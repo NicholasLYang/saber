@@ -1,12 +1,15 @@
 struct Person {
-  age: int
+  age: int,
+  height: float
 }
 
 let foo = \() => {
   let p = Person {
-    age: 10
+    age: 10,
+    height: 189.5
   };
-  print(p.age);
+  let { age, height } = p;
+  print(age);
 }
 
 export foo;
