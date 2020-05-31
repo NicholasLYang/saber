@@ -541,20 +541,12 @@ impl CodeGenerator {
         }
     }
 
-    fn generate_record_literal(
-        &mut self,
-        fields: &Vec<(Name, Loc<ExprT>)>,
-        location: LocationRange,
-    ) -> Result<Vec<OpCode>> {
-        // Since all types are either pointers or 32 bit ints/floats,
-        // we can do one field == 4 bytes
-        if fields.len() >= 64 {
-            return Err(GenerationError::RecordTooLarge { location });
-        }
-        // Size of record in bytes
-        let record_size: i32 = (4 * fields.len()).try_into().unwrap();
+    // Generates very simple allocator scheme
+    // Checks if there's enough space and if not,
+    // it allocates more
+    fn generate_allocator(&self, memory_size: i32) -> Vec<OpCode> {
         let mut opcodes = Vec::new();
-        opcodes.push(OpCode::I32Const(record_size));
+        opcodes.push(OpCode::I32Const(memory_size));
         // Global 0 is current heap pointer
         opcodes.push(OpCode::GetGlobal(0));
         // Add record size to current memory size
@@ -584,10 +576,25 @@ impl CodeGenerator {
         opcodes.push(OpCode::Unreachable);
         opcodes.push(OpCode::End);
         opcodes.push(OpCode::End);
+        opcodes
+    }
 
-        // Cool, we've finished the allocation step. Now we need to write the
-        // struct to memory. This consists of looping through entries, generating
-        // the opcodes and storing them in the heap
+    fn generate_record_literal(
+        &mut self,
+        fields: &Vec<(Name, Loc<ExprT>)>,
+        location: LocationRange,
+    ) -> Result<Vec<OpCode>> {
+        // Since all types are either pointers or 32 bit ints/floats,
+        // we can do one field == 4 bytes
+        if fields.len() >= 64 {
+            return Err(GenerationError::RecordTooLarge { location });
+        }
+        // Size of record in bytes
+        let record_size: i32 = (4 * fields.len()).try_into().unwrap();
+        let mut opcodes = self.generate_allocator(record_size);
+        // We need to write the struct to memory. This consists of
+        // looping through entries, generating the opcodes and
+        // storing them in the heap
 
         for (_, expr) in fields {
             // Address for store
