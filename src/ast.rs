@@ -5,6 +5,7 @@ use std::fmt;
 use std::sync::Arc;
 
 pub type Name = usize;
+pub type TypeId = usize;
 
 // Wrapper to provide location to AST nodes
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -207,8 +208,7 @@ impl fmt::Display for Op {
     }
 }
 
-// Yeah this is hilariously basic rn.
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, Hash, PartialEq, Eq, Clone, Serialize, Deserialize)]
 pub enum Type {
     Unit,
     Float,
@@ -217,10 +217,10 @@ pub enum Type {
     Char,
     String,
     Var(Name),
-    Array(Arc<Type>),
-    Record(Vec<(Name, Arc<Type>)>),
-    Tuple(Vec<Arc<Type>>),
-    Arrow(Arc<Type>, Arc<Type>),
+    Array(TypeId),
+    Record(Vec<(Name, TypeId)>),
+    Tuple(Vec<TypeId>),
+    Arrow(TypeId, TypeId),
 }
 
 impl fmt::Display for Type {

@@ -1,6 +1,8 @@
 use ast::{
-    Expr, ExprT, Loc, Name, Op, Pat, Program, Stmt, StmtT, Type, TypeDef, TypeSig, UnaryOp, Value,
+    Expr, ExprT, Loc, Name, Op, Pat, Program, Stmt, StmtT, Type, TypeDef, TypeId, TypeSig, UnaryOp,
+    Value,
 };
+use bimap::BiMap;
 use im::hashmap::HashMap;
 use lexer::LocationRange;
 use std::sync::Arc;
@@ -54,31 +56,77 @@ pub struct Scope {
     pub parent: Option<usize>,
 }
 
+struct TypeTable {
+    type_index: usize,
+    table: BiMap<TypeId, Type>,
+}
+
+impl TypeTable {
+    fn new() -> TypeTable {
+        let mut table = TypeTable {
+            type_index: 0,
+            table: BiMap::new(),
+        };
+        table.insert(Type::Int);
+        table.insert(Type::Float);
+        table.insert(Type::Char);
+        table.insert(Type::String);
+        table.insert(Type::Bool);
+        table
+    }
+
+    pub fn insert(&mut self, type_: Type) -> TypeId {
+        let index = self.type_index;
+        self.table.insert(index, type_);
+        self.type_index += 1;
+        index
+    }
+
+    pub fn get_id(&mut self, type_: &Type) -> Option<TypeId> {
+        self.table.get_by_right(type_).map(|id| *id)
+    }
+
+    pub fn get_type(&mut self, id: TypeId) -> Option<Type> {
+        self.table.get_by_left(&id).map(|t| t.clone())
+    }
+}
+
 pub struct TypeChecker {
     symbol_table: SymbolTable,
     // Type names. Right now just has the primitives like string,
     // integer, float, char
-    type_names: HashMap<Name, Arc<Type>>,
+    type_names: HashMap<Name, TypeId>,
     // The return type for the typing context
     return_type: Option<Arc<Type>>,
     // Index for type variable names
     type_var_index: usize,
+    // Type table
+    types: TypeTable,
     // Symbol table
     name_table: NameTable,
 }
 
-fn build_type_names(name_table: &mut NameTable) -> HashMap<Name, Arc<Type>> {
+fn build_type_names(
+    name_table: &mut NameTable,
+    type_table: &mut TypeTable,
+) -> HashMap<Name, TypeId> {
     let primitive_types = vec![
-        ("int", Arc::new(Type::Int)),
-        ("float", Arc::new(Type::Float)),
-        ("char", Arc::new(Type::Char)),
-        ("string", Arc::new(Type::String)),
-        ("bool", Arc::new(Type::Bool)),
+        ("int", Type::Int),
+        ("float", Type::Float),
+        ("char", Type::Char),
+        ("string", Type::String),
+        ("bool", Type::Bool),
     ];
     let mut type_names = HashMap::new();
     for (name, type_) in primitive_types {
-        let id = name_table.insert(name.to_string());
-        type_names.insert(id, type_);
+        let name_id = name_table.insert(name.to_string());
+        let type_id = if let Some(id) = type_table.get_id(&type_) {
+            id
+        } else {
+            type_table.insert(type_.clone())
+        };
+
+        type_names.insert(name_id, type_id);
     }
     type_names
 }
@@ -96,11 +144,14 @@ impl TypeChecker {
             Arc::new(Type::String),
             Arc::new(Type::Unit),
         );
+        let mut type_table = TypeTable::new();
+        symbol_table.insert_function(print_id, Arc::new(Type::Int), Arc::new(Type::Unit));
         TypeChecker {
             symbol_table,
-            type_names: build_type_names(&mut name_table),
+            type_names: build_type_names(&mut name_table, &mut type_table),
             return_type: None,
             type_var_index: 0,
+            types: type_table,
             name_table,
         }
     }
@@ -142,8 +193,8 @@ impl TypeChecker {
                     let field_type = self.lookup_type_sig(&type_sig)?;
                     typed_fields.push((name, field_type));
                 }
-                self.type_names
-                    .insert(name, Arc::new(Type::Record(typed_fields)));
+                let type_id = self.types.insert(Type::Record(typed_fields));
+                self.type_names.insert(name, type_id);
                 Ok(())
             }
         }
@@ -270,14 +321,14 @@ impl TypeChecker {
                 Ok(Arc::new(Type::Array(type_)))
             }
             TypeSig::Name(name) => {
-                if let Some(type_) = self.type_names.get(name) {
-                    Ok(type_.clone())
-                } else {
-                    Err(TypeError::TypeDoesNotExist {
+                let id = self
+                    .type_names
+                    .get(name)
+                    .ok_or(TypeError::TypeDoesNotExist {
                         location: sig.location,
                         type_name: self.name_table.get_str(name).to_string(),
-                    })
-                }
+                    })?;
+                Ok(Arc::new(self.types.get_type(*id).unwrap()))
             }
             TypeSig::Empty => Ok(Arc::new(Type::Unit)),
             TypeSig::Arrow(param_sigs, return_sig) => {
@@ -766,8 +817,8 @@ impl TypeChecker {
                 }
             }
             Expr::Record { name, fields } => {
-                let type_ = if let Some(type_) = self.type_names.get(&name) {
-                    type_.clone()
+                let type_id = if let Some(id) = self.type_names.get(&name) {
+                    id
                 } else {
                     let name_str = self.name_table.get_str(&name);
                     return Err(TypeError::TypeDoesNotExist {
@@ -775,6 +826,8 @@ impl TypeChecker {
                         type_name: name_str.to_string(),
                     });
                 };
+
+                let type_ = Arc::new(self.types.get_type(*type_id).unwrap());
 
                 let mut field_types = Vec::new();
                 let mut fields_t = Vec::new();
