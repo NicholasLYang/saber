@@ -33,6 +33,7 @@ pub enum OpCode {
     GetLocal(u32),
     SetGlobal(u32),
     GetGlobal(u32),
+    // First is align, second is offset
     I32Load(u32, u32),
     F32Load(u32, u32),
     I32Store(u32, u32),
@@ -112,7 +113,7 @@ pub struct ImportEntry {
 pub enum ImportKind {
     Function { type_: usize },
     //    Table { type_: TableType },
-    //    Memory { type_: MemoryType },
+    Memory(MemoryType),
     //    Global { type_: GlobalType },
 }
 
@@ -141,7 +142,6 @@ pub struct ProgramData {
     pub type_section: Vec<FunctionType>,
     pub import_section: Vec<ImportEntry>,
     pub function_section: Vec<Option<usize>>,
-    pub memory_section: MemoryType,
     pub global_section: Vec<(GlobalType, Vec<OpCode>)>,
     pub exports_section: Vec<ExportEntry>,
     // Right now we only have one elem segment
@@ -152,21 +152,34 @@ pub struct ProgramData {
 
 impl ProgramData {
     pub fn new(func_count: usize) -> Self {
+        let import_section = vec![ImportEntry {
+            module_str: "mem".as_bytes().to_vec(),
+            field_str: "heap".as_bytes().to_vec(),
+            kind: ImportKind::Memory(MemoryType {
+                limits: ResizableLimits(0, None),
+            }),
+        }];
         ProgramData {
             type_section: Vec::new(),
-            import_section: Vec::new(),
+            import_section,
             function_section: vec![None; func_count],
-            memory_section: MemoryType {
-                limits: ResizableLimits(0, None),
-            },
             // Heap pointer is global #0
-            global_section: vec![(
-                GlobalType {
-                    content_type: WasmType::i32,
-                    mutability: true,
-                },
-                vec![OpCode::I32Const(0)],
-            )],
+            global_section: vec![
+                (
+                    GlobalType {
+                        content_type: WasmType::i32,
+                        mutability: true,
+                    },
+                    vec![OpCode::I32Const(0)],
+                ),
+                (
+                    GlobalType {
+                        content_type: WasmType::i32,
+                        mutability: true,
+                    },
+                    vec![OpCode::I32Const(0)],
+                ),
+            ],
             exports_section: Vec::new(),
             elements_section: ElemSegment {
                 offset: vec![OpCode::I32Const(0), OpCode::End],

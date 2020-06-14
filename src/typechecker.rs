@@ -88,8 +88,16 @@ fn build_type_names(name_table: &mut NameTable) -> HashMap<Name, Arc<Type>> {
 impl TypeChecker {
     pub fn new(mut name_table: NameTable) -> TypeChecker {
         let mut symbol_table = SymbolTable::new();
-        let print_id = name_table.insert("print".into());
-        symbol_table.insert_function(print_id, Arc::new(Type::Int), Arc::new(Type::Unit));
+        let print_int_id = name_table.insert("printInt".into());
+        symbol_table.insert_function(print_int_id, Arc::new(Type::Int), Arc::new(Type::Unit));
+        let print_float_id = name_table.insert("printFloat".into());
+        symbol_table.insert_function(print_float_id, Arc::new(Type::Float), Arc::new(Type::Unit));
+        let print_string_id = name_table.insert("printString".into());
+        symbol_table.insert_function(
+            print_string_id,
+            Arc::new(Type::String),
+            Arc::new(Type::Unit),
+        );
         TypeChecker {
             symbol_table,
             type_names: build_type_names(&mut name_table),

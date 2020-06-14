@@ -154,7 +154,7 @@ impl Emitter {
         self.emit_imports_section(program.import_section)?;
         self.emit_functions_section(program.function_section)?;
         self.emit_table_section(program.elements_section.elems.len())?;
-        self.emit_memory_section(program.memory_section)?;
+        //self.emit_memory_section(program.memory_section)?;
         self.emit_global_section(program.global_section)?;
         self.emit_exports_section(program.exports_section)?;
         self.emit_elements_section(program.elements_section)?;
@@ -222,6 +222,15 @@ impl Emitter {
                 ImportKind::Function { type_ } => {
                     opcodes.push(OpCode::Kind(0));
                     opcodes.push(OpCode::Index(usize_to_u32(type_)?));
+                }
+                ImportKind::Memory(memory_type) => {
+                    opcodes.push(OpCode::Kind(2));
+                    let is_max_present = memory_type.limits.1.is_some();
+                    opcodes.push(OpCode::Bool(is_max_present));
+                    opcodes.push(OpCode::Count(memory_type.limits.0));
+                    if let Some(max) = memory_type.limits.1 {
+                        opcodes.push(OpCode::Count(max));
+                    }
                 }
             };
         }

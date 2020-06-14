@@ -64,15 +64,36 @@ impl CodeGenerator {
     }
 
     fn generate_default_imports(&mut self) -> Result<()> {
-        let print_type = FunctionType {
+        let print_int_type = FunctionType {
             param_types: vec![WasmType::i32],
             return_type: None,
         };
-        let type_index = self.program_data.insert_type(print_type);
+        let print_int_index = self.program_data.insert_type(print_int_type);
         self.program_data.import_section.push(ImportEntry {
             module_str: "std".into(),
-            field_str: "print".into(),
-            kind: ImportKind::Function { type_: type_index },
+            field_str: "printInt".into(),
+            kind: ImportKind::Function {
+                type_: print_int_index,
+            },
+        });
+        let print_float_type = FunctionType {
+            param_types: vec![WasmType::f32],
+            return_type: None,
+        };
+        let print_float_index = self.program_data.insert_type(print_float_type);
+        self.program_data.import_section.push(ImportEntry {
+            module_str: "std".into(),
+            field_str: "printFloat".into(),
+            kind: ImportKind::Function {
+                type_: print_float_index,
+            },
+        });
+        self.program_data.import_section.push(ImportEntry {
+            module_str: "std".into(),
+            field_str: "printString".into(),
+            kind: ImportKind::Function {
+                type_: print_int_index,
+            },
         });
         Ok(())
     }
@@ -373,7 +394,7 @@ impl CodeGenerator {
 
     fn generate_expr(&mut self, expr: &Loc<ExprT>) -> Result<Vec<OpCode>> {
         match &expr.inner {
-            ExprT::Primary { value, type_: _ } => Ok(vec![self.generate_primary(value)?]),
+            ExprT::Primary { value, type_: _ } => self.generate_primary(value),
             ExprT::Var { name, type_: _ } => {
                 let index = self.get_var_index(*name)?;
                 Ok(vec![OpCode::GetLocal(index.try_into().unwrap())])
@@ -544,6 +565,12 @@ impl CodeGenerator {
     // Generates very simple allocator scheme
     // Checks if there's enough space and if not,
     // it allocates more
+    // This is hella hacky but basically I don't feel like
+    // making this a builtin wasm function
+    // (I'd need to inject it into the symbol table somehow)
+    // I'm using globals as registers
+    // Global 0 is heap ptr
+    // Global 1 is "return"
     fn generate_allocator(&self, memory_size: i32) -> Vec<OpCode> {
         let mut opcodes = Vec::new();
         opcodes.push(OpCode::I32Const(memory_size));
@@ -568,7 +595,6 @@ impl CodeGenerator {
         // beyond that to store large values
         opcodes.push(OpCode::I32Const(1));
         opcodes.push(OpCode::GrowMemory);
-        // Error handling. If the result is equal to -1, we trap
         opcodes.push(OpCode::I32Const(-1));
         opcodes.push(OpCode::I32Eq);
         opcodes.push(OpCode::If);
@@ -576,6 +602,16 @@ impl CodeGenerator {
         opcodes.push(OpCode::Unreachable);
         opcodes.push(OpCode::End);
         opcodes.push(OpCode::End);
+
+        // We set Global 1 to old heap ptr
+        opcodes.push(OpCode::GetGlobal(0));
+        opcodes.push(OpCode::SetGlobal(1));
+        // We need to update heap ptr
+        opcodes.push(OpCode::I32Const(memory_size));
+        opcodes.push(OpCode::GetGlobal(0));
+        opcodes.push(OpCode::I32Add);
+        opcodes.push(OpCode::SetGlobal(0));
+
         opcodes
     }
 
@@ -595,10 +631,14 @@ impl CodeGenerator {
         // We need to write the struct to memory. This consists of
         // looping through entries, generating the opcodes and
         // storing them in the heap
-
         for (_, expr) in fields {
-            // Address for store
-            opcodes.push(OpCode::GetGlobal(0));
+            // No, you're not seeing double. We push
+            // the value of Global 1 to "save" it
+            // in case it gets mutated when we generate
+            // the field.
+            opcodes.push(OpCode::GetGlobal(1));
+            // We push it again as an address for store
+            opcodes.push(OpCode::GetGlobal(1));
             opcodes.append(&mut self.generate_expr(expr)?);
             let wasm_type = self
                 .generate_wasm_type(&expr.inner.get_type())?
@@ -614,11 +654,11 @@ impl CodeGenerator {
                 }
             };
             opcodes.push(store_code);
-            // heap_ptr = heap_ptr + 4;
-            opcodes.push(OpCode::GetGlobal(0));
+            // We restore here. g1 is already on the stack
+            // so we add 4 to it and save
             opcodes.push(OpCode::I32Const(4));
             opcodes.push(OpCode::I32Add);
-            opcodes.push(OpCode::SetGlobal(0));
+            opcodes.push(OpCode::SetGlobal(1));
         }
         // return heap_ptr - sizeof(record)
         opcodes.push(OpCode::GetGlobal(0));
@@ -627,18 +667,47 @@ impl CodeGenerator {
         Ok(opcodes)
     }
 
-    fn generate_primary(&self, value: &Value) -> Result<OpCode> {
+    fn generate_primary(&self, value: &Value) -> Result<Vec<OpCode>> {
         match value {
-            Value::Float(f) => Ok(OpCode::F32Const(*f)),
-            Value::Integer(i) => Ok(OpCode::I32Const(*i)),
+            Value::Float(f) => Ok(vec![OpCode::F32Const(*f)]),
+            Value::Integer(i) => Ok(vec![OpCode::I32Const(*i)]),
             Value::Bool(b) => {
                 if *b {
-                    Ok(OpCode::I32Const(1))
+                    Ok(vec![OpCode::I32Const(1)])
                 } else {
-                    Ok(OpCode::I32Const(0))
+                    Ok(vec![OpCode::I32Const(0)])
                 }
             }
-            _ => Err(GenerationError::UnsupportedValue),
+            Value::String(s) => {
+                let mut bytes = s.as_bytes().to_vec();
+                let raw_str_length: i32 = bytes.len().try_into().expect("String is too long");
+                // Make bytes a multiple of 4 for ease of use;
+                while bytes.len() % 4 != 0 {
+                    bytes.push(0);
+                }
+                // We tack on 4 more bytes for the length
+                let mut opcodes = self.generate_allocator(raw_str_length + 4);
+                // Pop on global 1 as return value (ptr to str)
+                opcodes.push(OpCode::GetGlobal(1));
+                opcodes.push(OpCode::GetGlobal(1));
+                opcodes.push(OpCode::I32Const(raw_str_length));
+                opcodes.push(OpCode::I32Store(2, 0));
+                for b in bytes.chunks_exact(4) {
+                    // Increment global 1 by 4 bytes
+                    opcodes.push(OpCode::GetGlobal(1));
+                    opcodes.push(OpCode::I32Const(4));
+                    opcodes.push(OpCode::I32Add);
+                    opcodes.push(OpCode::SetGlobal(1));
+                    let packed_bytes = ((b[0] as u32) << 0)
+                        + ((b[1] as u32) << 8)
+                        + ((b[2] as u32) << 16)
+                        + ((b[3] as u32) << 24);
+                    opcodes.push(OpCode::GetGlobal(1));
+                    opcodes.push(OpCode::I32Const(packed_bytes as i32));
+                    opcodes.push(OpCode::I32Store(2, 0))
+                }
+                Ok(opcodes)
+            }
         }
     }
 
