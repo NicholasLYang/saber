@@ -22,8 +22,6 @@ pub enum GenerationError {
     },
     #[fail(display = "Function '{}' not defined", name)]
     FunctionNotDefined { name: String },
-    #[fail(display = "Unsupported value, probably string")]
-    UnsupportedValue,
     #[fail(display = "Cannot have () as type")]
     EmptyType,
     #[fail(display = "Code Generator: Could not infer type var {:?}", type_)]

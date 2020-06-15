@@ -14,8 +14,6 @@ pub enum TypeError {
         location: LocationRange,
         name: String,
     },
-    #[fail(display = "{}: Typechecker - Not implemented yet", location)]
-    NotImplemented { location: LocationRange },
     #[fail(
         display = "{}: Could not find operation {} with arguments of type {} and {}",
         location, op, lhs_type, rhs_type
