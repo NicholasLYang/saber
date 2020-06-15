@@ -39,7 +39,7 @@ pub enum StmtT {
     Block(Vec<Loc<StmtT>>),
     Function {
         name: Name,
-        params: Vec<(Name, Arc<Type>)>,
+        params: Vec<(Name, TypeId)>,
         params_type: TypeId,
         return_type: TypeId,
         body: Box<Loc<ExprT>>,
@@ -121,7 +121,7 @@ pub enum ExprT {
     // Note: only used for anonymous functions. Functions that are
     // bound with let are TypedStmt::Function
     Function {
-        params: Vec<(Name, Arc<Type>)>,
+        params: Vec<(Name, TypeId)>,
         body: Box<Loc<ExprT>>,
         local_variables: Vec<Arc<Type>>,
         name: Name,

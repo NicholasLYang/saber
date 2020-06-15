@@ -24,7 +24,7 @@ pub struct SymbolTable {
     // them into a vec, then when we finish
     // typechecking the function, we reset and spit out
     // the variable types
-    var_types: Vec<Arc<Type>>,
+    var_types: Vec<TypeId>,
     current_scope: usize,
 }
 
@@ -35,6 +35,7 @@ pub enum EntryType {
         index: usize,
         params_type: TypeId,
         return_type: TypeId,
+        type_: TypeId,
     },
     Var {
         var_type: TypeId,
@@ -66,7 +67,7 @@ impl SymbolTable {
         var_types
     }
 
-    pub fn restore_vars(&mut self, var_types: Vec<Arc<Type>>) -> Vec<Arc<Type>> {
+    pub fn restore_vars(&mut self, var_types: Vec<TypeId>) -> Vec<Arc<Type>> {
         let mut var_types = var_types;
         std::mem::swap(&mut self.var_types, &mut var_types);
         var_types
@@ -122,7 +123,7 @@ impl SymbolTable {
         None
     }
 
-    pub fn insert_var(&mut self, name: Name, var_type: Arc<Type>) {
+    pub fn insert_var(&mut self, name: Name, var_type: TypeId) {
         self.var_types.push(var_type.clone());
         self.scopes[self.current_scope].symbols.insert(
             name,
@@ -136,7 +137,13 @@ impl SymbolTable {
         );
     }
 
-    pub fn insert_function(&mut self, name: Name, params_type: TypeId, return_type: TypeId) {
+    pub fn insert_function(
+        &mut self,
+        name: Name,
+        params_type: TypeId,
+        return_type: TypeId,
+        type_: TypeId,
+    ) {
         if self.lookup_name(name).is_none() {
             self.scopes[self.current_scope].symbols.insert(
                 name,
@@ -146,6 +153,7 @@ impl SymbolTable {
                         index: self.function_index,
                         params_type,
                         return_type,
+                        type_,
                     },
                 },
             );

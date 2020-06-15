@@ -41,7 +41,7 @@ pub enum TypeError {
     #[fail(display = "Field {} does not exist in record", name)]
     FieldDoesNotExist { name: String },
     #[fail(display = "Type {} is not a record", type_)]
-    NotARecord { type_: Arc<Type> },
+    NotARecord { type_: Type },
     #[fail(display = "{} Cannot apply unary operator to {:?}", location, expr)]
     InvalidUnaryExpr {
         location: LocationRange,
@@ -94,13 +94,28 @@ fn build_type_names(
 impl TypeChecker {
     pub fn new(mut name_table: NameTable) -> TypeChecker {
         let mut symbol_table = SymbolTable::new();
-        let print_int_id = name_table.insert("printInt".into());
-        symbol_table.insert_function(print_int_id, INT_INDEX, UNIT_INDEX);
-        let print_float_id = name_table.insert("printFloat".into());
-        symbol_table.insert_function(print_float_id, FLOAT_INDEX, UNIT_INDEX);
-        let print_string_id = name_table.insert("printString".into());
-        symbol_table.insert_function(print_string_id, STR_INDEX, UNIT_INDEX);
         let mut type_table = TypeTable::new();
+        let print_int_id = name_table.insert("printInt".into());
+        symbol_table.insert_function(
+            print_int_id,
+            INT_INDEX,
+            UNIT_INDEX,
+            type_table.insert(Type::Arrow(INT_INDEX, UNIT_INDEX)),
+        );
+        let print_float_id = name_table.insert("printFloat".into());
+        symbol_table.insert_function(
+            print_float_id,
+            FLOAT_INDEX,
+            UNIT_INDEX,
+            type_table.insert(Type::Arrow(FLOAT_INDEX, UNIT_INDEX)),
+        );
+        let print_string_id = name_table.insert("printString".into());
+        symbol_table.insert_function(
+            print_string_id,
+            STR_INDEX,
+            UNIT_INDEX,
+            type_table.insert(Type::Arrow(STR_INDEX, UNIT_INDEX)),
+        );
         TypeChecker {
             symbol_table,
             type_names: build_type_names(&mut name_table, &mut type_table),
@@ -172,17 +187,18 @@ impl TypeChecker {
                 } else {
                     self.get_fresh_type_var()
                 };
+                let type_ = self
+                    .type_table
+                    .insert(Type::Arrow(params_type, return_type));
                 self.symbol_table
-                    .insert_function(func_name, params_type.clone(), return_type);
+                    .insert_function(func_name, params_type, return_type, type_);
                 let previous_scope = self.symbol_table.push_scope(true);
                 let (params, body, return_type, local_variables) =
                     self.function(params, *body, return_type_sig)?;
                 let func_scope = self.symbol_table.restore_scope(previous_scope);
-                self.symbol_table.insert_function(
-                    func_name,
-                    params_type.clone(),
-                    return_type.clone(),
-                );
+
+                self.type_table
+                    .update(type_, Type::Arrow(params_type, return_type));
                 Ok(vec![Loc {
                     location,
                     inner: StmtT::Function {
@@ -278,35 +294,32 @@ impl TypeChecker {
         match &sig.inner {
             TypeSig::Array(sig) => {
                 let type_ = self.lookup_type_sig(sig)?;
-                self.type_table.insert(Type::Array(type_))
+                Ok(self.type_table.insert(Type::Array(type_)))
             }
-            TypeSig::Name(name) => {
-                *self
-                    .type_names
-                    .get(name)
-                    .ok_or(TypeError::TypeDoesNotExist {
-                        location: sig.location,
-                        type_name: self.name_table.get_str(name).to_string(),
-                    })?
-            }
-            // TODO: Easy optimization where all base types
-            // get the same id
-            TypeSig::Empty => self.type_table.insert(Type::Unit),
+            TypeSig::Name(name) => self
+                .type_names
+                .get(name)
+                .ok_or(TypeError::TypeDoesNotExist {
+                    location: sig.location,
+                    type_name: self.name_table.get_str(name).to_string(),
+                })
+                .map(|t| *t),
+            TypeSig::Empty => Ok(UNIT_INDEX),
             TypeSig::Arrow(param_sigs, return_sig) => {
                 let param_types = if param_sigs.len() == 1 {
                     self.lookup_type_sig(&param_sigs[0])?
                 } else {
                     let mut types = Vec::new();
                     for param in param_sigs {
-                        let id = self.type_table.insert(self.lookup_type_sig(param)?);
-                        types.push(id);
+                        types.push(self.lookup_type_sig(param)?);
                     }
                     self.type_table.insert(Type::Tuple(types))
                 };
 
                 let return_type = self.lookup_type_sig(return_sig)?;
-                self.type_table
-                    .insert(Type::Arrow(param_types, return_type))
+                Ok(self
+                    .type_table
+                    .insert(Type::Arrow(param_types, return_type)))
             }
         }
     }
@@ -323,7 +336,7 @@ impl TypeChecker {
             }
             Pat::Tuple(pats, _) => {
                 let types: Result<Vec<_>, _> = pats.iter().map(|pat| self.pat(pat)).collect();
-                Ok(self.insert(Type::Tuple(types?)))
+                Ok(self.type_table.insert(Type::Tuple(types?)))
             }
             Pat::Record(pats, type_sig, _) => {
                 // In the future I should unify these two if they both exist.
@@ -334,7 +347,7 @@ impl TypeChecker {
                         .iter()
                         .map(|name| Ok((*name, self.get_fresh_type_var())))
                         .collect();
-                    Ok(self.insert(Type::Record(types?)))
+                    Ok(self.type_table.insert(Type::Record(types?)))
                 }
             }
             Pat::Empty(_) => Ok(UNIT_INDEX),
@@ -343,7 +356,7 @@ impl TypeChecker {
 
     /// Gets the function parameters as a list of names with
     /// types. Useful for WebAssembly code generation.
-    fn get_func_params(&mut self, pat: &Pat) -> Result<Vec<(Name, Arc<Type>)>, TypeError> {
+    fn get_func_params(&mut self, pat: &Pat) -> Result<Vec<(Name, TypeId)>, TypeError> {
         match pat {
             Pat::Id(name, Some(type_sig), _) => {
                 let type_ = self.lookup_type_sig(&type_sig)?;
@@ -370,7 +383,7 @@ impl TypeChecker {
                 let mut params = Vec::new();
                 for name in names {
                     let field_type = if let Some(t) = &type_ {
-                        self.get_field_type(t, *name)?
+                        self.get_field_type(*t, *name)?
                     } else {
                         self.get_fresh_type_var()
                     };
@@ -384,12 +397,12 @@ impl TypeChecker {
 
     fn get_field_type(
         &mut self,
-        record_type: &Arc<Type>,
+        record_type: TypeId,
         field_name: usize,
-    ) -> Result<Arc<Type>, TypeError> {
-        if let Type::Record(fields) = &**record_type {
+    ) -> Result<TypeId, TypeError> {
+        if let Type::Record(fields) = self.type_table.get_type(record_type) {
             if let Some((_, type_)) = fields.iter().find(|(name, _)| *name == field_name) {
-                Ok(type_.clone())
+                Ok(*type_)
             } else {
                 Err(TypeError::FieldDoesNotExist {
                     name: self.name_table.get_str(&field_name).to_string(),
@@ -397,7 +410,7 @@ impl TypeChecker {
             }
         } else {
             Err(TypeError::NotARecord {
-                type_: record_type.clone(),
+                type_: self.type_table.get_type(record_type).clone(),
             })
         }
     }
@@ -410,7 +423,7 @@ impl TypeChecker {
         &mut self,
         pat: &Pat,
         owner_name: Name,
-        rhs_type: &Arc<Type>,
+        rhs_type: TypeId,
         location: LocationRange,
     ) -> Result<Vec<Loc<StmtT>>, TypeError> {
         let mut bindings = Vec::new();
@@ -470,7 +483,7 @@ impl TypeChecker {
                     });
                     let type_ = self.get_fresh_type_var();
                     bindings
-                        .append(&mut self.generate_pattern_bindings(pat, name, &type_, location)?)
+                        .append(&mut self.generate_pattern_bindings(pat, name, type_, location)?)
                 }
                 Ok(bindings)
             }
@@ -485,7 +498,7 @@ impl TypeChecker {
     ) -> Result<Vec<Loc<StmtT>>, TypeError> {
         let pat_type = self.pat(&pat)?;
         let typed_rhs = self.expr(rhs)?;
-        if let Some(type_) = self.unify(&pat_type, &typed_rhs.inner.get_type()) {
+        if let Some(type_) = self.unify(pat_type, typed_rhs.inner.get_type()) {
             let name = if let Pat::Id(name, _, _) = pat {
                 name
             } else {
@@ -493,7 +506,7 @@ impl TypeChecker {
             };
             self.symbol_table.insert_var(name, type_);
             let mut pat_bindings =
-                self.generate_pattern_bindings(&pat, name, &typed_rhs.inner.get_type(), location)?;
+                self.generate_pattern_bindings(&pat, name, typed_rhs.inner.get_type(), location)?;
             let mut bindings = vec![Loc {
                 location,
                 inner: StmtT::Asgn(name, typed_rhs),
@@ -501,10 +514,12 @@ impl TypeChecker {
             bindings.append(&mut pat_bindings);
             Ok(bindings)
         } else {
+            let type1 = self.type_table.get_type(pat_type).clone();
+            let type2 = self.type_table.get_type(typed_rhs.inner.get_type()).clone();
             Err(TypeError::UnificationFailure {
                 location,
-                type1: pat_type,
-                type2: typed_rhs.inner.get_type(),
+                type1,
+                type2,
             })
         }
     }
@@ -522,19 +537,11 @@ impl TypeChecker {
         params: Pat,
         body: Loc<Expr>,
         return_type: Option<Loc<TypeSig>>,
-    ) -> Result<
-        (
-            Vec<(Name, Arc<Type>)>,
-            Box<Loc<ExprT>>,
-            TypeId,
-            Vec<Arc<Type>>,
-        ),
-        TypeError,
-    > {
+    ) -> Result<(Vec<(Name, TypeId)>, Box<Loc<ExprT>>, TypeId, Vec<Arc<Type>>), TypeError> {
         let old_var_types = self.symbol_table.reset_vars();
         let func_params = self.get_func_params(&params)?;
         for (name, type_) in &func_params {
-            self.symbol_table.insert_var(name.clone(), type_.clone());
+            self.symbol_table.insert_var(name.clone(), *type_);
         }
         // Insert return type into typechecker so that
         // typechecker can verify return statements.
@@ -549,13 +556,20 @@ impl TypeChecker {
         let body_type = body.inner.get_type();
         let mut return_type = None;
         std::mem::swap(&mut return_type, &mut self.return_type);
-        let return_type =
-            self.unify(return_type.unwrap(), &body_type)
-                .ok_or(TypeError::UnificationFailure {
+        let return_type = if body_type != UNIT_INDEX {
+            self.unify(return_type.unwrap(), body_type).ok_or_else(|| {
+                let type1 = self.type_table.get_type(return_type.unwrap()).clone();
+                let type1 = self.type_table.get_type(body_type).clone();
+                TypeError::UnificationFailure {
                     location: body_location,
-                    type1: (&return_type).clone().unwrap(),
-                    type2: body_type,
-                })?;
+                    type1,
+                    type2,
+                }
+            })?
+        } else {
+            return_type.unwrap()
+        };
+
         let func_var_types = self.symbol_table.restore_vars(old_var_types);
         Ok((func_params, Box::new(body), return_type, func_var_types))
     }
@@ -580,11 +594,12 @@ impl TypeChecker {
                         index: _,
                         params_type,
                         return_type,
+                        type_,
                     } => Ok(Loc {
                         location,
                         inner: ExprT::Var {
                             name,
-                            type_: Arc::new(Type::Arrow(params_type.clone(), return_type.clone())),
+                            type_: *type_,
                         },
                     }),
                     EntryType::Var { var_type, index: _ } => Ok(Loc {
@@ -648,11 +663,11 @@ impl TypeChecker {
                 let (params, body, return_type, local_variables) =
                     self.function(params, *body, return_type_sig)?;
                 let func_scope = self.symbol_table.restore_scope(previous_scope);
-                self.symbol_table
-                    .insert_function(name, params_type.clone(), return_type.clone());
                 let type_ = self
                     .type_table
                     .insert(Type::Arrow(params_type, return_type));
+                self.symbol_table
+                    .insert_function(name, params_type, return_type, type_);
                 let func = Loc {
                     location,
                     inner: ExprT::Function {
