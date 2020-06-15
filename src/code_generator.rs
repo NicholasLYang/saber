@@ -3,7 +3,8 @@ use lexer::LocationRange;
 use std::convert::TryInto;
 use std::sync::Arc;
 use symbol_table::{EntryType, SymbolTable};
-use utils::NameTable;
+use typechecker::TypeChecker;
+use utils::{NameTable, TypeTable};
 use wasm::{
     ExportEntry, ExternalKind, FunctionBody, FunctionType, ImportEntry, ImportKind, LocalEntry,
     OpCode, ProgramData, WasmType,
@@ -43,6 +44,7 @@ pub enum GenerationError {
 pub struct CodeGenerator {
     symbol_table: SymbolTable,
     name_table: NameTable,
+    type_table: TypeTable,
     // All the generated code
     program_data: ProgramData,
     return_type: Option<WasmType>,
@@ -51,11 +53,13 @@ pub struct CodeGenerator {
 type Result<T> = std::result::Result<T, GenerationError>;
 
 impl CodeGenerator {
-    pub fn new(name_table: NameTable, symbol_table: SymbolTable) -> Self {
+    pub fn new(typechecker: TypeChecker) -> Self {
+        let (symbol_table, name_table, type_table) = typechecker.get_tables();
         let func_count = symbol_table.get_function_index();
         CodeGenerator {
             symbol_table,
             name_table,
+            type_table,
             program_data: ProgramData::new(func_count),
             return_type: None,
         }

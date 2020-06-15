@@ -1,4 +1,4 @@
-use ast::{Name, Type};
+use ast::{Name, Type, TypeId};
 use im::hashmap::HashMap;
 use std::sync::Arc;
 
@@ -33,11 +33,11 @@ pub enum EntryType {
     Function {
         // Index into function array
         index: usize,
-        params_type: Arc<Type>,
-        return_type: Arc<Type>,
+        params_type: TypeId,
+        return_type: TypeId,
     },
     Var {
-        var_type: Arc<Type>,
+        var_type: TypeId,
         index: usize,
     },
 }
@@ -136,7 +136,7 @@ impl SymbolTable {
         );
     }
 
-    pub fn insert_function(&mut self, name: Name, params_type: Arc<Type>, return_type: Arc<Type>) {
+    pub fn insert_function(&mut self, name: Name, params_type: TypeId, return_type: TypeId) {
         if self.lookup_name(name).is_none() {
             self.scopes[self.current_scope].symbols.insert(
                 name,
