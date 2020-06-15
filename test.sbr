@@ -1,10 +1,12 @@
 struct Person {
-  age: int,
-  height: float
+  name: string
 }
 
 let foo = \() => {
-  printString("Hello world!");
+  let p = Person {
+    name: "Nicholas"
+  };
+  printString(p.name)
 }
 
 export foo;

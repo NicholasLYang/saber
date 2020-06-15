@@ -8,4 +8,5 @@ const outputWasm = "test.wasm";
 const watModule = wabt.parseWat(inputWat, readFileSync(inputWat, "utf8"));
 const { buffer } = watModule.toBinary({});
 
+
 writeFileSync(outputWasm, new Buffer(buffer));

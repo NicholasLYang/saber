@@ -661,7 +661,7 @@ impl CodeGenerator {
             opcodes.push(OpCode::SetGlobal(1));
         }
         // return heap_ptr - sizeof(record)
-        opcodes.push(OpCode::GetGlobal(0));
+        opcodes.push(OpCode::GetGlobal(1));
         opcodes.push(OpCode::I32Const(record_size));
         opcodes.push(OpCode::I32Sub);
         Ok(opcodes)
