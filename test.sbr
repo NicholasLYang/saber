@@ -1,12 +1,20 @@
-struct Person {
+struct School {
   name: string
+}
+struct Person {
+  name: string,
+  school: School
 }
 
 let foo = \() => {
   let p = Person {
-    name: "Nicholas"
+    name: "Nicholas",
+    school: School {
+      name: "New York University"
+    }
   };
-  printString(p.name)
+  printString(p.name);
+  printString(p.school.name)
 }
 
 export foo;

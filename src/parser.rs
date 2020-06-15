@@ -178,21 +178,22 @@ impl<'input> Parser<'input> {
                         self.recover_from_error(TokenDiscriminants::RBrace)?;
                     }
                 }
-            }
-            match self.stmt() {
-                Ok(Some(stmt)) => stmts.push(stmt),
-                Ok(None) => {}
-                Err(ParseError::EndOfFile { expected_tokens: _ }) => {
-                    let mut errors = Vec::new();
-                    std::mem::swap(&mut errors, &mut self.errors);
-                    return Ok(Program {
-                        stmts,
-                        type_defs,
-                        errors,
-                    });
-                }
-                Err(err) => {
-                    self.errors.push(err);
+            } else {
+                match self.stmt() {
+                    Ok(Some(stmt)) => stmts.push(stmt),
+                    Ok(None) => {}
+                    Err(ParseError::EndOfFile { expected_tokens: _ }) => {
+                        let mut errors = Vec::new();
+                        std::mem::swap(&mut errors, &mut self.errors);
+                        return Ok(Program {
+                            stmts,
+                            type_defs,
+                            errors,
+                        });
+                    }
+                    Err(err) => {
+                        self.errors.push(err);
+                    }
                 }
             }
         }

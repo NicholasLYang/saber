@@ -804,9 +804,23 @@ impl TypeChecker {
             }
             Expr::Field(lhs, name) => {
                 let lhs_t = self.expr(*lhs)?;
+                let type_ = if let Type::Record(fields) = &*lhs_t.inner.get_type() {
+                    let field = fields
+                        .iter()
+                        .find(|(field_name, _)| *field_name == name)
+                        .ok_or_else(|| {
+                            let name_str = self.name_table.get_str(&name);
+                            TypeError::FieldDoesNotExist {
+                                name: name_str.to_string(),
+                            }
+                        })?;
+                    field.1.clone()
+                } else {
+                    self.get_fresh_type_var()
+                };
                 Ok(Loc {
                     location,
-                    inner: ExprT::Field(Box::new(lhs_t), name, self.get_fresh_type_var()),
+                    inner: ExprT::Field(Box::new(lhs_t), name, type_),
                 })
             }
         }

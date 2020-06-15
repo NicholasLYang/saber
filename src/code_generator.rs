@@ -546,7 +546,9 @@ impl CodeGenerator {
                         WasmType::i32 => OpCode::I32Load(2, offset),
                         WasmType::f32 => OpCode::F32Load(2, offset),
                         WasmType::Empty => OpCode::Drop,
-                        _ => return Err(GenerationError::NotReachable),
+                        _ => {
+                            return Err(GenerationError::NotReachable);
+                        }
                     };
                     opcodes.push(load_code);
                     Ok(opcodes)

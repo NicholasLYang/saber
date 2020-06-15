@@ -29,6 +29,7 @@ hopefully I'll be able to port it to other platforms.
   - ~~Add nested functions~~ 
   - ~~Add first class functions~~
   - ~~Add structs/records~~
+  - ~~Add strings~~
   - Garbage collection!
 - Tests/Debugging
   - ~~Write some tests~~
