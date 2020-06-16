@@ -1,6 +1,5 @@
-use ast::{Name, Type, TypeId};
+use ast::{Name, TypeId};
 use im::hashmap::HashMap;
-use std::sync::Arc;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Scope {
@@ -61,13 +60,13 @@ impl SymbolTable {
         self.function_index
     }
 
-    pub fn reset_vars(&mut self) -> Vec<Arc<Type>> {
+    pub fn reset_vars(&mut self) -> Vec<TypeId> {
         let mut var_types = Vec::new();
         std::mem::swap(&mut var_types, &mut self.var_types);
         var_types
     }
 
-    pub fn restore_vars(&mut self, var_types: Vec<TypeId>) -> Vec<Arc<Type>> {
+    pub fn restore_vars(&mut self, var_types: Vec<TypeId>) -> Vec<TypeId> {
         let mut var_types = var_types;
         std::mem::swap(&mut self.var_types, &mut var_types);
         var_types

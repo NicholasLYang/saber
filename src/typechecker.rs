@@ -72,10 +72,7 @@ pub struct TypeChecker {
     name_table: NameTable,
 }
 
-fn build_type_names(
-    name_table: &mut NameTable,
-    type_table: &mut TypeTable,
-) -> HashMap<Name, TypeId> {
+fn build_type_names(name_table: &mut NameTable) -> HashMap<Name, TypeId> {
     let primitive_types = vec![
         ("int", INT_INDEX),
         ("float", FLOAT_INDEX),
@@ -118,7 +115,7 @@ impl TypeChecker {
         );
         TypeChecker {
             symbol_table,
-            type_names: build_type_names(&mut name_table, &mut type_table),
+            type_names: build_type_names(&mut name_table),
             return_type: None,
             type_var_index: 0,
             type_table,
@@ -537,7 +534,7 @@ impl TypeChecker {
         params: Pat,
         body: Loc<Expr>,
         return_type: Option<Loc<TypeSig>>,
-    ) -> Result<(Vec<(Name, TypeId)>, Box<Loc<ExprT>>, TypeId, Vec<Arc<Type>>), TypeError> {
+    ) -> Result<(Vec<(Name, TypeId)>, Box<Loc<ExprT>>, TypeId, Vec<TypeId>), TypeError> {
         let old_var_types = self.symbol_table.reset_vars();
         let func_params = self.get_func_params(&params)?;
         for (name, type_) in &func_params {
@@ -559,7 +556,7 @@ impl TypeChecker {
         let return_type = if body_type != UNIT_INDEX {
             self.unify(return_type.unwrap(), body_type).ok_or_else(|| {
                 let type1 = self.type_table.get_type(return_type.unwrap()).clone();
-                let type1 = self.type_table.get_type(body_type).clone();
+                let type2 = self.type_table.get_type(body_type).clone();
                 TypeError::UnificationFailure {
                     location: body_location,
                     type1,
@@ -592,8 +589,8 @@ impl TypeChecker {
                 match &entry.entry_type {
                     EntryType::Function {
                         index: _,
-                        params_type,
-                        return_type,
+                        params_type: _,
+                        return_type: _,
                         type_,
                     } => Ok(Loc {
                         location,
@@ -807,7 +804,7 @@ impl TypeChecker {
             }
             Expr::Record { name, fields } => {
                 let type_id = if let Some(id) = self.type_names.get(&name) {
-                    id
+                    *id
                 } else {
                     let name_str = self.name_table.get_str(&name);
                     return Err(TypeError::TypeDoesNotExist {
@@ -824,10 +821,10 @@ impl TypeChecker {
                     fields_t.push((name, expr_t));
                 }
                 let expr_type = self.type_table.insert(Type::Record(field_types));
-                let type_ = self.unify(expr_type, *type_id).ok_or_else(|| {
+                let type_ = self.unify(expr_type, type_id).ok_or_else(|| {
                     TypeError::UnificationFailure {
                         type1: self.type_table.get_type(expr_type).clone(),
-                        type2: self.type_table.get_type(*type_id).clone(),
+                        type2: self.type_table.get_type(type_id).clone(),
                         location,
                     }
                 })?;
@@ -845,16 +842,16 @@ impl TypeChecker {
                 let type_ = if let Type::Record(fields) =
                     self.type_table.get_type(lhs_t.inner.get_type())
                 {
-                    let field = fields
-                        .iter()
-                        .find(|(field_name, _)| *field_name == name)
-                        .ok_or_else(|| {
-                            let name_str = self.name_table.get_str(&name);
-                            TypeError::FieldDoesNotExist {
-                                name: name_str.to_string(),
-                            }
-                        })?;
-                    field.1.clone()
+                    let field = fields.iter().find(|(field_name, _)| *field_name == name);
+
+                    if let Some(field) = field {
+                        field.1
+                    } else {
+                        let name_str = self.name_table.get_str(&name);
+                        return Err(TypeError::FieldDoesNotExist {
+                            name: name_str.to_string(),
+                        });
+                    }
                 } else {
                     self.get_fresh_type_var()
                 };
@@ -925,8 +922,8 @@ impl TypeChecker {
         if type_id1 == type_id2 {
             return Some(type_id1);
         }
-        let type1 = self.type_table.get_type(type_id1);
-        let type2 = self.type_table.get_type(type_id2);
+        let type1 = self.type_table.get_type(type_id1).clone();
+        let type2 = self.type_table.get_type(type_id2).clone();
         match (type1, type2) {
             (Type::Record(fields), Type::Record(other_fields)) => {
                 if fields.len() != other_fields.len() {
@@ -963,8 +960,8 @@ impl TypeChecker {
             }
             (Type::Arrow(param_type1, return_type1), Type::Arrow(param_type2, return_type2)) => {
                 match (
-                    self.unify(*param_type1, *param_type2),
-                    self.unify(*return_type1, *return_type2),
+                    self.unify(param_type1, param_type2),
+                    self.unify(return_type1, return_type2),
                 ) {
                     (Some(param_type), Some(return_type)) => {
                         let id = self.type_table.insert(Type::Arrow(param_type, return_type));

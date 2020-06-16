@@ -2,7 +2,6 @@ use lexer::LocationRange;
 use parser::ParseError;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::sync::Arc;
 
 pub type Name = usize;
 pub type TypeId = usize;
@@ -43,7 +42,7 @@ pub enum StmtT {
         params_type: TypeId,
         return_type: TypeId,
         body: Box<Loc<ExprT>>,
-        local_variables: Vec<Arc<Type>>,
+        local_variables: Vec<TypeId>,
         scope: usize,
     },
     Export(Name),
@@ -123,7 +122,7 @@ pub enum ExprT {
     Function {
         params: Vec<(Name, TypeId)>,
         body: Box<Loc<ExprT>>,
-        local_variables: Vec<Arc<Type>>,
+        local_variables: Vec<TypeId>,
         name: Name,
         scope_index: usize,
         type_: TypeId,

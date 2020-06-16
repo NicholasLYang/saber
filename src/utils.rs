@@ -50,7 +50,7 @@ pub static UNIT_INDEX: usize = 5;
 
 impl TypeTable {
     pub fn new() -> TypeTable {
-        let mut table = TypeTable {
+        TypeTable {
             table: vec![
                 Type::Int,
                 Type::Float,
@@ -59,8 +59,7 @@ impl TypeTable {
                 Type::Bool,
                 Type::Unit,
             ],
-        };
-        table
+        }
     }
 
     pub fn insert(&mut self, type_: Type) -> TypeId {
@@ -73,7 +72,7 @@ impl TypeTable {
         self.table[id] = type_
     }
 
-    pub fn get_type(&mut self, id: TypeId) -> &Type {
+    pub fn get_type(&self, id: TypeId) -> &Type {
         &self.table[id]
     }
 }
