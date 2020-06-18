@@ -553,7 +553,10 @@ impl TypeChecker {
         let body_type = body.inner.get_type();
         let mut return_type = None;
         std::mem::swap(&mut return_type, &mut self.return_type);
-        let return_type = if body_type != UNIT_INDEX {
+
+        // If the body type is unit, we don't try to unify the body type
+        // with return type.
+        let mut return_type = if body_type != UNIT_INDEX {
             self.unify(return_type.unwrap(), body_type).ok_or_else(|| {
                 let type1 = self.type_table.get_type(return_type.unwrap()).clone();
                 let type2 = self.type_table.get_type(body_type).clone();
@@ -565,6 +568,11 @@ impl TypeChecker {
             })?
         } else {
             return_type.unwrap()
+        };
+
+        // If return type is a type var, we just set it be unit
+        if let Type::Var(_) = self.type_table.get_type(return_type) {
+            return_type = UNIT_INDEX;
         };
 
         let func_var_types = self.symbol_table.restore_vars(old_var_types);

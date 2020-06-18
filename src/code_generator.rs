@@ -24,8 +24,11 @@ pub enum GenerationError {
     FunctionNotDefined { name: String },
     #[fail(display = "Cannot have () as type")]
     EmptyType,
-    #[fail(display = "Code Generator: Could not infer type var {:?}", type_)]
-    CouldNotInfer { type_: Type },
+    #[fail(display = "{}: Could not infer type var {:?}", location, type_)]
+    CouldNotInfer {
+        location: LocationRange,
+        type_: Type,
+    },
     #[fail(display = "Code Generator: Not implemented yet! {}", reason)]
     NotImplemented { reason: &'static str },
     #[fail(display = "Code Generator: Not reachable")]
@@ -103,14 +106,14 @@ impl CodeGenerator {
 
     pub fn generate_program(mut self, program: Vec<Loc<StmtT>>) -> Result<ProgramData> {
         for stmt in program {
-            (&mut self).generate_top_level_stmt(&stmt.inner)?;
+            (&mut self).generate_top_level_stmt(&stmt)?;
         }
         self.generate_default_imports()?;
         Ok(self.program_data)
     }
 
-    pub fn generate_top_level_stmt(&mut self, stmt: &StmtT) -> Result<()> {
-        match stmt {
+    pub fn generate_top_level_stmt(&mut self, stmt: &Loc<StmtT>) -> Result<()> {
+        match &stmt.inner {
             StmtT::Function {
                 name,
                 params,
@@ -127,6 +130,7 @@ impl CodeGenerator {
                     *return_type,
                     local_variables,
                     body,
+                    stmt.location,
                 )?;
                 Ok(())
             }
@@ -171,6 +175,7 @@ impl CodeGenerator {
         return_type: TypeId,
         local_variables: &Vec<TypeId>,
         body: &Loc<ExprT>,
+        location: LocationRange,
     ) -> Result<usize> {
         let entry = self.symbol_table.lookup_name_in_scope(name, scope).unwrap();
         let index = if let EntryType::Function {
@@ -185,7 +190,8 @@ impl CodeGenerator {
             return Err(GenerationError::NotReachable);
         };
         let old_scope = self.symbol_table.restore_scope(scope);
-        let (type_, body) = self.generate_function(return_type, params, local_variables, body)?;
+        let (type_, body) =
+            self.generate_function(return_type, params, local_variables, body, location)?;
         let type_index = self.program_data.insert_type(type_);
         self.program_data.code_section[index] = Some(body);
         self.program_data.function_section[index] = Some(type_index);
@@ -199,10 +205,11 @@ impl CodeGenerator {
         params: &[(Name, TypeId)],
         local_variables: &Vec<TypeId>,
         body: &Loc<ExprT>,
+        location: LocationRange,
     ) -> Result<(FunctionType, FunctionBody)> {
-        let return_type = self.generate_wasm_type(return_type)?;
+        let return_type = self.generate_wasm_type(return_type, location)?;
         self.return_type = return_type.clone();
-        let function_type = self.generate_function_type(&return_type, params)?;
+        let function_type = self.generate_function_type(&return_type, params, location)?;
         let function_body = self.generate_function_body(body, local_variables, params.len())?;
         Ok((function_type, function_body))
     }
@@ -213,11 +220,12 @@ impl CodeGenerator {
         &mut self,
         return_type: &Option<WasmType>,
         params: &[(Name, TypeId)],
+        location: LocationRange,
     ) -> Result<FunctionType> {
         let mut wasm_param_types = Vec::new();
         for (_, param_type) in params {
             let wasm_type = self
-                .generate_wasm_type(*param_type)?
+                .generate_wasm_type(*param_type, location)?
                 .ok_or(GenerationError::EmptyType)?;
             wasm_param_types.push(wasm_type);
         }
@@ -239,7 +247,7 @@ impl CodeGenerator {
         // to after the params
         for local_type in &local_variables[param_count..] {
             let wasm_type = self
-                .generate_wasm_type(*local_type)?
+                .generate_wasm_type(*local_type, body.location)?
                 .ok_or(GenerationError::EmptyType)?;
             local_entries.push(LocalEntry {
                 count: 1,
@@ -252,15 +260,15 @@ impl CodeGenerator {
         })
     }
 
-    fn get_args_type(&self, arg_type: TypeId) -> Result<Vec<WasmType>> {
+    fn get_args_type(&self, arg_type: TypeId, location: LocationRange) -> Result<Vec<WasmType>> {
         if let Type::Tuple(elems) = self.type_table.get_type(arg_type) {
             let mut wasm_types = Vec::new();
             for elem in elems {
-                wasm_types.append(&mut self.get_args_type(*elem)?);
+                wasm_types.append(&mut self.get_args_type(*elem, location)?);
             }
             Ok(wasm_types)
         } else {
-            let wasm_type = match self.generate_wasm_type(arg_type)? {
+            let wasm_type = match self.generate_wasm_type(arg_type, location)? {
                 Some(t) => vec![t],
                 None => Vec::new(),
             };
@@ -268,7 +276,11 @@ impl CodeGenerator {
         }
     }
 
-    fn generate_wasm_type(&self, sbr_type: TypeId) -> Result<Option<WasmType>> {
+    fn generate_wasm_type(
+        &self,
+        sbr_type: TypeId,
+        location: LocationRange,
+    ) -> Result<Option<WasmType>> {
         match self.type_table.get_type(sbr_type) {
             Type::Unit => Ok(None),
             Type::Int | Type::Bool | Type::Char => Ok(Some(WasmType::i32)),
@@ -279,6 +291,7 @@ impl CodeGenerator {
             | Type::Record(_)
             | Type::Tuple(_) => Ok(Some(WasmType::i32)),
             Type::Var(id) => Err(GenerationError::CouldNotInfer {
+                location,
                 type_: Type::Var(*id),
             }),
         }
@@ -301,8 +314,8 @@ impl CodeGenerator {
         }
     }
 
-    fn generate_stmt(&mut self, stmt: &StmtT, is_last: bool) -> Result<Vec<OpCode>> {
-        match stmt {
+    fn generate_stmt(&mut self, stmt: &Loc<StmtT>, is_last: bool) -> Result<Vec<OpCode>> {
+        match &stmt.inner {
             StmtT::Function {
                 name,
                 params,
@@ -320,6 +333,7 @@ impl CodeGenerator {
                     *return_type,
                     local_variables,
                     body,
+                    stmt.location,
                 )?;
                 Ok(Vec::new())
             }
@@ -362,9 +376,7 @@ impl CodeGenerator {
             StmtT::Block(stmts) => {
                 let mut opcodes = Vec::new();
                 for (i, stmt) in stmts.iter().enumerate() {
-                    opcodes.append(
-                        &mut self.generate_stmt(&stmt.inner, is_last && i == stmts.len() - 1)?,
-                    );
+                    opcodes.append(&mut self.generate_stmt(stmt, is_last && i == stmts.len() - 1)?);
                 }
                 Ok(opcodes)
             }
@@ -433,8 +445,8 @@ impl CodeGenerator {
                         return Ok(opcodes);
                     };
                 }
-                let args_wasm_type = self.get_args_type(args.inner.get_type())?;
-                let return_wasm_type = self.generate_wasm_type(*type_)?;
+                let args_wasm_type = self.get_args_type(args.inner.get_type(), args.location)?;
+                let return_wasm_type = self.generate_wasm_type(*type_, expr.location)?;
                 let func_type = FunctionType {
                     param_types: args_wasm_type,
                     return_type: return_wasm_type,
@@ -470,6 +482,7 @@ impl CodeGenerator {
                     return_type,
                     local_variables,
                     body,
+                    expr.location,
                 )?;
                 self.program_data.elements_section.elems.push(index);
                 let table_index = self.program_data.elements_section.elems.len() - 1;
@@ -493,7 +506,7 @@ impl CodeGenerator {
                 self.symbol_table.restore_scope(*scope_index);
                 let mut opcodes = Vec::new();
                 for stmt in stmts {
-                    opcodes.append(&mut self.generate_stmt(&stmt.inner, false)?);
+                    opcodes.append(&mut self.generate_stmt(stmt, false)?);
                 }
                 if let Some(expr) = end_expr {
                     opcodes.append(&mut self.generate_expr(expr)?);
@@ -505,7 +518,8 @@ impl CodeGenerator {
                 let mut opcodes = self.generate_expr(cond)?;
                 opcodes.push(OpCode::If);
                 opcodes.push(OpCode::Type(
-                    self.generate_wasm_type(*type_)?.unwrap_or(WasmType::Empty),
+                    self.generate_wasm_type(*type_, expr.location)?
+                        .unwrap_or(WasmType::Empty),
                 ));
                 opcodes.append(&mut self.generate_expr(then_block)?);
                 if let Some(else_block) = else_block {
@@ -561,7 +575,7 @@ impl CodeGenerator {
                             reason: "Field doesn't exist: Should be caught by typechecker",
                         })?;
                     let field_wasm_type = self
-                        .generate_wasm_type(fields[field_position].1)?
+                        .generate_wasm_type(fields[field_position].1, expr.location)?
                         .unwrap_or(WasmType::Empty);
                     let offset: u32 = (4 * field_position).try_into().unwrap();
                     let load_code = match field_wasm_type {
@@ -665,7 +679,7 @@ impl CodeGenerator {
             opcodes.push(OpCode::GetGlobal(1));
             opcodes.append(&mut self.generate_expr(expr)?);
             let wasm_type = self
-                .generate_wasm_type(expr.inner.get_type())?
+                .generate_wasm_type(expr.inner.get_type(), expr.location)?
                 .unwrap_or(WasmType::Empty);
             let store_code = match wasm_type {
                 // Alignment of 2, offset of 0
