@@ -14,7 +14,7 @@ let foo = \() => {
     }
   };
   printString(p.name);
-  printString(p.school.name)
+  printString(p.school.name);
 }
 
 export foo;
