@@ -49,6 +49,8 @@ pub enum TypeError {
     },
     #[fail(display = "Callee is not a function")]
     CalleeNotFunction,
+    #[fail(display = "{}: Cannot return at top level", location)]
+    TopLevelReturn { location: LocationRange },
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -212,14 +214,16 @@ impl TypeChecker {
             Stmt::Asgn(pat, rhs) => Ok(self.asgn(pat, rhs, location)?),
             Stmt::Return(expr) => {
                 let typed_expr = self.expr(expr)?;
-                match self.return_type.clone() {
+                match self.return_type {
                     Some(return_type) => {
                         if self.is_unifiable(typed_expr.inner.get_type(), return_type) {
+                            println!("1");
                             Ok(vec![Loc {
                                 location,
                                 inner: StmtT::Return(typed_expr),
                             }])
                         } else {
+                            println!("2");
                             let type1 = self
                                 .type_table
                                 .get_type(typed_expr.inner.get_type())
@@ -232,13 +236,9 @@ impl TypeChecker {
                             })
                         }
                     }
-                    None => {
-                        self.return_type = Some(typed_expr.inner.get_type());
-                        Ok(vec![Loc {
-                            location,
-                            inner: StmtT::Return(typed_expr),
-                        }])
-                    }
+                    None => Err(TypeError::TopLevelReturn {
+                        location: stmt.location,
+                    }),
                 }
             }
             Stmt::Block(stmts) => {
@@ -540,34 +540,37 @@ impl TypeChecker {
         for (name, type_) in &func_params {
             self.symbol_table.insert_var(name.clone(), *type_);
         }
-        // Insert return type into typechecker so that
+        // Save the current return type
+        let mut old_return_type = self.return_type;
+
+        // Insert new return type into typechecker so that
         // typechecker can verify return statements.
         self.return_type = if let Some(return_type_sig) = return_type {
             Some(self.lookup_type_sig(&return_type_sig)?)
         } else {
             Some(self.get_fresh_type_var())
         };
+
         let body_location = body.location;
         // Check body
         let body = self.expr(body)?;
         let body_type = body.inner.get_type();
-        let mut return_type = None;
-        std::mem::swap(&mut return_type, &mut self.return_type);
-
+        std::mem::swap(&mut old_return_type, &mut self.return_type);
         // If the body type is unit, we don't try to unify the body type
         // with return type.
         let mut return_type = if body_type != UNIT_INDEX {
-            self.unify(return_type.unwrap(), body_type).ok_or_else(|| {
-                let type1 = self.type_table.get_type(return_type.unwrap()).clone();
-                let type2 = self.type_table.get_type(body_type).clone();
-                TypeError::UnificationFailure {
-                    location: body_location,
-                    type1,
-                    type2,
-                }
-            })?
+            self.unify(old_return_type.unwrap(), body_type)
+                .ok_or_else(|| {
+                    let type1 = self.type_table.get_type(old_return_type.unwrap()).clone();
+                    let type2 = self.type_table.get_type(body_type).clone();
+                    TypeError::UnificationFailure {
+                        location: body_location,
+                        type1,
+                        type2,
+                    }
+                })?
         } else {
-            return_type.unwrap()
+            old_return_type.unwrap()
         };
 
         // If return type is a type var, we just set it be unit
