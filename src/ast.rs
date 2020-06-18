@@ -31,20 +31,24 @@ pub enum Stmt {
 }
 
 #[derive(Debug, PartialEq, Clone)]
+pub struct FunctionT {
+    pub name: Name,
+    pub params: Vec<(Name, TypeId)>,
+    pub params_type: TypeId,
+    pub return_type: TypeId,
+    pub body: Box<Loc<ExprT>>,
+    pub local_variables: Vec<TypeId>,
+    pub type_: TypeId,
+}
+
+#[derive(Debug, PartialEq, Clone)]
 pub enum StmtT {
     Asgn(Name, Loc<ExprT>),
     Expr(Loc<ExprT>),
     Return(Loc<ExprT>),
     Block(Vec<Loc<StmtT>>),
-    Function {
-        name: Name,
-        params: Vec<(Name, TypeId)>,
-        params_type: TypeId,
-        return_type: TypeId,
-        body: Box<Loc<ExprT>>,
-        local_variables: Vec<TypeId>,
-        scope: usize,
-    },
+    // Second field is scope index. It's not in FunctionT for boring reasons
+    Function(FunctionT, usize),
     Export(Name),
 }
 
@@ -119,14 +123,8 @@ pub enum ExprT {
     },
     // Note: only used for anonymous functions. Functions that are
     // bound with let are TypedStmt::Function
-    Function {
-        params: Vec<(Name, TypeId)>,
-        body: Box<Loc<ExprT>>,
-        local_variables: Vec<TypeId>,
-        name: Name,
-        scope_index: usize,
-        type_: TypeId,
-    },
+    // Second field is scope index. It's not in FunctionT for boring reasons
+    Function(FunctionT, usize),
     Record {
         name: Name,
         fields: Vec<(Name, Loc<ExprT>)>,
@@ -296,14 +294,7 @@ impl ExprT {
                 rhs: _,
                 type_,
             } => *type_,
-            ExprT::Function {
-                params: _,
-                body: _,
-                name: _,
-                scope_index: _,
-                local_variables: _,
-                type_,
-            } => *type_,
+            ExprT::Function(func, _) => func.type_,
             ExprT::Field(_, _, type_) => *type_,
             ExprT::Call {
                 callee: _,

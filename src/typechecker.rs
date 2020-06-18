@@ -1,6 +1,6 @@
 use ast::{
-    Expr, ExprT, Loc, Name, Op, Pat, Program, Stmt, StmtT, Type, TypeDef, TypeId, TypeSig, UnaryOp,
-    Value,
+    Expr, ExprT, FunctionT, Loc, Name, Op, Pat, Program, Stmt, StmtT, Type, TypeDef, TypeId,
+    TypeSig, UnaryOp, Value,
 };
 use im::hashmap::HashMap;
 use lexer::LocationRange;
@@ -179,39 +179,32 @@ impl TypeChecker {
                     inner: StmtT::Expr(typed_expr),
                 }])
             }
-            Stmt::Function(func_name, params, return_type_sig, body) => {
+            Stmt::Function(name, params, return_type_sig, body) => {
                 let params_type = self.pat(&params)?;
                 let return_type = if let Some(type_sig) = &return_type_sig {
                     self.lookup_type_sig(type_sig)?
                 } else {
-                    self.get_fresh_type_var()
+                    println!("11");
+                    let var = self.get_fresh_type_var();
+                    println!("~11");
+                    var
                 };
                 let type_ = self
                     .type_table
                     .insert(Type::Arrow(params_type, return_type));
                 self.symbol_table
-                    .insert_function(func_name, params_type, return_type, type_);
+                    .insert_function(name, params_type, return_type, type_);
                 let previous_scope = self.symbol_table.push_scope(true);
-                let (params, body, return_type, local_variables) =
-                    self.function(params, *body, return_type_sig)?;
+                let func = self.function(name, params, *body, return_type_sig, params_type)?;
                 let func_scope = self.symbol_table.restore_scope(previous_scope);
-
                 self.type_table
                     .update(type_, Type::Arrow(params_type, return_type));
                 Ok(vec![Loc {
                     location,
-                    inner: StmtT::Function {
-                        name: func_name,
-                        params,
-                        params_type,
-                        return_type,
-                        body,
-                        local_variables,
-                        scope: func_scope,
-                    },
+                    inner: StmtT::Function(func, func_scope),
                 }])
             }
-            Stmt::Asgn(pat, rhs) => Ok(self.asgn(pat, rhs, location)?),
+            Stmt::Asgn(pat, rhs) => self.asgn(pat, rhs, location),
             Stmt::Return(expr) => {
                 let typed_expr = self.expr(expr)?;
                 match self.return_type {
@@ -531,10 +524,12 @@ impl TypeChecker {
      **/
     fn function(
         &mut self,
+        name: Name,
         params: Pat,
         body: Loc<Expr>,
         return_type: Option<Loc<TypeSig>>,
-    ) -> Result<(Vec<(Name, TypeId)>, Box<Loc<ExprT>>, TypeId, Vec<TypeId>), TypeError> {
+        params_type: TypeId,
+    ) -> Result<FunctionT, TypeError> {
         let old_var_types = self.symbol_table.reset_vars();
         let func_params = self.get_func_params(&params)?;
         for (name, type_) in &func_params {
@@ -579,7 +574,18 @@ impl TypeChecker {
         };
 
         let func_var_types = self.symbol_table.restore_vars(old_var_types);
-        Ok((func_params, Box::new(body), return_type, func_var_types))
+        let type_ = self
+            .type_table
+            .insert(Type::Arrow(params_type, return_type));
+        Ok(FunctionT {
+            name,
+            params: func_params,
+            params_type,
+            return_type,
+            body: Box::new(body),
+            local_variables: func_var_types,
+            type_,
+        })
     }
 
     fn expr(&mut self, expr: Loc<Expr>) -> Result<Loc<ExprT>, TypeError> {
@@ -665,27 +671,16 @@ impl TypeChecker {
                 body,
                 return_type: return_type_sig,
             } => {
-                let name = self.name_table.get_fresh_name();
                 let params_type = self.pat(&params)?;
                 let previous_scope = self.symbol_table.push_scope(true);
-                let (params, body, return_type, local_variables) =
-                    self.function(params, *body, return_type_sig)?;
+                let name = self.name_table.get_fresh_name();
+                let func = self.function(name, params, *body, return_type_sig, params_type)?;
                 let func_scope = self.symbol_table.restore_scope(previous_scope);
-                let type_ = self
-                    .type_table
-                    .insert(Type::Arrow(params_type, return_type));
                 self.symbol_table
-                    .insert_function(name, params_type, return_type, type_);
+                    .insert_function(name, params_type, func.return_type, func.type_);
                 let func = Loc {
                     location,
-                    inner: ExprT::Function {
-                        params,
-                        type_,
-                        body,
-                        name,
-                        local_variables,
-                        scope_index: func_scope,
-                    },
+                    inner: ExprT::Function(func, func_scope),
                 };
                 Ok(func)
             }
@@ -719,12 +714,17 @@ impl TypeChecker {
                 let typed_callee = self.expr(*callee)?;
                 let callee_type = typed_callee.inner.get_type();
                 let (params_type, return_type) = match self.type_table.get_type(callee_type) {
-                    Type::Arrow(params_type, return_type) => {
-                        (params_type.clone(), return_type.clone())
-                    }
+                    Type::Arrow(params_type, return_type) => (*params_type, *return_type),
                     Type::Var(_) => (self.get_fresh_type_var(), self.get_fresh_type_var()),
                     _ => return Err(TypeError::CalleeNotFunction),
                 };
+                println!("{:?}", typed_callee);
+                println!("Callee type: {}", self.type_table.get_type(callee_type));
+                println!(
+                    "Return type: {} {}",
+                    return_type,
+                    self.type_table.get_type(return_type)
+                );
                 let typed_args = self.expr(*args)?;
                 let args_type = typed_args.inner.get_type();
                 if self.is_unifiable(params_type, args_type) {
