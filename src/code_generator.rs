@@ -297,20 +297,19 @@ impl CodeGenerator {
         }
     }
 
-    fn get_var_index(&mut self, var: Name) -> Result<usize> {
-        match self
+    fn get_var_entry(&mut self, var: Name) -> Result<(usize, bool)> {
+        let entry = self
             .symbol_table
             .lookup_name(var)
-            .expect("Variable must be in scope")
-            .entry_type
-        {
+            .expect("Variable must be in scope");
+        match entry.entry_type {
             EntryType::Function {
                 index: _,
                 params_type: _,
                 return_type: _,
                 type_: _,
             } => Err(GenerationError::NotReachable),
-            EntryType::Var { index, var_type: _ } => Ok(index),
+            EntryType::Var { index, var_type: _ } => Ok((index, entry.is_enclosed_var)),
         }
     }
 
@@ -368,8 +367,20 @@ impl CodeGenerator {
                 }
             }
             StmtT::Asgn(name, expr) => {
-                let index = self.get_var_index(*name)?;
-                let mut opcodes = self.generate_expr(&expr)?;
+                let (index, is_enclosed) = self.get_var_entry(*name)?;
+                let mut opcodes = if is_enclosed && self.is_primitive(expr.inner.get_type()) {
+                    // All primitive types fit into 32 bits or 4 bytes
+                    let mut opcodes = self.generate_allocator(4);
+                    // Push on global 1 as expr value
+                    opcodes.push(OpCode::GetGlobal(1));
+                    // Push on global 1 as ptr to box
+                    opcodes.push(OpCode::GetGlobal(1));
+                    opcodes.append(&mut self.generate_expr(&expr)?);
+                    opcodes.push(OpCode::I32Store(2, 0));
+                    opcodes
+                } else {
+                    self.generate_expr(&expr)?
+                };
                 opcodes.push(OpCode::SetLocal(index.try_into().unwrap()));
                 Ok(opcodes)
             }
@@ -381,6 +392,14 @@ impl CodeGenerator {
                 Ok(opcodes)
             }
             _ => Ok(Vec::new()),
+        }
+    }
+
+    // We define primitives as types that are not boxed by default
+    fn is_primitive(&self, type_id: TypeId) -> bool {
+        match self.type_table.get_type(type_id) {
+            Type::Int | Type::Float | Type::Bool | Type::Char | Type::Arrow(_, _) => true,
+            _ => false,
         }
     }
 
@@ -416,9 +435,20 @@ impl CodeGenerator {
     fn generate_expr(&mut self, expr: &Loc<ExprT>) -> Result<Vec<OpCode>> {
         match &expr.inner {
             ExprT::Primary { value, type_: _ } => self.generate_primary(value),
-            ExprT::Var { name, type_: _ } => {
-                let index = self.get_var_index(*name)?;
-                Ok(vec![OpCode::GetLocal(index.try_into().unwrap())])
+            ExprT::Var { name, type_ } => {
+                let (index, is_enclosed) = self.get_var_entry(*name)?;
+                let mut opcodes = vec![OpCode::GetLocal(index.try_into().unwrap())];
+                if is_enclosed && self.is_primitive(*type_) {
+                    let load_code = match self.type_table.get_type(*type_) {
+                        Type::Int | Type::Bool | Type::Char | Type::Arrow(_, _) => {
+                            OpCode::I32Load(2, 0)
+                        }
+                        Type::Float => OpCode::F32Load(2, 0),
+                        _ => return Err(GenerationError::NotReachable),
+                    };
+                    opcodes.push(load_code);
+                }
+                Ok(opcodes)
             }
             ExprT::Call {
                 callee,
@@ -725,8 +755,9 @@ impl CodeGenerator {
                 }
                 // We tack on 4 more bytes for the length
                 let mut opcodes = self.generate_allocator(raw_str_length + 4);
-                // Pop on global 1 as return value (ptr to str)
+                // Push on global 1 to save it
                 opcodes.push(OpCode::GetGlobal(1));
+                // Push on global 1 as return value (ptr to str)
                 opcodes.push(OpCode::GetGlobal(1));
                 opcodes.push(OpCode::I32Const(raw_str_length));
                 opcodes.push(OpCode::I32Store(2, 0));

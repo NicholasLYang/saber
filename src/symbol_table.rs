@@ -123,7 +123,7 @@ impl SymbolTable {
     }
 
     pub fn insert_var(&mut self, name: Name, var_type: TypeId) {
-        self.var_types.push(var_type.clone());
+        self.var_types.push(var_type);
         self.scopes[self.current_scope].symbols.insert(
             name,
             SymbolEntry {

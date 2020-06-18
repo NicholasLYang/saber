@@ -1,16 +1,25 @@
-struct School {
-  name: string
+let bar = \() => {
+  let name = "Nicholas";
+  let age = 10;
+  \() => {
+    printString("Nicholas");
+    printInt(age);
+  }
 }
+
 struct Person {
   name: string,
-  school: School
+  age: int
 }
 
-let bar = \() => \() => 5
-
 let foo = \() => {
-  let f = bar();
-  printInt(f());
+  let p = Person {
+    name: "Nicholas",
+    age: 21
+  };
+  let { name, age } = p;
+  printString(name);
+  printInt(age);
 }
 
 export foo;

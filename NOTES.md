@@ -57,3 +57,9 @@ Use a crate? https://github.com/brendanzab/codespan
 ## Memory Allocation
 
 Global #0 is gonna be pointer to current heap max
+
+## Closures (cont)
+
+How do we reference a local defined in an outer function? We can heap allocate it by default in a 
+scope data structure, then pass the scope to the inner function somehow? Scopes need to be linked too since 
+functions can be nested multiple times.
