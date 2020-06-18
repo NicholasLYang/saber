@@ -2,9 +2,9 @@ use lexer::LocationRange;
 use parser::ParseError;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::sync::Arc;
 
 pub type Name = usize;
+pub type TypeId = usize;
 
 // Wrapper to provide location to AST nodes
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -38,11 +38,11 @@ pub enum StmtT {
     Block(Vec<Loc<StmtT>>),
     Function {
         name: Name,
-        params: Vec<(Name, Arc<Type>)>,
-        params_type: Arc<Type>,
-        return_type: Arc<Type>,
+        params: Vec<(Name, TypeId)>,
+        params_type: TypeId,
+        return_type: TypeId,
         body: Box<Loc<ExprT>>,
-        local_variables: Vec<Arc<Type>>,
+        local_variables: Vec<TypeId>,
         scope: usize,
     },
     Export(Name),
@@ -90,56 +90,55 @@ pub enum ExprT {
         stmts: Vec<Loc<StmtT>>,
         end_expr: Option<Box<Loc<ExprT>>>,
         scope_index: usize,
-        type_: Arc<Type>,
+        type_: TypeId,
     },
     If(
         Box<Loc<ExprT>>,
         Box<Loc<ExprT>>,
         Option<Box<Loc<ExprT>>>,
-        Arc<Type>,
+        TypeId,
     ),
     Primary {
         value: Value,
-        type_: Arc<Type>,
+        type_: TypeId,
     },
     Var {
         name: Name,
-        type_: Arc<Type>,
+        type_: TypeId,
     },
     BinOp {
         op: Op,
         lhs: Box<Loc<ExprT>>,
         rhs: Box<Loc<ExprT>>,
-        type_: Arc<Type>,
+        type_: TypeId,
     },
     UnaryOp {
         op: UnaryOp,
         rhs: Box<Loc<ExprT>>,
-        type_: Arc<Type>,
+        type_: TypeId,
     },
     // Note: only used for anonymous functions. Functions that are
     // bound with let are TypedStmt::Function
     Function {
-        params: Vec<(Name, Arc<Type>)>,
-        params_type: Arc<Type>,
-        return_type: Arc<Type>,
+        params: Vec<(Name, TypeId)>,
         body: Box<Loc<ExprT>>,
-        local_variables: Vec<Arc<Type>>,
+        local_variables: Vec<TypeId>,
         name: Name,
         scope_index: usize,
+        type_: TypeId,
     },
     Record {
         name: Name,
         fields: Vec<(Name, Loc<ExprT>)>,
-        type_: Arc<Type>,
+        type_: TypeId,
     },
-    Field(Box<Loc<ExprT>>, Name, Arc<Type>),
+    Field(Box<Loc<ExprT>>, Name, TypeId),
     Call {
         callee: Box<Loc<ExprT>>,
         args: Box<Loc<ExprT>>,
-        type_: Arc<Type>,
+        type_: TypeId,
     },
-    Tuple(Vec<Loc<ExprT>>, Arc<Type>),
+    Tuple(Vec<Loc<ExprT>>, TypeId),
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -207,8 +206,7 @@ impl fmt::Display for Op {
     }
 }
 
-// Yeah this is hilariously basic rn.
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, Hash, PartialEq, Eq, Clone, Serialize, Deserialize)]
 pub enum Type {
     Unit,
     Float,
@@ -217,10 +215,10 @@ pub enum Type {
     Char,
     String,
     Var(Name),
-    Array(Arc<Type>),
-    Record(Vec<(Name, Arc<Type>)>),
-    Tuple(Vec<Arc<Type>>),
-    Arrow(Arc<Type>, Arc<Type>),
+    Array(TypeId),
+    Record(Vec<(Name, TypeId)>),
+    Tuple(Vec<TypeId>),
+    Arrow(TypeId, TypeId),
 }
 
 impl fmt::Display for Type {
@@ -282,49 +280,48 @@ pub enum Pat {
 
 // Oy vey, cause Rust doesn't allow enum field access
 impl ExprT {
-    pub fn get_type(&self) -> Arc<Type> {
+    pub fn get_type(&self) -> TypeId {
         match &self {
-            ExprT::Primary { value: _, type_ } => type_.clone(),
-            ExprT::Var { name: _, type_ } => type_.clone(),
-            ExprT::Tuple(_elems, type_) => type_.clone(),
+            ExprT::Primary { value: _, type_ } => *type_,
+            ExprT::Var { name: _, type_ } => *type_,
+            ExprT::Tuple(_elems, type_) => *type_,
             ExprT::BinOp {
                 op: _,
                 lhs: _,
                 rhs: _,
                 type_,
-            } => type_.clone(),
+            } => *type_,
             ExprT::UnaryOp {
                 op: _,
                 rhs: _,
                 type_,
-            } => type_.clone(),
+            } => *type_,
             ExprT::Function {
                 params: _,
                 body: _,
                 name: _,
                 scope_index: _,
                 local_variables: _,
-                params_type,
-                return_type,
-            } => Arc::new(Type::Arrow(params_type.clone(), return_type.clone())),
-            ExprT::Field(_, _, type_) => type_.clone(),
+                type_,
+            } => *type_,
+            ExprT::Field(_, _, type_) => *type_,
             ExprT::Call {
                 callee: _,
                 args: _,
                 type_,
-            } => type_.clone(),
+            } => *type_,
             ExprT::Block {
                 stmts: _,
                 end_expr: _,
                 scope_index: _,
                 type_,
-            } => type_.clone(),
+            } => *type_,
             ExprT::Record {
                 name: _,
                 fields: _,
                 type_,
-            } => type_.clone(),
-            ExprT::If(_, _, _, type_) => type_.clone(),
+            } => *type_,
+            ExprT::If(_, _, _, type_) => *type_,
         }
     }
 }
