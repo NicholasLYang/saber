@@ -27,6 +27,7 @@ mod code_generator;
 mod emitter;
 mod lexer;
 mod parser;
+mod printer;
 mod symbol_table;
 mod typechecker;
 mod types;

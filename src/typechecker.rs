@@ -4,6 +4,7 @@ use ast::{
 };
 use im::hashmap::HashMap;
 use lexer::LocationRange;
+use printer::type_to_string;
 use std::sync::Arc;
 use symbol_table::{EntryType, SymbolTable};
 use utils::{
@@ -30,8 +31,8 @@ pub enum TypeError {
     #[fail(display = "{}: Could not unify {} with {}", location, type1, type2)]
     UnificationFailure {
         location: LocationRange,
-        type1: Type,
-        type2: Type,
+        type1: String,
+        type2: String,
     },
     #[fail(display = "{}: Type {} does not exist", location, type_name)]
     TypeDoesNotExist {
@@ -224,11 +225,13 @@ impl TypeChecker {
                             }])
                         } else {
                             println!("2");
-                            let type1 = self
-                                .type_table
-                                .get_type(typed_expr.inner.get_type())
-                                .clone();
-                            let type2 = self.type_table.get_type(return_type).clone();
+                            let type1 = type_to_string(
+                                &self.name_table,
+                                &self.type_table,
+                                typed_expr.inner.get_type(),
+                            );
+                            let type2 =
+                                type_to_string(&self.name_table, &self.type_table, return_type);
                             Err(TypeError::UnificationFailure {
                                 location,
                                 type1,
@@ -511,8 +514,12 @@ impl TypeChecker {
             bindings.append(&mut pat_bindings);
             Ok(bindings)
         } else {
-            let type1 = self.type_table.get_type(pat_type).clone();
-            let type2 = self.type_table.get_type(typed_rhs.inner.get_type()).clone();
+            let type1 = type_to_string(&self.name_table, &self.type_table, pat_type);
+            let type2 = type_to_string(
+                &self.name_table,
+                &self.type_table,
+                typed_rhs.inner.get_type(),
+            );
             Err(TypeError::UnificationFailure {
                 location,
                 type1,
@@ -561,8 +568,12 @@ impl TypeChecker {
         let mut return_type = if body_type != UNIT_INDEX {
             self.unify(old_return_type.unwrap(), body_type)
                 .ok_or_else(|| {
-                    let type1 = self.type_table.get_type(old_return_type.unwrap()).clone();
-                    let type2 = self.type_table.get_type(body_type).clone();
+                    let type1 = type_to_string(
+                        &self.name_table,
+                        &self.type_table,
+                        old_return_type.unwrap(),
+                    );
+                    let type2 = type_to_string(&self.name_table, &self.type_table, body_type);
                     TypeError::UnificationFailure {
                         location: body_location,
                         type1,
@@ -737,8 +748,8 @@ impl TypeChecker {
                         },
                     })
                 } else {
-                    let type1 = self.type_table.get_type(params_type).clone();
-                    let type2 = self.type_table.get_type(args_type).clone();
+                    let type1 = type_to_string(&self.name_table, &self.type_table, params_type);
+                    let type2 = type_to_string(&self.name_table, &self.type_table, args_type);
                     Err(TypeError::UnificationFailure {
                         location,
                         type1,
@@ -777,8 +788,8 @@ impl TypeChecker {
                     let typed_else_block = self.expr(*else_block)?;
                     let else_type = typed_else_block.inner.get_type();
                     if !self.is_unifiable(then_type, else_type) {
-                        let type1 = self.type_table.get_type(then_type).clone();
-                        let type2 = self.type_table.get_type(else_type).clone();
+                        let type1 = type_to_string(&self.name_table, &self.type_table, then_type);
+                        let type2 = type_to_string(&self.name_table, &self.type_table, else_type);
                         return Err(TypeError::UnificationFailure {
                             location,
                             type1,
@@ -795,10 +806,10 @@ impl TypeChecker {
                         ),
                     })
                 } else if !self.is_unifiable(UNIT_INDEX, then_type) {
-                    let type2 = self.type_table.get_type(then_type).clone();
+                    let type2 = type_to_string(&self.name_table, &self.type_table, then_type);
                     Err(TypeError::UnificationFailure {
                         location,
-                        type1: Type::Unit,
+                        type1: "()".to_string(),
                         type2,
                     })
                 } else {
@@ -834,8 +845,8 @@ impl TypeChecker {
                 let expr_type = self.type_table.insert(Type::Record(field_types));
                 let type_ = self.unify(expr_type, type_id).ok_or_else(|| {
                     TypeError::UnificationFailure {
-                        type1: self.type_table.get_type(expr_type).clone(),
-                        type2: self.type_table.get_type(type_id).clone(),
+                        type1: type_to_string(&self.name_table, &self.type_table, expr_type),
+                        type2: type_to_string(&self.name_table, &self.type_table, type_id),
                         location,
                     }
                 })?;

@@ -6,11 +6,9 @@ struct Person {
   school: School
 }
 
-let bar = \() => \() => 5
-
 let foo = \() => {
-  let f = bar();
-  printInt(f());
+  let p = Person { name: "Nicholas" };
+  printString(p.name);
 }
 
 export foo;

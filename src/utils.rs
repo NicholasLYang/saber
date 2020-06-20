@@ -19,11 +19,11 @@ impl NameTable {
         }
     }
 
-    pub fn get_id(&mut self, sym: &String) -> Option<&usize> {
+    pub fn get_id(&self, sym: &String) -> Option<&usize> {
         self.0.get_by_left(sym)
     }
 
-    pub fn get_str(&mut self, id: &usize) -> &str {
+    pub fn get_str(&self, id: &usize) -> &str {
         self.0.get_by_right(id).unwrap()
     }
 
