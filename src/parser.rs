@@ -1,6 +1,7 @@
 use crate::ast::{Expr, Name, Op, Pat, Stmt, TypeSig, Value};
 use crate::lexer::{Lexer, LexicalError, LocationRange, Token, TokenDiscriminants};
 use ast::{Loc, Program, TypeDef, UnaryOp};
+use printer::token_to_string;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use utils::NameTable;
@@ -25,8 +26,9 @@ pub enum ParseError {
         location, token, expected_tokens
     )]
     UnexpectedToken {
-        token: Token,
-        expected_tokens: Vec<TokenDiscriminants>,
+        token: String,
+        token_type: TokenDiscriminants,
+        expected_tokens: String,
         location: LocationRange,
     },
     #[fail(display = "{}: Cannot destructure a function", location)]
@@ -72,9 +74,10 @@ impl<'input> Parser<'input> {
                 Ok((token, location))
             } else {
                 Err(ParseError::UnexpectedToken {
-                    token,
+                    token: token_to_string(&self.lexer.name_table, &token),
+                    token_type: token.into(),
                     location,
-                    expected_tokens: vec![expected],
+                    expected_tokens: format!("{}", expected),
                 })
             }
         } else {
@@ -118,13 +121,14 @@ impl<'input> Parser<'input> {
     }
 
     fn bump(&mut self) -> Result<Option<(Token, LocationRange)>, ParseError> {
-        match self.pushedback_tokens.pop() {
+        let tok = match self.pushedback_tokens.pop() {
             Some(tok) => Ok(Some(tok)),
             None => match self.lexer.next() {
                 Some(tok) => Ok(Some(tok?)),
                 None => Ok(None),
             },
-        }
+        };
+        tok
     }
 
     fn peek(&mut self) -> Result<(), ParseError> {
@@ -204,8 +208,9 @@ impl<'input> Parser<'input> {
             Some((Token::Ident(id), loc)) => Ok((id, loc)),
             Some((token, location)) => Err(ParseError::UnexpectedToken {
                 location,
-                token,
-                expected_tokens: vec![TokenDiscriminants::Ident],
+                token: token_to_string(&self.lexer.name_table, &token),
+                token_type: token.into(),
+                expected_tokens: format!("{}", TokenDiscriminants::Ident),
             }),
             None => Err(ParseError::EndOfFile {
                 expected_tokens: vec![TokenDiscriminants::Ident],
@@ -265,16 +270,18 @@ impl<'input> Parser<'input> {
                 // Special case if the unexpected token is a semicolon
                 // since that's our recovery token
                 if let ParseError::UnexpectedToken {
-                    token,
+                    token: _,
+                    token_type,
                     location: _,
                     expected_tokens: _,
                 } = &err
                 {
-                    if token == &Token::Semicolon {
+                    if token_type == &TokenDiscriminants::Semicolon {
                         self.errors.push(err);
                         return Ok(None);
                     }
                 }
+                self.errors.push(err);
                 self.recover_from_error(TokenDiscriminants::Semicolon)?;
                 Ok(None)
             }
@@ -294,8 +301,9 @@ impl<'input> Parser<'input> {
             Some((token, location)) => {
                 self.pushback((token.clone(), location.clone()));
                 Err(ParseError::UnexpectedToken {
-                    token,
-                    expected_tokens: vec![TokenDiscriminants::Ident],
+                    token: token_to_string(&self.lexer.name_table, &token),
+                    token_type: token.into(),
+                    expected_tokens: format!("{}", TokenDiscriminants::Ident),
                     location,
                 })
             }
@@ -583,9 +591,10 @@ impl<'input> Parser<'input> {
                     }
                     Some((token, location)) => {
                         return Err(ParseError::UnexpectedToken {
-                            token,
+                            token: token_to_string(&self.lexer.name_table, &token),
+                            token_type: token.into(),
                             location,
-                            expected_tokens: vec![TokenDiscriminants::Ident],
+                            expected_tokens: format!("{}", TokenDiscriminants::Ident),
                         })
                     }
                     None => {
@@ -698,18 +707,23 @@ impl<'input> Parser<'input> {
                     })
                 }
             }
-            token => Err(ParseError::UnexpectedToken {
-                token,
-                location,
-                expected_tokens: vec![
+            token => {
+                let expected_tokens = format!(
+                    "{}, {}, {}, {}, {}, {}",
                     TokenDiscriminants::True,
                     TokenDiscriminants::False,
                     TokenDiscriminants::Integer,
                     TokenDiscriminants::Float,
                     TokenDiscriminants::String,
                     TokenDiscriminants::LParen,
-                ],
-            }),
+                );
+                Err(ParseError::UnexpectedToken {
+                    token: token_to_string(&self.lexer.name_table, &token),
+                    token_type: token.into(),
+                    location,
+                    expected_tokens,
+                })
+            }
         }
     }
 
@@ -793,13 +807,15 @@ impl<'input> Parser<'input> {
             }
             token => {
                 return Err(ParseError::UnexpectedToken {
-                    token,
+                    token: token_to_string(&self.lexer.name_table, &token),
+                    token_type: token.into(),
                     location: left,
-                    expected_tokens: vec![
+                    expected_tokens: format!(
+                        "{}, {}, {}",
                         TokenDiscriminants::LParen,
                         TokenDiscriminants::LBrace,
                         TokenDiscriminants::Ident,
-                    ],
+                    ),
                 })
             }
         }
@@ -810,9 +826,10 @@ impl<'input> Parser<'input> {
         match token {
             Some((Token::Ident(name), _)) => Ok(name),
             Some((token, location)) => Err(ParseError::UnexpectedToken {
-                token,
+                token: token_to_string(&self.lexer.name_table, &token),
+                token_type: token.into(),
                 location,
-                expected_tokens: vec![TokenDiscriminants::Ident],
+                expected_tokens: format!("{}", TokenDiscriminants::Ident),
             }),
             _ => Err(ParseError::EndOfFile {
                 expected_tokens: vec![TokenDiscriminants::Ident],
@@ -866,9 +883,14 @@ impl<'input> Parser<'input> {
                 })
             }
             Some((token, location)) => Err(ParseError::UnexpectedToken {
-                token,
+                token: token_to_string(&self.lexer.name_table, &token),
+                token_type: token.into(),
                 location,
-                expected_tokens: vec![TokenDiscriminants::LBracket, TokenDiscriminants::Ident],
+                expected_tokens: format!(
+                    "{}, {}",
+                    TokenDiscriminants::LBracket,
+                    TokenDiscriminants::Ident
+                ),
             }),
             None => Err(ParseError::EndOfFile {
                 expected_tokens: vec![TokenDiscriminants::LBracket, TokenDiscriminants::Ident],
