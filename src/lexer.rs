@@ -162,7 +162,7 @@ pub enum LexicalError {
     #[fail(display = "{}: Invalid character '{}'", location, ch)]
     InvalidCharacter { ch: char, location: LocationRange },
 
-    #[fail(display = "String starting at {} was not terminated", location)]
+    #[fail(display = "{}: String was not terminated", location)]
     UnterminatedString { location: Location },
 }
 

@@ -15,7 +15,7 @@ pub struct Parser<'input> {
 #[derive(Debug, Fail, PartialEq, Clone, Serialize, Deserialize)]
 pub enum ParseError {
     #[fail(
-        display = "ParseError: Reached end of file without completing parse. Expected these tokens: {:?}",
+        display = "Reached end of file without completing parse. Expected these tokens: {:?}",
         expected_tokens
     )]
     EndOfFile {
@@ -34,10 +34,11 @@ pub enum ParseError {
     #[fail(display = "{}: Cannot destructure a function", location)]
     DestructureFunction { location: LocationRange },
     #[fail(
-        display = "Cannot have a type signature on a let function binding (use type signatures in the function!)"
+        display = "{}: Cannot have a type signature on a let function binding (use type signatures in the function!)",
+        location
     )]
-    FuncBindingTypeSig,
-    #[fail(display = "Lexer error: {}", err)]
+    FuncBindingTypeSig { location: LocationRange },
+    #[fail(display = "{}", err)]
     LexicalError { err: LexicalError },
     #[fail(display = "Should not be reachable")]
     NotReachable,
@@ -341,7 +342,7 @@ impl<'input> Parser<'input> {
                     location: LocationRange(left.0, location.1),
                     inner: Stmt::Function(name, params, return_type, body),
                 }),
-                Pat::Id(_, _, _) => Err(ParseError::FuncBindingTypeSig),
+                Pat::Id(_, _, _) => Err(ParseError::FuncBindingTypeSig { location }),
                 Pat::Record(_, _, location) | Pat::Empty(location) | Pat::Tuple(_, location) => {
                     Err(ParseError::DestructureFunction { location })
                 }
