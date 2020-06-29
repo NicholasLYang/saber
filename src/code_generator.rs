@@ -677,7 +677,9 @@ impl CodeGenerator {
         }
         // Size of record in bytes
         let record_size: i32 = (4 * fields.len()).try_into().unwrap();
-        let mut opcodes = self.generate_allocator(record_size);
+        let mut opcodes = vec![OpCode::I32Const(record_size), OpCode::Call(ALLOC_INDEX)];
+        // Save pointer to block at global 1
+        opcodes.push(OpCode::SetGlobal(1));
         // We need to write the struct to memory. This consists of
         // looping through entries, generating the opcodes and
         // storing them in the heap

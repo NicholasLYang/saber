@@ -1,3 +1,4 @@
+extern crate base64;
 extern crate bimap;
 extern crate byteorder;
 extern crate failure;
@@ -62,9 +63,14 @@ fn read_file(file_name: &str) -> Result<()> {
     let typed_program = typechecker.check_program(program)?;
     let code_generator = CodeGenerator::new(typechecker);
     let program = code_generator.generate_program(typed_program)?;
-    let out_file = File::create("build/out.wasm")?;
-    let mut emitter = Emitter::new(out_file);
+    let mut emitter = Emitter::new();
     emitter.emit_program(program)?;
+    let js_str = format!(
+        "const code = \"{}\"; module.exports = code",
+        emitter.output_base64()
+    );
+    let mut js_file = File::create("build/code.js")?;
+    js_file.write_all(js_str.as_bytes())?;
     Ok(())
 }
 

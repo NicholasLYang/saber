@@ -1,7 +1,6 @@
 use crate::types::Result;
 use byteorder::{LittleEndian, WriteBytesExt};
 use std::convert::TryInto;
-use std::fs::File;
 use std::io::prelude::*;
 use wasm::{
     ElemSegment, ExportEntry, FunctionBody, FunctionType, GlobalType, ImportEntry, ImportKind,
@@ -9,7 +8,7 @@ use wasm::{
 };
 
 pub struct Emitter {
-    file: File,
+    output: Vec<u8>,
     buffer: Vec<u8>,
 }
 
@@ -141,9 +140,9 @@ pub fn emit_code<T: Write>(mut dest: T, op_code: OpCode) -> Result<()> {
 }
 
 impl Emitter {
-    pub fn new(file: File) -> Emitter {
+    pub fn new() -> Emitter {
         Emitter {
-            file,
+            output: Vec::new(),
             buffer: Vec::new(),
         }
     }
@@ -166,9 +165,13 @@ impl Emitter {
         emit_code(&mut self.buffer, op_code)
     }
 
+    pub fn output_base64(&mut self) -> String {
+        base64::encode(&self.output)
+    }
+
     pub fn flush_buffer(&mut self) -> Result<()> {
         // Flush buffer
-        self.file.write_all(&self.buffer)?;
+        self.output.write_all(&self.buffer)?;
         self.buffer = Vec::new();
         Ok(())
     }
@@ -178,7 +181,7 @@ impl Emitter {
         for opcode in opcodes {
             self.emit_code(opcode)?;
         }
-        leb128::write::unsigned(&mut self.file, usize_to_u64(self.buffer.len())?)?;
+        leb128::write::unsigned(&mut self.output, usize_to_u64(self.buffer.len())?)?;
         self.flush_buffer()
     }
 

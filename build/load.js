@@ -1,8 +1,22 @@
 const { readFileSync, writeFileSync } = require("fs");
-const path = require("path");
+const code = require("./code.js");
 
-const instantiate = async (fileName) => {
-    const buffer = readFileSync(path.join(__dirname, `${fileName}.wasm`));
+function atob(a) {
+    return new Buffer(a, 'base64').toString('binary');
+};
+
+function base64ToArray(base64) {
+    const characters = atob(base64);
+    const array = new Uint8Array(characters.length);
+
+    for (let i = 0; i < characters.length; i++) {
+        array[i] = characters.charCodeAt(i);
+    }
+    return array;
+}
+
+const instantiate = async () => {
+    const buffer = base64ToArray(code);
     const module = await WebAssembly.compile(buffer);
     const memory = new WebAssembly.Memory({ initial: 1 });
     const importObject = {
@@ -45,34 +59,37 @@ const PAGE_SIZE = 65536;
 
 // Takes in size in bytes
 const alloc = memory => size => {
-    // size + 4 because we gotta tack on a block length
-    const alignedSize = ((size + 4) + 3) & ~0x03;
+    // size + 8 because we gotta tack on a block length and refcount
+    const alignedSize = ((size + 8) + 3) & ~0x03;
     let memArray = new Uint32Array(memory.buffer);
     let ptr = 0;
     while (ptr < memArray.length) {
         const len = memArray[ptr];
         // If length is 0, block is not initialized. We can assume everything
         // from here to end of array is free
-        // We multiply (memArray.length - ptr) by 4 because they're dealing with
-        // a 32 bit array
         if (len === 0) {
+            // We multiply (memArray.length - ptr) by 4 because they're dealing with
+            // a 32 bit array
             if ((memArray.length - ptr) * 4 > alignedSize) {
                 // Or with 1 to indicate allocated
                 memArray[ptr] = alignedSize | 1;
-                return (ptr + 1) * 4;
+                memArray[ptr + 1] = 1;
+                return (ptr + 2) * 4;
             } else {
                 memory.grow(Math.max(alignedSize/PAGE_SIZE, 1));
                 memArray = new Uint32Array(memory.buffer);
                 memArray[ptr] = alignedSize | 1;
-                return (ptr + 1) * 4;
+                memArray[ptr + 1] = 1;
+                return (ptr + 2) * 4;
             }
         // If the block is allocated, we move on
         } else if ((len & 1) === 1) {
-            ptr += len - 1
+            ptr += len
         // If the length is big enough, we allocate the block
         } else if (len > alignedSize) {
             memArray[ptr] = len + 1;
-            return (ptr + 1) * 4;
+            memArray[ptr + 1] = 1;
+            return (ptr + 2) * 4;
         } else {
             ptr += len;
         }
@@ -80,10 +97,18 @@ const alloc = memory => size => {
     memory.grow(Math.max(alignedSize/PAGE_SIZE, 1));
     memArray = new Uint32Array(memory.buffer);
     memArray[ptr] = alignedSize | 1;
-    return (ptr + 1) * 4;
+    memArray[ptr + 1] = 1;
+    return (ptr + 2) * 4;
+};
+
+const dealloc = memory => ptr => {
+    memArray[ptr + 1] -= 1;
+    if (memArray[ptr + 1] === 0) {
+
+    }
 }
 
-instantiate("out")
+instantiate()
     .then(res => {
 	console.log(res);
     })
