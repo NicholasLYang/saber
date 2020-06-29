@@ -116,6 +116,7 @@ impl TypeChecker {
             UNIT_INDEX,
             type_table.insert(Type::Arrow(STR_INDEX, UNIT_INDEX)),
         );
+
         TypeChecker {
             symbol_table,
             type_names: build_type_names(&mut name_table),

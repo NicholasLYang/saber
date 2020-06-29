@@ -1,7 +1,7 @@
 use ast::{ExprT, Loc, Name, Op, StmtT, Type, TypeId, UnaryOp, Value};
 use lexer::LocationRange;
 use std::convert::TryInto;
-use symbol_table::{EntryType, SymbolTable};
+use symbol_table::{EntryType, SymbolTable, ALLOC_INDEX};
 use typechecker::TypeChecker;
 use utils::{NameTable, TypeTable, FLOAT_INDEX, UNIT_INDEX};
 use wasm::{
@@ -70,6 +70,18 @@ impl CodeGenerator {
     }
 
     fn generate_default_imports(&mut self) -> Result<()> {
+        let alloc_type = FunctionType {
+            param_types: vec![WasmType::i32],
+            return_type: Some(WasmType::i32),
+        };
+        let alloc_type_index = self.program_data.insert_type(alloc_type);
+        self.program_data.import_section.push(ImportEntry {
+            module_str: "std".into(),
+            field_str: "alloc".into(),
+            kind: ImportKind::Function {
+                type_: alloc_type_index,
+            },
+        });
         let print_int_type = FunctionType {
             param_types: vec![WasmType::i32],
             return_type: None,
@@ -723,8 +735,13 @@ impl CodeGenerator {
                 while bytes.len() % 4 != 0 {
                     bytes.push(0);
                 }
+                let buffer_length: i32 = bytes.len().try_into().expect("String is too long");
                 // We tack on 4 more bytes for the length
-                let mut opcodes = self.generate_allocator(raw_str_length + 4);
+                let mut opcodes = vec![
+                    OpCode::I32Const(buffer_length + 4),
+                    OpCode::Call(ALLOC_INDEX),
+                ];
+                opcodes.push(OpCode::SetGlobal(1));
                 // Pop on global 1 as return value (ptr to str)
                 opcodes.push(OpCode::GetGlobal(1));
                 opcodes.push(OpCode::GetGlobal(1));
