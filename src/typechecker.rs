@@ -731,10 +731,14 @@ impl TypeChecker {
                 let typed_callee = self.expr(*callee)?;
                 let callee_type = typed_callee.inner.get_type();
                 let (params_type, return_type) = match self.type_table.get_type(callee_type) {
-                    Type::Arrow(params_type, return_type) => {
-                        (params_type.clone(), return_type.clone())
+                    Type::Arrow(params_type, return_type) => (*params_type, *return_type),
+                    Type::Var(_) => {
+                        let params_type = self.get_fresh_type_var();
+                        let return_type = self.get_fresh_type_var();
+                        self.type_table
+                            .insert(Type::Arrow(params_type, return_type));
+                        (params_type, return_type)
                     }
-                    Type::Var(_) => (self.get_fresh_type_var(), self.get_fresh_type_var()),
                     _ => return Err(TypeError::CalleeNotFunction),
                 };
                 let typed_args = self.expr(*args)?;
