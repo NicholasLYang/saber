@@ -3,7 +3,7 @@ use lexer::LocationRange;
 use std::convert::TryInto;
 use symbol_table::{EntryType, SymbolTable, ALLOC_INDEX};
 use typechecker::TypeChecker;
-use utils::{NameTable, TypeTable, FLOAT_INDEX, UNIT_INDEX};
+use utils::{NameTable, TypeTable, FLOAT_INDEX};
 use wasm::{
     ExportEntry, ExternalKind, FunctionBody, FunctionType, ImportEntry, ImportKind, LocalEntry,
     OpCode, ProgramData, WasmType,
@@ -351,8 +351,9 @@ impl CodeGenerator {
             }
             StmtT::Expr(expr) => {
                 let mut opcodes = self.generate_expr(expr)?;
-                if expr.inner.get_type() != UNIT_INDEX {
-                    opcodes.push(OpCode::Drop);
+                match self.type_table.get_type(expr.inner.get_type()) {
+                    Type::Unit => {}
+                    _ => opcodes.push(OpCode::Drop),
                 }
                 if is_last {
                     // If the return type is empty, we can safely return
@@ -610,59 +611,6 @@ impl CodeGenerator {
                 type_: _,
             } => self.generate_record_literal(fields, expr.location),
         }
-    }
-
-    // Generates very simple allocator scheme
-    // Checks if there's enough space and if not,
-    // it allocates more
-    // This is hella hacky but basically I don't feel like
-    // making this a builtin wasm function
-    // (I'd need to inject it into the symbol table somehow)
-    // I'm using globals as registers
-    // Global 0 is heap ptr
-    // Global 1 is "return"
-    fn generate_allocator(&self, memory_size: i32) -> Vec<OpCode> {
-        let mut opcodes = Vec::new();
-        opcodes.push(OpCode::I32Const(memory_size));
-        // Global 0 is current heap pointer
-        opcodes.push(OpCode::GetGlobal(0));
-        // Add record size to current memory size
-        opcodes.push(OpCode::I32Add);
-
-        // Get current memory allocated in pages
-        opcodes.push(OpCode::CurrentMemory);
-        // 64 * 1024 = 65536 bytes per page
-        opcodes.push(OpCode::I32Const(65536));
-        opcodes.push(OpCode::I32Mul);
-
-        // Currently on stack: [heap_ptr + sizeof(record), pages_allocated * PAGE_SIZE]
-        // If heap_ptr + sizeof(record) > pages_allocated * PAGE_SIZE...
-        opcodes.push(OpCode::I32GreaterUnsigned);
-        opcodes.push(OpCode::If);
-        opcodes.push(OpCode::Type(WasmType::Empty));
-        // ...we call GrowMemory
-        // Right now we only grow in increments of one page. In the future we can grow
-        // beyond that to store large values
-        opcodes.push(OpCode::I32Const(1));
-        opcodes.push(OpCode::GrowMemory);
-        opcodes.push(OpCode::I32Const(-1));
-        opcodes.push(OpCode::I32Eq);
-        opcodes.push(OpCode::If);
-        opcodes.push(OpCode::Type(WasmType::Empty));
-        opcodes.push(OpCode::Unreachable);
-        opcodes.push(OpCode::End);
-        opcodes.push(OpCode::End);
-
-        // We set Global 1 to old heap ptr
-        opcodes.push(OpCode::GetGlobal(0));
-        opcodes.push(OpCode::SetGlobal(1));
-        // We need to update heap ptr
-        opcodes.push(OpCode::I32Const(memory_size));
-        opcodes.push(OpCode::GetGlobal(0));
-        opcodes.push(OpCode::I32Add);
-        opcodes.push(OpCode::SetGlobal(0));
-
-        opcodes
     }
 
     fn generate_record_literal(

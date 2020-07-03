@@ -19,7 +19,7 @@ hopefully I'll be able to port it to other platforms.
 - Typechecking
   - ~~Typecheck functions~~
   - ~~Typecheck records~~
-  - Add named types
+  - ~~Add named types~~
   - Constraint solve type variables
   - Add sum and product types
 - Lexical Analysis
@@ -37,7 +37,7 @@ hopefully I'll be able to port it to other platforms.
 - Tests/Debugging
   - ~~Write some tests~~
   - ~~Add locations in errors with row/col~~
-  - Add better error messages using name and type tables
+  - ~~Add better error messages using name and type tables~~
 
 ## Design
 

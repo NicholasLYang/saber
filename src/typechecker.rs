@@ -52,6 +52,11 @@ pub enum TypeError {
     CalleeNotFunction,
     #[fail(display = "{}: Cannot return at top level", location)]
     TopLevelReturn { location: LocationRange },
+    #[fail(
+        display = "{}: Function appears to be shadowed by var of same name",
+        location
+    )]
+    ShadowingFunction { location: LocationRange },
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -141,19 +146,32 @@ impl TypeChecker {
         for type_def in program.type_defs {
             self.type_def(type_def)?;
         }
+        self.read_functions(&program.stmts)?;
         let mut typed_stmts = Vec::new();
-        let mut deferred_stmts = Vec::new();
         for stmt in program.stmts {
-            if let Stmt::Function(_, _, _, _) = stmt.inner {
-                typed_stmts.push(self.stmt(stmt)?);
-            } else {
-                deferred_stmts.push(stmt);
+            typed_stmts.append(&mut self.stmt(stmt)?);
+        }
+        Ok(typed_stmts)
+    }
+
+    // Reads functions defined in this block
+    fn read_functions(&mut self, stmts: &Vec<Loc<Stmt>>) -> Result<(), TypeError> {
+        for stmt in stmts {
+            if let Stmt::Function(func_name, params, return_type_sig, _) = &stmt.inner {
+                let params_type = self.pat(&params)?;
+                let return_type = if let Some(type_sig) = return_type_sig {
+                    self.lookup_type_sig(type_sig)?
+                } else {
+                    self.get_fresh_type_var()
+                };
+                let type_ = self
+                    .type_table
+                    .insert(Type::Arrow(params_type, return_type));
+                self.symbol_table
+                    .insert_function(*func_name, params_type, return_type, type_);
             }
         }
-        for stmt in deferred_stmts {
-            typed_stmts.push(self.stmt(stmt)?);
-        }
-        Ok(typed_stmts.into_iter().flatten().collect())
+        Ok(())
     }
 
     fn type_def(&mut self, type_def: Loc<TypeDef>) -> Result<(), TypeError> {
@@ -181,25 +199,30 @@ impl TypeChecker {
                     inner: StmtT::Expr(typed_expr),
                 }])
             }
-            Stmt::Function(func_name, params, return_type_sig, body) => {
-                let params_type = self.pat(&params)?;
-                let return_type = if let Some(type_sig) = &return_type_sig {
-                    self.lookup_type_sig(type_sig)?
+            Stmt::Function(func_name, params, _, body) => {
+                let sym_entry = if let Some(entry) = self.symbol_table.lookup_name(func_name) {
+                    entry
                 } else {
-                    self.get_fresh_type_var()
+                    return Err(TypeError::VarNotDefined {
+                        name: self.name_table.get_str(&func_name).to_string(),
+                        location,
+                    });
                 };
-                let type_ = self
-                    .type_table
-                    .insert(Type::Arrow(params_type, return_type));
-                self.symbol_table
-                    .insert_function(func_name, params_type, return_type, type_);
+                let (params_type, return_type) = if let EntryType::Function {
+                    index: _,
+                    params_type,
+                    return_type,
+                    type_: _,
+                } = &sym_entry.entry_type
+                {
+                    (*params_type, *return_type)
+                } else {
+                    return Err(TypeError::ShadowingFunction { location });
+                };
                 let previous_scope = self.symbol_table.push_scope(true);
                 let (params, body, return_type, local_variables) =
-                    self.function(params, *body, return_type_sig)?;
+                    self.function(params, *body, return_type)?;
                 let func_scope = self.symbol_table.restore_scope(previous_scope);
-
-                self.type_table
-                    .update(type_, Type::Arrow(params_type, return_type));
                 Ok(vec![Loc {
                     location,
                     inner: StmtT::Function {
@@ -219,13 +242,11 @@ impl TypeChecker {
                 match self.return_type {
                     Some(return_type) => {
                         if self.is_unifiable(typed_expr.inner.get_type(), return_type) {
-                            println!("1");
                             Ok(vec![Loc {
                                 location,
                                 inner: StmtT::Return(typed_expr),
                             }])
                         } else {
-                            println!("2");
                             let type1 = type_to_string(
                                 &self.name_table,
                                 &self.type_table,
@@ -246,6 +267,7 @@ impl TypeChecker {
                 }
             }
             Stmt::Block(stmts) => {
+                self.read_functions(&stmts)?;
                 let mut typed_stmts = Vec::new();
                 for stmt in stmts {
                     typed_stmts.push(self.stmt(stmt)?);
@@ -541,7 +563,7 @@ impl TypeChecker {
         &mut self,
         params: Pat,
         body: Loc<Expr>,
-        return_type: Option<Loc<TypeSig>>,
+        return_type: TypeId,
     ) -> Result<(Vec<(Name, TypeId)>, Box<Loc<ExprT>>, TypeId, Vec<TypeId>), TypeError> {
         let old_var_types = self.symbol_table.reset_vars();
         let func_params = self.get_func_params(&params)?;
@@ -551,13 +573,7 @@ impl TypeChecker {
         // Save the current return type
         let mut old_return_type = self.return_type;
 
-        // Insert new return type into typechecker so that
-        // typechecker can verify return statements.
-        self.return_type = if let Some(return_type_sig) = return_type {
-            Some(self.lookup_type_sig(&return_type_sig)?)
-        } else {
-            Some(self.get_fresh_type_var())
-        };
+        self.return_type = Some(return_type);
 
         let body_location = body.location;
         // Check body
@@ -566,7 +582,7 @@ impl TypeChecker {
         std::mem::swap(&mut old_return_type, &mut self.return_type);
         // If the body type is unit, we don't try to unify the body type
         // with return type.
-        let mut return_type = if body_type != UNIT_INDEX {
+        let return_type = if body_type != UNIT_INDEX {
             self.unify(old_return_type.unwrap(), body_type)
                 .ok_or_else(|| {
                     let type1 = type_to_string(
@@ -587,7 +603,7 @@ impl TypeChecker {
 
         // If return type is a type var, we just set it be unit
         if let Type::Var(_) = self.type_table.get_type(return_type) {
-            return_type = UNIT_INDEX;
+            self.type_table.update(return_type, Type::Unit);
         };
 
         let func_var_types = self.symbol_table.restore_vars(old_var_types);
@@ -680,8 +696,13 @@ impl TypeChecker {
                 let name = self.name_table.get_fresh_name();
                 let params_type = self.pat(&params)?;
                 let previous_scope = self.symbol_table.push_scope(true);
+                let return_type = if let Some(return_type_sig) = return_type_sig {
+                    self.lookup_type_sig(&return_type_sig)?
+                } else {
+                    self.get_fresh_type_var()
+                };
                 let (params, body, return_type, local_variables) =
-                    self.function(params, *body, return_type_sig)?;
+                    self.function(params, *body, return_type)?;
                 let func_scope = self.symbol_table.restore_scope(previous_scope);
                 let type_ = self
                     .type_table
@@ -763,10 +784,11 @@ impl TypeChecker {
                 }
             }
             Expr::Block(stmts, end_expr) => {
+                self.read_functions(&stmts)?;
                 let mut typed_stmts = Vec::new();
                 let previous_scope = self.symbol_table.push_scope(false);
                 for stmt in stmts {
-                    typed_stmts.append(&mut self.stmt(stmt)?)
+                    typed_stmts.append(&mut self.stmt(stmt)?);
                 }
                 let (type_, typed_end_expr) = if let Some(expr) = end_expr {
                     let typed_expr = self.expr(*expr)?;
@@ -999,8 +1021,6 @@ impl TypeChecker {
             }
             (Type::Int, Type::Bool) => Some(type_id1),
             (Type::Bool, Type::Int) => Some(type_id2),
-            // TODO: We need a way to look up usages of type vars and
-            // convert them to the other type with unification
             (Type::Var(_), t) => {
                 self.type_table.update(type_id1, t.clone());
                 Some(type_id2)

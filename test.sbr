@@ -1,6 +1,10 @@
 let foo = \() => {
-  let str = "hello world";
-  printString(str);
+  bar();
+  printString("Testing 2");
+}
+
+let bar = \() => {
+  printString("Testing");
 }
 
 export foo;

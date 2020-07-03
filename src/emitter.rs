@@ -4,7 +4,7 @@ use std::convert::TryInto;
 use std::io::prelude::*;
 use wasm::{
     ElemSegment, ExportEntry, FunctionBody, FunctionType, GlobalType, ImportEntry, ImportKind,
-    MemoryType, OpCode, ProgramData, WasmType,
+    OpCode, ProgramData, WasmType,
 };
 
 pub struct Emitter {
@@ -59,7 +59,7 @@ pub fn emit_code<T: Write>(mut dest: T, op_code: OpCode) -> Result<()> {
         OpCode::I32Xor => dest.write_u8(0x73),
         OpCode::I32Eq => dest.write_u8(0x46),
         OpCode::I32GreaterSigned => dest.write_u8(0x4a),
-        OpCode::I32GreaterUnsigned => dest.write_u8(0x4b),
+        //OpCode::I32GreaterUnsigned => dest.write_u8(0x4b),
         OpCode::F32Add => dest.write_u8(0x92),
         OpCode::F32Sub => dest.write_u8(0x93),
         OpCode::F32Mul => dest.write_u8(0x94),
@@ -125,7 +125,7 @@ pub fn emit_code<T: Write>(mut dest: T, op_code: OpCode) -> Result<()> {
         OpCode::Unreachable => dest.write_u8(0x00),
         OpCode::Drop => dest.write_u8(0x1a),
         OpCode::End => dest.write_u8(0x0b),
-        OpCode::GrowMemory => {
+        /*        OpCode::GrowMemory => {
             dest.write_u8(0x40)?;
             leb128::write::unsigned(&mut dest, 0)?;
             Ok(())
@@ -134,7 +134,7 @@ pub fn emit_code<T: Write>(mut dest: T, op_code: OpCode) -> Result<()> {
             dest.write_u8(0x3f)?;
             leb128::write::unsigned(&mut dest, 0)?;
             Ok(())
-        }
+        }*/
     }?;
     Ok(())
 }
@@ -153,7 +153,6 @@ impl Emitter {
         self.emit_imports_section(program.import_section)?;
         self.emit_functions_section(program.function_section)?;
         self.emit_table_section(program.elements_section.elems.len())?;
-        //self.emit_memory_section(program.memory_section)?;
         self.emit_global_section(program.global_section)?;
         self.emit_exports_section(program.exports_section)?;
         self.emit_elements_section(program.elements_section)?;
@@ -264,20 +263,6 @@ impl Emitter {
             OpCode::Bool(false),
             OpCode::Count(usize_to_u32(initial_length)?),
         ];
-        self.write_section(opcodes)
-    }
-
-    fn emit_memory_section(&mut self, memory_type: MemoryType) -> Result<()> {
-        self.emit_code(OpCode::SectionId(5))?;
-        let is_max_present = memory_type.limits.1.is_some();
-        let mut opcodes = vec![
-            OpCode::Count(1),
-            OpCode::Bool(is_max_present),
-            OpCode::Count(memory_type.limits.0),
-        ];
-        if let Some(max) = memory_type.limits.1 {
-            opcodes.push(OpCode::Count(max));
-        }
         self.write_section(opcodes)
     }
 

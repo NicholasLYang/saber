@@ -20,7 +20,7 @@ pub enum OpCode {
     I32Xor,
     I32Eq,
     I32GreaterSigned,
-    I32GreaterUnsigned,
+    //    I32GreaterUnsigned,
     F32Add,
     F32Sub,
     F32Mul,
@@ -45,8 +45,8 @@ pub enum OpCode {
     CallIndirect(u32),
     Unreachable,
     Drop,
-    GrowMemory,
-    CurrentMemory,
+    //    GrowMemory,
+    //    CurrentMemory,
 }
 
 #[derive(Debug, Clone, PartialEq)]

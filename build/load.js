@@ -24,7 +24,6 @@ const instantiate = async () => {
         mem: { heap: memory }};
     const instance = await WebAssembly.instantiate(module, importObject);
     let wasm = instance.exports;
-    printHeap(memory);
     wasm.foo();
     printHeap(memory);
 };
