@@ -1,5 +1,7 @@
 # Saber
 
+[![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-v2.0%20adopted-ff69b4.svg)](code_of_conduct.md) 
+
 Saber is a row polymorphic language that focuses on first class
 functions, a lightweight syntax and fast, efficient code. However,
 before any of those goals, I just need to build the basic
@@ -58,3 +60,10 @@ space.
 
 Remember what is an actual parameter for an op (i.e. goes right after
 the opcode) and what is implicitly read from the stack.
+
+## Code of Conduct
+
+Please note that this project is released with a [Contributor Code of Conduct](code_of_conduct.md). 
+By participating in this project you agree to abide by its terms.
+
+We highly recommend reading it over carefully before contributing.
