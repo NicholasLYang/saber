@@ -30,7 +30,7 @@ pub enum Stmt {
     Export(Name),
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum StmtT {
     Asgn(Name, Loc<ExprT>),
     Expr(Loc<ExprT>),
@@ -38,12 +38,9 @@ pub enum StmtT {
     Block(Vec<Loc<StmtT>>),
     Function {
         name: Name,
-        params: Vec<(Name, TypeId)>,
         params_type: TypeId,
         return_type: TypeId,
-        body: Box<Loc<ExprT>>,
-        local_variables: Vec<TypeId>,
-        scope: usize,
+        function: Function,
     },
     Export(Name),
 }
@@ -84,7 +81,7 @@ pub enum Expr {
     Tuple(Vec<Loc<Expr>>),
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum ExprT {
     Block {
         stmts: Vec<Loc<StmtT>>,
@@ -118,14 +115,11 @@ pub enum ExprT {
         type_: TypeId,
     },
     // Note: only used for anonymous functions. Functions that are
-    // bound with let are TypedStmt::Function
+    // bound with let are StmtT::Function
     Function {
-        params: Vec<(Name, TypeId)>,
-        body: Box<Loc<ExprT>>,
-        local_variables: Vec<TypeId>,
-        name: Name,
-        scope_index: usize,
+        function: Function,
         type_: TypeId,
+        name: Name,
     },
     Record {
         name: Name,
@@ -147,6 +141,14 @@ pub enum Value {
     Integer(i32),
     Bool(bool),
     String(String),
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct Function {
+    pub params: Vec<(Name, TypeId)>,
+    pub body: Box<Loc<ExprT>>,
+    pub local_variables: Vec<TypeId>,
+    pub scope_index: usize,
 }
 
 impl fmt::Display for Value {
@@ -297,11 +299,8 @@ impl ExprT {
                 type_,
             } => *type_,
             ExprT::Function {
-                params: _,
-                body: _,
+                function: _,
                 name: _,
-                scope_index: _,
-                local_variables: _,
                 type_,
             } => *type_,
             ExprT::Field(_, _, type_) => *type_,

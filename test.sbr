@@ -1,13 +1,15 @@
-let foo = \() => {
-  let b = {
-    bar();
-    10
-  };
-  printString("Testing 2");
+struct Person {
+  name: string
 }
 
-let bar = \() => {
-  printString("Testing");
+let foo = \() => {
+  let a = true;
+  if a {
+    let b = Person {
+      name: "Nicholas"
+    };
+    printString(b.name);
+  }
 }
 
 export foo;

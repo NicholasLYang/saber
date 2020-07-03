@@ -20,7 +20,6 @@ use crate::types::Result;
 use code_generator::CodeGenerator;
 use std::env;
 use std::fs::{self, File};
-use std::io;
 use std::io::Write;
 
 mod ast;
@@ -38,17 +37,17 @@ mod wasm;
 fn main() {
     let args: Vec<String> = env::args().collect();
 
-    let res = if args.len() < 2 {
+    if args.len() < 2 {
         println!("Usage: saber <file>");
     } else {
-        read_file(&args[1])
-    };
-    match res {
-        Ok(_) => (),
-        Err(err) => {
-            println!("{}", err);
+        let res = read_file(&args[1]);
+        match res {
+            Ok(_) => (),
+            Err(err) => {
+                println!("{}", err);
+            }
         }
-    }
+    };
 }
 
 fn read_file(file_name: &str) -> Result<()> {

@@ -1,4 +1,4 @@
-use ast::{ExprT, Loc, Name, Op, StmtT, Type, TypeId, UnaryOp, Value};
+use ast::{ExprT, Function, Loc, Name, Op, StmtT, Type, TypeId, UnaryOp, Value};
 use lexer::LocationRange;
 use std::convert::TryInto;
 use symbol_table::{EntryType, SymbolTable, ALLOC_INDEX};
@@ -128,16 +128,19 @@ impl CodeGenerator {
         match &stmt.inner {
             StmtT::Function {
                 name,
-                params,
                 params_type: _,
                 return_type,
-                local_variables,
-                body,
-                scope,
+                function:
+                    Function {
+                        params,
+                        local_variables,
+                        body,
+                        scope_index,
+                    },
             } => {
                 self.generate_function_binding(
                     *name,
-                    *scope,
+                    *scope_index,
                     params,
                     *return_type,
                     local_variables,
@@ -330,17 +333,20 @@ impl CodeGenerator {
         match &stmt.inner {
             StmtT::Function {
                 name,
-                params,
                 params_type: _,
                 return_type,
-                local_variables,
-                body,
-                scope,
+                function:
+                    Function {
+                        params,
+                        local_variables,
+                        body,
+                        scope_index,
+                    },
             } => {
-                self.symbol_table.restore_scope(*scope);
+                self.symbol_table.restore_scope(*scope_index);
                 self.generate_function_binding(
                     *name,
-                    *scope,
+                    *scope_index,
                     params,
                     *return_type,
                     local_variables,
@@ -471,12 +477,15 @@ impl CodeGenerator {
                 Ok(opcodes)
             }
             ExprT::Function {
-                params,
-                body,
                 name,
-                local_variables,
-                scope_index,
                 type_,
+                function:
+                    Function {
+                        params,
+                        body,
+                        local_variables,
+                        scope_index,
+                    },
             } => {
                 self.symbol_table.restore_scope(*scope_index);
                 let (_, return_type) = if let Type::Arrow(params_type, return_type) =

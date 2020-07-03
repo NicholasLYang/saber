@@ -370,6 +370,14 @@ impl<'input> Parser<'input> {
             Some((Token::Slash, left)) => self.function(left),
             Some((Token::LBrace, left)) => self.expr_block(left),
             Some((Token::If, left)) => self.if_expr(left),
+            Some((Token::Ident(id), left)) => {
+                if self.match_one(TokenDiscriminants::LBrace)?.is_some() {
+                    self.record_literal(id, left)
+                } else {
+                    self.pushback((Token::Ident(id), left));
+                    self.equality()
+                }
+            }
             Some(span) => {
                 self.pushback(span);
                 self.equality()
@@ -698,16 +706,10 @@ impl<'input> Parser<'input> {
                     Ok(expr)
                 }
             }
-            Token::Ident(name) => {
-                if self.match_one(TokenDiscriminants::LBrace)?.is_some() {
-                    self.record_literal(name, location)
-                } else {
-                    Ok(Loc {
-                        location,
-                        inner: Expr::Var { name },
-                    })
-                }
-            }
+            Token::Ident(name) => Ok(Loc {
+                location,
+                inner: Expr::Var { name },
+            }),
             token => {
                 let expected_tokens = format!(
                     "{}, {}, {}, {}, {}, {}",
