@@ -26,6 +26,13 @@ To compile a Saber file, run `cargo run <file>`. It will generate into `build/`.
 the generated code, run `node build/load.js`.
   
 
+## Code of Conduct
+
+Please note that this project is released with a [Contributor Code of Conduct](code_of_conduct.md). 
+By participating in this project you agree to abide by its terms.
+
+We highly recommend reading it over carefully before contributing.
+
 ## TODO
 - General
   - ~~Fix all the damn copies and bad, non idiomatic Rust.~~
@@ -69,11 +76,3 @@ Goals:
     runtime checks (performance penalty?)
 - Lightweight syntax. Avoid using keywords when possible (however,
   will affect syntax highlighting)
-
-
-## Code of Conduct
-
-Please note that this project is released with a [Contributor Code of Conduct](code_of_conduct.md). 
-By participating in this project you agree to abide by its terms.
-
-We highly recommend reading it over carefully before contributing.
