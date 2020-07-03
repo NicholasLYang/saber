@@ -39,7 +39,7 @@ fn main() {
     let args: Vec<String> = env::args().collect();
 
     let res = if args.len() < 2 {
-        run_repl()
+        println!("Usage: saber <file>");
     } else {
         read_file(&args[1])
     };
@@ -72,26 +72,4 @@ fn read_file(file_name: &str) -> Result<()> {
     let mut js_file = File::create("build/code.js")?;
     js_file.write_all(js_str.as_bytes())?;
     Ok(())
-}
-
-fn run_repl() -> Result<()> {
-    loop {
-        print!("> ");
-        io::stdout().flush().unwrap();
-        let mut input = String::new();
-        if input == "exit" {
-            return Ok(());
-        }
-        io::stdin()
-            .read_line(&mut input)
-            .expect("Couldn't read line");
-        let lexer = lexer::Lexer::new(&input);
-        let mut parser = Parser::new(lexer);
-        if let Some(parser_out) = parser.stmt()? {
-            let name_table = parser.get_name_table();
-            let mut typechecker = TypeChecker::new(name_table);
-            let typed_stmt = typechecker.stmt(parser_out)?;
-            println!("{:#?}", typed_stmt);
-        }
-    }
 }

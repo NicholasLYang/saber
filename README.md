@@ -8,6 +8,24 @@ before any of those goals, I just need to build the basic
 compiler. Right now I'm just compiling it to WebAssembly, but
 hopefully I'll be able to port it to other platforms.
 
+## Contributing
+
+Contributors are welcome! To develop on Saber, all you need is Rust, either stable 
+or nightly. Currently Saber compiles on rustc 1.44.1 and rustc 1.46.0-nightly.
+
+To run Saber code, you need NodeJS, version 12 or later.
+
+I'm currently running Saber on macOS Catalina, but I don't see why it shouldn't work 
+on Linux or Windows 
+
+### Setup
+
+Clone the repo, then `cd` into `build/`. Run `npm install`.
+
+To compile a Saber file, run `cargo run <file>`. It will generate into `build/`. To run 
+the generated code, run `node build/load.js`.
+  
+
 ## TODO
 - General
   - ~~Fix all the damn copies and bad, non idiomatic Rust.~~
@@ -52,14 +70,6 @@ Goals:
 - Lightweight syntax. Avoid using keywords when possible (however,
   will affect syntax highlighting)
 
-## WASM Notes
-
-Locals are stored in local entries in the code section, and params are
-stored in the function types section, but they share the same index
-space.
-
-Remember what is an actual parameter for an op (i.e. goes right after
-the opcode) and what is implicitly read from the stack.
 
 ## Code of Conduct
 

@@ -1,3 +1,12 @@
+## WASM Notes
+
+Locals are stored in local entries in the code section, and params are
+stored in the function types section, but they share the same index
+space.
+
+Remember what is an actual parameter for an op (i.e. goes right after
+the opcode) and what is implicitly read from the stack.
+
 ## Symbol Table
 
 I need a way to map names to indices for functions and

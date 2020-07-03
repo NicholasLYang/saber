@@ -1,5 +1,8 @@
 let foo = \() => {
-  bar();
+  let b = {
+    bar();
+    10
+  };
   printString("Testing 2");
 }
 
