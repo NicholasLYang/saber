@@ -20,7 +20,7 @@ const instantiate = async () => {
     const module = await WebAssembly.compile(buffer);
     const memory = new WebAssembly.Memory({ initial: 1 });
     const importObject = {
-        std: { alloc: alloc(memory), printInt: console.log, printFloat: console.log, printString: printString(memory) },
+        std: { alloc: alloc(memory), streq: streq(memory), printInt: console.log, printFloat: console.log, printString: printString(memory) },
         mem: { heap: memory }};
     const instance = await WebAssembly.instantiate(module, importObject);
     let wasm = instance.exports;
@@ -105,6 +105,28 @@ const dealloc = memory => ptr => {
     if (memArray[ptr + 1] === 0) {
 
     }
+}
+
+const streq = memory => (s1, s2) => {
+    console.log("S1");
+    console.log(s1);
+    console.log("S2");
+    console.log(s2);
+    if (s1 === s2) {
+        return true;
+    }
+    let memArray = new Uint32Array(memory.buffer);
+    const s1Len = memArray[s1/4];
+    const s2Len = memArray[s2/4];
+    if (s1Len !== s2Len) {
+        return false;
+    }
+    for (let i = 0; i < s1Len/4; i++) {
+        if (memArray[(s1 + i)/4 + 1] !== memArray[(s2 + i)/4 + 1]) {
+            return false;
+        }
+    }
+    return true;
 }
 
 instantiate()

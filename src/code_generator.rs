@@ -1,7 +1,8 @@
 use ast::{ExprT, Function, Loc, Name, Op, StmtT, Type, TypeId, UnaryOp, Value};
 use lexer::LocationRange;
+use printer::type_to_string;
 use std::convert::TryInto;
-use symbol_table::{EntryType, SymbolTable, ALLOC_INDEX};
+use symbol_table::{EntryType, SymbolTable, ALLOC_INDEX, STREQ_INDEX};
 use typechecker::TypeChecker;
 use utils::{NameTable, TypeTable, FLOAT_INDEX};
 use wasm::{
@@ -11,15 +12,8 @@ use wasm::{
 
 #[derive(Debug, Fail, PartialEq)]
 pub enum GenerationError {
-    #[fail(
-        display = "Operator '{}' from {} to {} does not exist",
-        op, input_type, result_type
-    )]
-    InvalidOperator {
-        op: Op,
-        input_type: Type,
-        result_type: Type,
-    },
+    #[fail(display = "Operator '{}' for type {} does not exist", op, input_type)]
+    InvalidOperator { op: Op, input_type: String },
     #[fail(display = "Function '{}' not defined", name)]
     FunctionNotDefined { name: String },
     #[fail(display = "Cannot have () as type")]
@@ -35,8 +29,12 @@ pub enum GenerationError {
     NotReachable,
     #[fail(display = "Cannot return at top level")]
     TopLevelReturn,
-    #[fail(display = "Cannot convert type {} to type {}", t1, t2)]
-    CannotConvert { t1: Type, t2: Type },
+    #[fail(display = "{}: Cannot convert type {} to type {}", location, t1, t2)]
+    CannotConvert {
+        location: LocationRange,
+        t1: String,
+        t2: String,
+    },
     #[fail(display = "{}: Record cannot have more than 64 fields", location)]
     RecordTooLarge { location: LocationRange },
     #[fail(display = "Cannot export value")]
@@ -80,6 +78,18 @@ impl CodeGenerator {
             field_str: "alloc".into(),
             kind: ImportKind::Function {
                 type_: alloc_type_index,
+            },
+        });
+        let streq_type = FunctionType {
+            param_types: vec![WasmType::i32, WasmType::i32],
+            return_type: Some(WasmType::i32),
+        };
+        let streq_type_index = self.program_data.insert_type(streq_type);
+        self.program_data.import_section.push(ImportEntry {
+            module_str: "std".into(),
+            field_str: "streq".into(),
+            kind: ImportKind::Function {
+                type_: streq_type_index,
             },
         });
         let print_int_type = FunctionType {
@@ -409,6 +419,7 @@ impl CodeGenerator {
         type2: TypeId,
         ops1: &mut Vec<OpCode>,
         ops2: &mut Vec<OpCode>,
+        location: LocationRange,
     ) -> Result<TypeId> {
         if type1 == type2 {
             return Ok(type1);
@@ -425,10 +436,17 @@ impl CodeGenerator {
                 ops2.push(OpCode::F32ConvertI32);
                 Ok(FLOAT_INDEX)
             }
-            (t1, t2) => Err(GenerationError::CannotConvert {
-                t1: t1.clone(),
-                t2: t2.clone(),
-            }),
+            (t1, t2) => {
+                if t1 == t2 {
+                    Ok(type1)
+                } else {
+                    Err(GenerationError::CannotConvert {
+                        t1: type_to_string(&self.name_table, &self.type_table, type1),
+                        t2: type_to_string(&self.name_table, &self.type_table, type2),
+                        location,
+                    })
+                }
+            }
         }
     }
 
@@ -562,8 +580,13 @@ impl CodeGenerator {
                 let mut rhs_ops = self.generate_expr(rhs)?;
                 let rhs_type = rhs.inner.get_type();
 
-                let promoted_type =
-                    self.promote_types(lhs_type, rhs_type, &mut lhs_ops, &mut rhs_ops)?;
+                let promoted_type = self.promote_types(
+                    lhs_type,
+                    rhs_type,
+                    &mut lhs_ops,
+                    &mut rhs_ops,
+                    expr.location,
+                )?;
                 lhs_ops.append(&mut rhs_ops);
                 lhs_ops.push(self.generate_operator(
                     &op,
@@ -737,10 +760,10 @@ impl CodeGenerator {
             (Op::Div, Type::Float, Type::Float) => Ok(OpCode::F32Div),
             (Op::Greater, Type::Int, Type::Bool) => Ok(OpCode::I32GreaterSigned),
             (Op::EqualEqual, Type::Int, Type::Bool) => Ok(OpCode::I32Eq),
-            (op, input_type, result_type) => Err(GenerationError::InvalidOperator {
+            (Op::EqualEqual, Type::String, Type::Bool) => Ok(OpCode::Call(STREQ_INDEX)),
+            (op, _, _) => Err(GenerationError::InvalidOperator {
                 op: op.clone(),
-                input_type: input_type.clone(),
-                result_type: result_type.clone(),
+                input_type: type_to_string(&self.name_table, &self.type_table, input_type),
             }),
         }
     }

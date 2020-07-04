@@ -3,12 +3,12 @@ struct Person {
 }
 
 let foo = \() => {
-  let a = true;
-  if a {
-    let b = Person {
-      name: "Nicholas"
-    };
-    printString(b.name);
+  let s1 = "Hello";
+  let s2 = "Hello";
+  if s1 == s2 {
+    printString("Equal!");
+  } else {
+    printString("Not equal!");
   }
 }
 
