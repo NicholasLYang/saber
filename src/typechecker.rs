@@ -142,16 +142,61 @@ impl TypeChecker {
         self.type_table.insert(type_var)
     }
 
-    pub fn check_program(&mut self, program: Program) -> Result<Vec<Loc<StmtT>>, TypeError> {
+    fn is_ref_type(&self, type_id: TypeId) -> bool {
+        !(type_id == INT_INDEX
+            || type_id == BOOL_INDEX
+            || type_id == UNIT_INDEX
+            || type_id == CHAR_INDEX
+            || type_id == FLOAT_INDEX)
+    }
+
+    fn generate_type_info<'a, I>(&self, fields: I) -> Vec<bool>
+    where
+        I: Iterator<Item = &'a usize>,
+    {
+        // Stores whether or not a field is a reference
+        let mut field_info = Vec::new();
+        for field_type in fields {
+            field_info.push(self.is_ref_type(*field_type))
+        }
+        field_info
+    }
+
+    fn generate_runtime_type_info(
+        &self,
+        named_types: Vec<(Name, TypeId)>,
+    ) -> Vec<(Name, Vec<bool>)> {
+        let mut type_info = Vec::new();
+        for (name, type_id) in named_types {
+            match self.type_table.get_type(type_id) {
+                Type::Record(fields) => {
+                    let field_info =
+                        self.generate_type_info(fields.iter().map(|(_, type_id)| type_id));
+                    type_info.push((name, field_info));
+                }
+                Type::Tuple(type_ids) => {
+                    type_info.push((name, self.generate_type_info(type_ids.iter())))
+                }
+                _ => {}
+            }
+        }
+        type_info
+    }
+
+    pub fn check_program(
+        &mut self,
+        program: Program,
+    ) -> Result<(Vec<Loc<StmtT>>, Vec<(Name, Vec<bool>)>), TypeError> {
+        let mut named_types = Vec::new();
         for type_def in program.type_defs {
-            self.type_def(type_def)?;
+            named_types.push(self.type_def(type_def)?);
         }
         self.read_functions(&program.stmts)?;
         let mut typed_stmts = Vec::new();
         for stmt in program.stmts {
             typed_stmts.append(&mut self.stmt(stmt)?);
         }
-        Ok(typed_stmts)
+        Ok((typed_stmts, self.generate_runtime_type_info(named_types)))
     }
 
     // Reads functions defined in this block
@@ -174,7 +219,7 @@ impl TypeChecker {
         Ok(())
     }
 
-    fn type_def(&mut self, type_def: Loc<TypeDef>) -> Result<(), TypeError> {
+    fn type_def(&mut self, type_def: Loc<TypeDef>) -> Result<(Name, TypeId), TypeError> {
         match type_def.inner {
             TypeDef::Struct(name, fields) => {
                 let mut typed_fields = Vec::new();
@@ -184,7 +229,7 @@ impl TypeChecker {
                 }
                 let type_id = self.type_table.insert(Type::Record(typed_fields));
                 self.type_names.insert(name, type_id);
-                Ok(())
+                Ok((name, type_id))
             }
         }
     }

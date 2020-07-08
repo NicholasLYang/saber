@@ -50,6 +50,20 @@ fn main() {
     };
 }
 
+fn format_bool_vec(vec: &Vec<bool>) -> String {
+    format!(
+        "[{}]",
+        vec.iter()
+            .map(|b| if *b {
+                "true".to_string()
+            } else {
+                "false".to_string()
+            })
+            .collect::<Vec<String>>()
+            .join(",")
+    )
+}
+
 fn read_file(file_name: &str) -> Result<()> {
     let contents = fs::read_to_string(file_name)?;
     let lexer = lexer::Lexer::new(&contents);
@@ -59,7 +73,10 @@ fn read_file(file_name: &str) -> Result<()> {
         println!("{}", error);
     }
     let mut typechecker = TypeChecker::new(parser.get_name_table());
-    let typed_program = typechecker.check_program(program)?;
+    let (typed_program, named_types) = typechecker.check_program(program)?;
+    for (name, type_info) in named_types {
+        println!("{}: {}", name, format_bool_vec(&type_info));
+    }
     let code_generator = CodeGenerator::new(typechecker);
     let program = code_generator.generate_program(typed_program)?;
     let mut emitter = Emitter::new();

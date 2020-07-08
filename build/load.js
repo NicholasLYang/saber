@@ -108,10 +108,6 @@ const dealloc = memory => ptr => {
 }
 
 const streq = memory => (s1, s2) => {
-    console.log("S1");
-    console.log(s1);
-    console.log("S2");
-    console.log(s2);
     if (s1 === s2) {
         return true;
     }
@@ -127,7 +123,7 @@ const streq = memory => (s1, s2) => {
         }
     }
     return true;
-}
+};
 
 instantiate()
     .then(res => {
