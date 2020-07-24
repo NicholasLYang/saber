@@ -4,7 +4,7 @@ use printer::type_to_string;
 use std::convert::TryInto;
 use symbol_table::{EntryType, SymbolTable, ALLOC_INDEX, STREQ_INDEX};
 use typechecker::TypeChecker;
-use utils::{NameTable, TypeTable, FLOAT_INDEX};
+use utils::{NameTable, TypeTable, FLOAT_INDEX, STR_INDEX};
 use wasm::{
     ExportEntry, ExternalKind, FunctionBody, FunctionType, ImportEntry, ImportKind, LocalEntry,
     OpCode, ProgramData, WasmType,
@@ -744,13 +744,25 @@ impl CodeGenerator {
                     bytes.push(0);
                 }
                 let buffer_length: i32 = bytes.len().try_into().expect("String is too long");
-                // We tack on 4 more bytes for the length
+                // We tack on 8 more bytes for the length and type_id
                 let mut opcodes = vec![
-                    OpCode::I32Const(buffer_length + 4),
+                    OpCode::I32Const(buffer_length + 8),
                     OpCode::Call(ALLOC_INDEX),
                 ];
                 opcodes.push(OpCode::SetGlobal(0));
-                // Pop on global 1 as return value (ptr to str)
+
+                // Set type_id
+                // Get ptr to record
+                opcodes.push(OpCode::GetGlobal(0));
+                opcodes.push(OpCode::I32Const(STR_INDEX.try_into().unwrap()));
+                // *ptr = type_id
+                opcodes.push(OpCode::I32Store(2, 0));
+                opcodes.push(OpCode::GetGlobal(0));
+                opcodes.push(OpCode::I32Const(4));
+                opcodes.push(OpCode::I32Add);
+                opcodes.push(OpCode::SetGlobal(0));
+
+                // Pop on global 0 as return value (ptr to str)
                 opcodes.push(OpCode::GetGlobal(0));
                 opcodes.push(OpCode::GetGlobal(0));
                 opcodes.push(OpCode::I32Const(raw_str_length));

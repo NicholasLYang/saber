@@ -40,15 +40,13 @@ const printHeap = memory => {
     console.log("--------");
 }
 
-const printString = memory => ptr => {
-    const memArray = new Uint8Array(memory.buffer);
-    const len = memArray[ptr]
-        + (memArray[ptr + 1] << 8)
-        + (memArray[ptr + 2]<< 16)
-        + (memArray[ptr + 3] << 24);
-    const out = new Uint8Array(len);
-    for (let offset = 0; offset < len; offset++) {
-        const i = offset + ptr + 4;
+const printString = memory => bytePtr => {
+    const memArray = new Uint32Array(memory.buffer);
+    let ptr = bytePtr/4;
+    const len = memArray[ptr];
+    const out = new Uint32Array(len/4);
+    for (let offset = 0; offset < len/4; offset++) {
+        const i = offset + ptr + 1;
         out[offset] = memArray[i];
     }
     const decoder = new TextDecoder();
@@ -102,9 +100,10 @@ const alloc = memory => size => {
 };
 
 const dealloc = memory => ptr => {
+    let memArray = new Uint32Array(memory.buffer);
     memArray[ptr + 1] -= 1;
     if (memArray[ptr + 1] === 0) {
-
+        typeInfo[memArray[ptr + 2]]
     }
 }
 
@@ -113,8 +112,8 @@ const streq = memory => (s1, s2) => {
         return true;
     }
     let memArray = new Uint32Array(memory.buffer);
-    const s1Len = memArray[s1/4];
-    const s2Len = memArray[s2/4];
+    const s1Len = memArray[s1/4 + 1];
+    const s2Len = memArray[s2/4 + 1];
     if (s1Len !== s2Len) {
         return false;
     }
