@@ -136,6 +136,10 @@ impl TypeChecker {
         (self.symbol_table, self.name_table, self.type_table)
     }
 
+    pub fn get_name_table(&self) -> &NameTable {
+        &self.name_table
+    }
+
     fn get_fresh_type_var(&mut self) -> TypeId {
         let type_var = Type::Var(self.type_var_index);
         self.type_var_index += 1;

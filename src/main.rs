@@ -74,15 +74,23 @@ fn read_file(file_name: &str) -> Result<()> {
     }
     let mut typechecker = TypeChecker::new(parser.get_name_table());
     let (typed_program, named_types) = typechecker.check_program(program)?;
-    for (name, type_info) in named_types {
-        println!("{}: {}", name, format_bool_vec(&type_info));
-    }
+    let type_info_str = named_types
+        .iter()
+        .map(|(name, type_info)| format!("{}:{}", name, format_bool_vec(&type_info)))
+        .collect::<Vec<String>>()
+        .join(",");
+    let mut type_info_file = File::create("build/type_info.js")?;
+    write!(
+        type_info_file,
+        "const type_info = {{{}}};module.exports = type_info;",
+        type_info_str
+    )?;
     let code_generator = CodeGenerator::new(typechecker);
     let program = code_generator.generate_program(typed_program)?;
     let mut emitter = Emitter::new();
     emitter.emit_program(program)?;
     let js_str = format!(
-        "const code = \"{}\"; module.exports = code",
+        "const code =\"{}\";module.exports = code",
         emitter.output_base64()
     );
     let mut js_file = File::create("build/code.js")?;

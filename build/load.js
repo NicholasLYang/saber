@@ -1,5 +1,6 @@
 const { readFileSync, writeFileSync } = require("fs");
 const code = require("./code.js");
+const typeInfo = require("./type_info.js");
 
 function atob(a) {
     return new Buffer(a, 'base64').toString('binary');
