@@ -136,6 +136,7 @@ impl TypeChecker {
         (self.symbol_table, self.name_table, self.type_table)
     }
 
+    #[allow(dead_code)]
     pub fn get_name_table(&self) -> &NameTable {
         &self.name_table
     }
@@ -154,7 +155,7 @@ impl TypeChecker {
             || type_id == FLOAT_INDEX)
     }
 
-    fn generate_type_info<'a, I>(&self, fields: I) -> Vec<bool>
+    fn generate_field_info<'a, I>(&self, fields: I) -> Vec<bool>
     where
         I: Iterator<Item = &'a usize>,
     {
@@ -166,23 +167,27 @@ impl TypeChecker {
         field_info
     }
 
+    fn generate_type_info(&self, type_id: TypeId) -> Option<(usize, Vec<bool>)> {
+        match self.type_table.get_type(type_id) {
+            Type::Record(fields) => {
+                let field_info =
+                    self.generate_field_info(fields.iter().map(|(_, type_id)| type_id));
+                Some((type_id, field_info))
+            }
+            Type::Tuple(type_ids) => Some((type_id, self.generate_field_info(type_ids.iter()))),
+            Type::Solved(type_id) => self.generate_type_info(*type_id),
+            _ => None,
+        }
+    }
+
     fn generate_runtime_type_info(
         &self,
         named_types: Vec<(Name, TypeId)>,
     ) -> Vec<(Name, Vec<bool>)> {
         let mut type_info = Vec::new();
-        for (name, type_id) in named_types {
-            match self.type_table.get_type(type_id) {
-                Type::Record(fields) => {
-                    let field_info =
-                        self.generate_type_info(fields.iter().map(|(_, type_id)| type_id));
-                    type_info.push((name, field_info));
-                }
-                Type::Tuple(type_ids) => {
-                    type_info.push((name, self.generate_type_info(type_ids.iter())))
-                }
-                _ => {}
-            }
+        for (_, type_id) in named_types {
+            self.generate_type_info(type_id)
+                .map(|info| type_info.push(info));
         }
         type_info
     }
@@ -914,7 +919,7 @@ impl TypeChecker {
                     fields_t.push((name, expr_t));
                 }
                 let expr_type = self.type_table.insert(Type::Record(field_types));
-                let type_ = self.unify(expr_type, type_id).ok_or_else(|| {
+                let type_ = self.unify(type_id, expr_type).ok_or_else(|| {
                     TypeError::UnificationFailure {
                         type1: type_to_string(&self.name_table, &self.type_table, expr_type),
                         type2: type_to_string(&self.name_table, &self.type_table, type_id),
@@ -1034,6 +1039,8 @@ impl TypeChecker {
                     }
                 }
                 let id = self.type_table.insert(Type::Record(unified_fields));
+                self.type_table.update(type_id1, Type::Solved(id));
+                self.type_table.update(type_id2, Type::Solved(id));
                 Some(id)
             }
             (Type::Tuple(ts), Type::Unit) | (Type::Unit, Type::Tuple(ts)) => {

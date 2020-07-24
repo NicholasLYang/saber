@@ -36,6 +36,7 @@ pub fn type_to_string(name_table: &NameTable, type_table: &TypeTable, type_id: T
             let return_str = type_to_string(name_table, type_table, *return_type);
             format!("{} => {}", params_str, return_str)
         }
+        Type::Solved(type_id) => type_to_string(name_table, type_table, *type_id),
     }
 }
 

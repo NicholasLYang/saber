@@ -163,23 +163,13 @@ impl ProgramData {
             type_section: Vec::new(),
             import_section,
             function_section: vec![None; func_count],
-            // Heap pointer is global #0
-            global_section: vec![
-                (
-                    GlobalType {
-                        content_type: WasmType::i32,
-                        mutability: true,
-                    },
-                    vec![OpCode::I32Const(0)],
-                ),
-                (
-                    GlobalType {
-                        content_type: WasmType::i32,
-                        mutability: true,
-                    },
-                    vec![OpCode::I32Const(0)],
-                ),
-            ],
+            global_section: vec![(
+                GlobalType {
+                    content_type: WasmType::i32,
+                    mutability: true,
+                },
+                vec![OpCode::I32Const(0)],
+            )],
             exports_section: Vec::new(),
             elements_section: ElemSegment {
                 offset: vec![OpCode::I32Const(0), OpCode::End],

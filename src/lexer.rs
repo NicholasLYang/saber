@@ -210,6 +210,7 @@ impl<'input> Lexer<'input> {
         next
     }
 
+    #[allow(dead_code)]
     fn peek(&self) {
         println!("{:?}", self.lookahead);
     }

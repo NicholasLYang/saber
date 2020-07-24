@@ -3,13 +3,8 @@ struct Person {
 }
 
 let foo = \() => {
-  let s1 = "Hello";
-  let s2 = "Hello";
-  if s1 == s2 {
-    printString("Equal!");
-  } else {
-    printString("Not equal!");
-  }
+  let p = Person { name: "Nicholas" };
+  printString(p.name);
 }
 
 export foo;

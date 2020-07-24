@@ -315,6 +315,7 @@ impl CodeGenerator {
             | Type::Arrow(_, _)
             | Type::Record(_)
             | Type::Tuple(_) => Ok(Some(WasmType::i32)),
+            Type::Solved(type_id) => self.generate_wasm_type(*type_id, location),
             Type::Var(id) => Err(GenerationError::CouldNotInfer {
                 location,
                 type_: Type::Var(*id),
@@ -528,13 +529,11 @@ impl CodeGenerator {
                 let table_index = self.program_data.elements_section.elems.len() - 1;
                 Ok(vec![OpCode::I32Const(table_index.try_into().unwrap())])
             }
-            ExprT::Tuple(elems, _) => {
+            ExprT::Tuple(elems, type_id) => {
                 if elems.len() == 0 {
                     Ok(Vec::new())
                 } else {
-                    Err(GenerationError::NotImplemented {
-                        reason: "Tuple code gen isn't done",
-                    })
+                    self.generate_record_literal(elems.iter(), elems.len(), *type_id, expr.location)
                 }
             }
             ExprT::Block {
@@ -622,7 +621,9 @@ impl CodeGenerator {
                     let field_wasm_type = self
                         .generate_wasm_type(fields[field_position].1, expr.location)?
                         .unwrap_or(WasmType::Empty);
-                    let offset: u32 = (4 * field_position).try_into().unwrap();
+                    // Account for type_id
+                    let field_loc = field_position + 1;
+                    let offset: u32 = (4 * field_loc).try_into().unwrap();
                     let load_code = match field_wasm_type {
                         WasmType::i32 => OpCode::I32Load(2, offset),
                         WasmType::f32 => OpCode::F32Load(2, offset),
@@ -640,37 +641,62 @@ impl CodeGenerator {
             ExprT::Record {
                 name: _,
                 fields,
-                type_: _,
-            } => self.generate_record_literal(fields, expr.location),
+                type_,
+            } => self.generate_record_literal(
+                fields.iter().map(|(_, expr)| expr),
+                fields.len(),
+                *type_,
+                expr.location,
+            ),
         }
     }
 
-    fn generate_record_literal(
+    fn generate_record_literal<'a, I>(
         &mut self,
-        fields: &Vec<(Name, Loc<ExprT>)>,
+        fields: I,
+        length: usize,
+        type_id: TypeId,
         location: LocationRange,
-    ) -> Result<Vec<OpCode>> {
+    ) -> Result<Vec<OpCode>>
+    where
+        I: Iterator<Item = &'a Loc<ExprT>>,
+    {
+        // We add 1 field for type id
+        let length = length + 1;
         // Since all types are either pointers or 32 bit ints/floats,
         // we can do one field == 4 bytes
-        if fields.len() >= 64 {
+        if length >= 64 {
             return Err(GenerationError::RecordTooLarge { location });
         }
         // Size of record in bytes
-        let record_size: i32 = (4 * fields.len()).try_into().unwrap();
+        let record_size: i32 = (4 * length).try_into().unwrap();
         let mut opcodes = vec![OpCode::I32Const(record_size), OpCode::Call(ALLOC_INDEX)];
-        // Save pointer to block at global 1
-        opcodes.push(OpCode::SetGlobal(1));
+        // Save pointer to block at global 0
+        opcodes.push(OpCode::SetGlobal(0));
+
+        // Set type_id
+        // Get ptr to record
+        opcodes.push(OpCode::GetGlobal(0));
+        // TODO: Add proper error handling for too many types.
+        opcodes.push(OpCode::I32Const(type_id.try_into().unwrap()));
+        // *ptr = type_id
+        opcodes.push(OpCode::I32Store(2, 0));
+        opcodes.push(OpCode::GetGlobal(0));
+        opcodes.push(OpCode::I32Const(4));
+        opcodes.push(OpCode::I32Add);
+        opcodes.push(OpCode::SetGlobal(0));
+
         // We need to write the struct to memory. This consists of
         // looping through entries, generating the opcodes and
         // storing them in the heap
-        for (_, expr) in fields {
+        for expr in fields {
             // No, you're not seeing double. We push
-            // the value of Global 1 to "save" it
+            // the value of Global 0 to "save" it
             // in case it gets mutated when we generate
             // the field.
-            opcodes.push(OpCode::GetGlobal(1));
+            opcodes.push(OpCode::GetGlobal(0));
             // We push it again as an address for store
-            opcodes.push(OpCode::GetGlobal(1));
+            opcodes.push(OpCode::GetGlobal(0));
             opcodes.append(&mut self.generate_expr(expr)?);
             let wasm_type = self
                 .generate_wasm_type(expr.inner.get_type(), expr.location)?
@@ -690,10 +716,10 @@ impl CodeGenerator {
             // so we add 4 to it and save
             opcodes.push(OpCode::I32Const(4));
             opcodes.push(OpCode::I32Add);
-            opcodes.push(OpCode::SetGlobal(1));
+            opcodes.push(OpCode::SetGlobal(0));
         }
         // return heap_ptr - sizeof(record)
-        opcodes.push(OpCode::GetGlobal(1));
+        opcodes.push(OpCode::GetGlobal(0));
         opcodes.push(OpCode::I32Const(record_size));
         opcodes.push(OpCode::I32Sub);
         Ok(opcodes)
@@ -723,23 +749,23 @@ impl CodeGenerator {
                     OpCode::I32Const(buffer_length + 4),
                     OpCode::Call(ALLOC_INDEX),
                 ];
-                opcodes.push(OpCode::SetGlobal(1));
+                opcodes.push(OpCode::SetGlobal(0));
                 // Pop on global 1 as return value (ptr to str)
-                opcodes.push(OpCode::GetGlobal(1));
-                opcodes.push(OpCode::GetGlobal(1));
+                opcodes.push(OpCode::GetGlobal(0));
+                opcodes.push(OpCode::GetGlobal(0));
                 opcodes.push(OpCode::I32Const(raw_str_length));
                 opcodes.push(OpCode::I32Store(2, 0));
                 for b in bytes.chunks_exact(4) {
                     // Increment global 1 by 4 bytes
-                    opcodes.push(OpCode::GetGlobal(1));
+                    opcodes.push(OpCode::GetGlobal(0));
                     opcodes.push(OpCode::I32Const(4));
                     opcodes.push(OpCode::I32Add);
-                    opcodes.push(OpCode::SetGlobal(1));
+                    opcodes.push(OpCode::SetGlobal(0));
                     let packed_bytes = ((b[0] as u32) << 0)
                         + ((b[1] as u32) << 8)
                         + ((b[2] as u32) << 16)
                         + ((b[3] as u32) << 24);
-                    opcodes.push(OpCode::GetGlobal(1));
+                    opcodes.push(OpCode::GetGlobal(0));
                     opcodes.push(OpCode::I32Const(packed_bytes as i32));
                     opcodes.push(OpCode::I32Store(2, 0))
                 }

@@ -221,6 +221,9 @@ pub enum Type {
     Record(Vec<(Name, TypeId)>),
     Tuple(Vec<TypeId>),
     Arrow(TypeId, TypeId),
+    // Points to a type that is solved further
+    // Not the greatest solution but meh
+    Solved(TypeId),
 }
 
 impl fmt::Display for Type {
@@ -254,6 +257,7 @@ impl fmt::Display for Type {
                     format!("({})", elems)
                 }
                 Type::Arrow(t1, t2) => format!("{} => {}", t1, t2),
+                Type::Solved(t) => format!("solved({})", t),
             }
         )
     }

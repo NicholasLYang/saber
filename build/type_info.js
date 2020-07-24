@@ -1,1 +1,1 @@
-const type_info = {0:[true]}; module.exports = type_info
+const type_info = {14:[true]};module.exports = type_info;

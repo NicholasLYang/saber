@@ -132,6 +132,7 @@ impl<'input> Parser<'input> {
         tok
     }
 
+    #[allow(dead_code)]
     fn peek(&mut self) -> Result<(), ParseError> {
         let tok = self.bump()?;
         println!("TOK: {:?}", tok);
