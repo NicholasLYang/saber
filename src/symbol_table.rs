@@ -43,7 +43,8 @@ pub enum EntryType {
 }
 
 pub static ALLOC_INDEX: u32 = 0;
-pub static STREQ_INDEX: u32 = 1;
+pub static DEALLOC_INDEX: u32 = 1;
+pub static STREQ_INDEX: u32 = 2;
 
 impl SymbolTable {
     pub fn new() -> Self {
@@ -53,7 +54,7 @@ impl SymbolTable {
                 is_function_scope: false,
                 parent: None,
             }],
-            function_index: 2,
+            function_index: 3,
             var_types: Vec::new(),
             current_scope: 0,
         }
@@ -95,6 +96,10 @@ impl SymbolTable {
 
     pub fn lookup_name(&mut self, name: usize) -> Option<&SymbolEntry> {
         self.lookup_name_in_scope(name, self.current_scope)
+    }
+
+    pub fn get_scope_entries(&self, scope: usize) -> impl Iterator<Item = &(Name, SymbolEntry)> {
+        self.scopes[scope].symbols.iter()
     }
 
     // Looks up name in scope

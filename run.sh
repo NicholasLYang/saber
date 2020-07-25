@@ -1,3 +1,3 @@
-cargo build > /dev/null 2>&1
+cargo build
 target/debug/saber test.sbr
 npm start --prefix build

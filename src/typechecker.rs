@@ -96,6 +96,14 @@ fn build_type_names(name_table: &mut NameTable) -> HashMap<Name, TypeId> {
     type_names
 }
 
+pub fn is_ref_type(type_id: TypeId) -> bool {
+    !(type_id == INT_INDEX
+        || type_id == BOOL_INDEX
+        || type_id == UNIT_INDEX
+        || type_id == CHAR_INDEX
+        || type_id == FLOAT_INDEX)
+}
+
 impl TypeChecker {
     pub fn new(mut name_table: NameTable) -> TypeChecker {
         let mut symbol_table = SymbolTable::new();
@@ -147,14 +155,6 @@ impl TypeChecker {
         self.type_table.insert(type_var)
     }
 
-    fn is_ref_type(&self, type_id: TypeId) -> bool {
-        !(type_id == INT_INDEX
-            || type_id == BOOL_INDEX
-            || type_id == UNIT_INDEX
-            || type_id == CHAR_INDEX
-            || type_id == FLOAT_INDEX)
-    }
-
     fn generate_field_info<'a, I>(&self, fields: I) -> Vec<bool>
     where
         I: Iterator<Item = &'a usize>,
@@ -162,7 +162,7 @@ impl TypeChecker {
         // Stores whether or not a field is a reference
         let mut field_info = Vec::new();
         for field_type in fields {
-            field_info.push(self.is_ref_type(*field_type))
+            field_info.push(is_ref_type(*field_type))
         }
         field_info
     }

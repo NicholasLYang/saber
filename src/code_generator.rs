@@ -2,8 +2,8 @@ use ast::{ExprT, Function, Loc, Name, Op, StmtT, Type, TypeId, UnaryOp, Value};
 use lexer::LocationRange;
 use printer::type_to_string;
 use std::convert::TryInto;
-use symbol_table::{EntryType, SymbolTable, ALLOC_INDEX, STREQ_INDEX};
-use typechecker::TypeChecker;
+use symbol_table::{EntryType, SymbolTable, ALLOC_INDEX, DEALLOC_INDEX, STREQ_INDEX};
+use typechecker::{is_ref_type, TypeChecker};
 use utils::{NameTable, TypeTable, FLOAT_INDEX, STR_INDEX};
 use wasm::{
     ExportEntry, ExternalKind, FunctionBody, FunctionType, ImportEntry, ImportKind, LocalEntry,
@@ -78,6 +78,18 @@ impl CodeGenerator {
             field_str: "alloc".into(),
             kind: ImportKind::Function {
                 type_: alloc_type_index,
+            },
+        });
+        let dealloc_type = FunctionType {
+            param_types: vec![WasmType::i32],
+            return_type: None,
+        };
+        let dealloc_type_index = self.program_data.insert_type(dealloc_type);
+        self.program_data.import_section.push(ImportEntry {
+            module_str: "std".into(),
+            field_str: "dealloc".into(),
+            kind: ImportKind::Function {
+                type_: dealloc_type_index,
             },
         });
         let streq_type = FunctionType {
@@ -550,6 +562,15 @@ impl CodeGenerator {
                 if let Some(expr) = end_expr {
                     opcodes.append(&mut self.generate_expr(expr)?);
                 }
+                let entries = self.symbol_table.get_scope_entries(*scope_index);
+                for (_, entry) in entries {
+                    if let EntryType::Var { var_type, index } = &entry.entry_type {
+                        if is_ref_type(*var_type) {
+                            opcodes.push(OpCode::GetLocal((*index).try_into().unwrap()));
+                            opcodes.push(OpCode::Call(DEALLOC_INDEX));
+                        }
+                    }
+                }
                 Ok(opcodes)
             }
             ExprT::If(cond, then_block, else_block, type_) => {
@@ -757,13 +778,18 @@ impl CodeGenerator {
                 opcodes.push(OpCode::I32Const(STR_INDEX.try_into().unwrap()));
                 // *ptr = type_id
                 opcodes.push(OpCode::I32Store(2, 0));
+
+                // Pop on global 0 as return value (ptr to type id)
+                // This may seem weird, as intuitively we'd want the
+                // pointer to be to the start of the string
+                // but for GC reasons we want it to point to type id
+                opcodes.push(OpCode::GetGlobal(0));
+
                 opcodes.push(OpCode::GetGlobal(0));
                 opcodes.push(OpCode::I32Const(4));
                 opcodes.push(OpCode::I32Add);
                 opcodes.push(OpCode::SetGlobal(0));
 
-                // Pop on global 0 as return value (ptr to str)
-                opcodes.push(OpCode::GetGlobal(0));
                 opcodes.push(OpCode::GetGlobal(0));
                 opcodes.push(OpCode::I32Const(raw_str_length));
                 opcodes.push(OpCode::I32Store(2, 0));
