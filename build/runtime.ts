@@ -1,35 +1,6 @@
-const { readFileSync, writeFileSync } = require("fs");
-const code = require("./code.js");
-const typeInfo = require("./type_info.js");
+const { typeInfo, STR_INDEX } = require("./type_info.js");
 
-function atob(a) {
-    return new Buffer(a, 'base64').toString('binary');
-};
-
-function base64ToArray(base64) {
-    const characters = atob(base64);
-    const array = new Uint8Array(characters.length);
-
-    for (let i = 0; i < characters.length; i++) {
-        array[i] = characters.charCodeAt(i);
-    }
-    return array;
-}
-
-const instantiate = async () => {
-    const buffer = base64ToArray(code);
-    const module = await WebAssembly.compile(buffer);
-    const memory = new WebAssembly.Memory({ initial: 1 });
-    const importObject = {
-        std: { alloc: alloc(memory), streq: streq(memory), printInt: console.log, printFloat: console.log, printString: printString(memory) },
-        mem: { heap: memory }};
-    const instance = await WebAssembly.instantiate(module, importObject);
-    let wasm = instance.exports;
-    wasm.foo();
-    printHeap(memory);
-};
-
-const printHeap = memory => {
+export const printHeap = (memory: WebAssembly.Memory) => {
     const memArray = new Uint8Array(memory.buffer);
     console.log("--------");
     for (let i = 0; i < 2 ** 7; i++) {
@@ -38,9 +9,9 @@ const printHeap = memory => {
         }
     }
     console.log("--------");
-}
+};
 
-const printString = memory => bytePtr => {
+export const printString = (memory: WebAssembly.Memory) => (bytePtr: number) => {
     const memArray = new Uint32Array(memory.buffer);
     let ptr = bytePtr/4;
     const len = memArray[ptr];
@@ -56,7 +27,7 @@ const printString = memory => bytePtr => {
 const PAGE_SIZE = 65536;
 
 // Takes in size in bytes
-const alloc = memory => size => {
+export const alloc = (memory: WebAssembly.Memory) => (size: number) => {
     // size + 8 because we gotta tack on a block length and refcount
     const alignedSize = ((size + 8) + 3) & ~0x03;
     let memArray = new Uint32Array(memory.buffer);
@@ -80,10 +51,10 @@ const alloc = memory => size => {
                 memArray[ptr + 1] = 1;
                 return (ptr + 2) * 4;
             }
-        // If the block is allocated, we move on
+            // If the block is allocated, we move on
         } else if ((len & 1) === 1) {
             ptr += len
-        // If the length is big enough, we allocate the block
+            // If the length is big enough, we allocate the block
         } else if (len > alignedSize) {
             memArray[ptr] = len + 1;
             memArray[ptr + 1] = 1;
@@ -99,15 +70,41 @@ const alloc = memory => size => {
     return (ptr + 2) * 4;
 };
 
-const dealloc = memory => ptr => {
+export const dealloc = (memory: WebAssembly.Memory) => (bytePtr: number) => {
     let memArray = new Uint32Array(memory.buffer);
+    const ptr = (bytePtr - 8)/4;
     memArray[ptr + 1] -= 1;
     if (memArray[ptr + 1] === 0) {
-        typeInfo[memArray[ptr + 2]]
+        // Remove allocated flag
+        memArray[ptr] = memArray[ptr] ^ 1;
+        const typeId = memArray[ptr + 2];
+        if (typeId === STR_INDEX) {
+            return;
+        }
+        if (!(typeId in typeInfo)) {
+            throw new Error(`RuntimeError: Invalid type for struct. Most likely internal error`);
+        }
+        const structInfo = typeInfo[typeId];
+        structInfo.forEach((isRef: boolean, index: number) => {
+            if (isRef) {
+                const ptr2 = memArray[ptr + 3 + index];
+                dealloc(memory)(ptr2);
+            }
+        });
     }
 }
 
-const streq = memory => (s1, s2) => {
+export const clone = (memory: WebAssembly.Memory) => (bytePtr: number) => {
+    const ptr = bytePtr/4;
+    const memArray = new Uint32Array(memory.buffer);
+    if (memArray[ptr - 1] < 1) {
+        throw new Error(`RuntimeError: Invalid refcount for struct. Most likely internal error`);
+    }
+    memArray[ptr - 1] += 1;
+    return ptr;
+}
+
+export const streq = (memory: WebAssembly.Memory) => (s1: number, s2: number) => {
     if (s1 === s2) {
         return true;
     }
@@ -124,11 +121,3 @@ const streq = memory => (s1, s2) => {
     }
     return true;
 };
-
-instantiate()
-    .then(res => {
-	console.log(res);
-    })
-    .catch(error => {
-	console.log(error);
-    });

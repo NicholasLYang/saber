@@ -9,4 +9,5 @@
 test.sbr
 .idea
 .cdmkn
-/build/code.js
+/build/code.ts
+/build/*.js

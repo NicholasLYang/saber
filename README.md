@@ -23,7 +23,7 @@ on Linux or Windows
 Clone the repo, then `cd` into `build/`. Run `npm install`.
 
 To compile a Saber file, run `cargo run <file>`. It will generate into `build/`. To run 
-the generated code, run `node build/load.js`.
+the generated code, run `node build/load.ts`.
   
 
 ## Code of Conduct

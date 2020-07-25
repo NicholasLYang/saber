@@ -21,6 +21,7 @@ use code_generator::CodeGenerator;
 use std::env;
 use std::fs::{self, File};
 use std::io::Write;
+use utils::STR_INDEX;
 
 mod ast;
 mod code_generator;
@@ -79,21 +80,18 @@ fn read_file(file_name: &str) -> Result<()> {
         .map(|(name, type_info)| format!("{}:{}", name, format_bool_vec(&type_info)))
         .collect::<Vec<String>>()
         .join(",");
-    let mut type_info_file = File::create("build/type_info.js")?;
+    let mut type_info_file = File::create("build/type_info.ts")?;
     write!(
         type_info_file,
-        "const type_info = {{{}}};module.exports = type_info;",
-        type_info_str
+        "export const typeInfo = {{{}}};export const STR_INDEX = {};",
+        type_info_str, STR_INDEX
     )?;
     let code_generator = CodeGenerator::new(typechecker);
     let program = code_generator.generate_program(typed_program)?;
     let mut emitter = Emitter::new();
     emitter.emit_program(program)?;
-    let js_str = format!(
-        "const code =\"{}\";module.exports = code",
-        emitter.output_base64()
-    );
-    let mut js_file = File::create("build/code.js")?;
+    let js_str = format!("export const code =\"{}\"", emitter.output_base64());
+    let mut js_file = File::create("build/code.ts")?;
     js_file.write_all(js_str.as_bytes())?;
     Ok(())
 }

@@ -1,1 +1,1 @@
-const type_info = {14:[true]};module.exports = type_info;
+const typeInfo = {14:[true]};const STR_INDEX = 3;module.exports = {typeInfo, STR_INDEX};
