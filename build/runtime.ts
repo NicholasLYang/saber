@@ -52,15 +52,15 @@ export const alloc = (memory: WebAssembly.Memory) => (size: number) => {
                 return (ptr + 2) * 4;
             }
             // If the block is allocated, we move on
-        } else if ((len & 1) === 1) {
-            ptr += len
+        } else if ((len & 1)) {
+            ptr += (len - 1)/4;
             // If the length is big enough, we allocate the block
         } else if (len > alignedSize) {
             memArray[ptr] = len + 1;
             memArray[ptr + 1] = 1;
             return (ptr + 2) * 4;
         } else {
-            ptr += len;
+            ptr += len/4;
         }
     }
     memory.grow(Math.max(alignedSize/PAGE_SIZE, 1));
