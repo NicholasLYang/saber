@@ -1,17 +1,18 @@
 use ast::{
-    Expr, ExprT, Function, Loc, Name, Op, Pat, Program, Stmt, StmtT, Type, TypeDef, TypeId,
-    TypeSig, UnaryOp, Value,
+    Expr, ExprT, Function, Loc, Name, Op, Pat, Program, ProgramT, Stmt, StmtT, Type, TypeDef,
+    TypeId, TypeSig, UnaryOp, Value,
 };
 use im::hashmap::HashMap;
 use lexer::LocationRange;
 use printer::type_to_string;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use symbol_table::{EntryType, SymbolTable};
 use utils::{
     NameTable, TypeTable, BOOL_INDEX, CHAR_INDEX, FLOAT_INDEX, INT_INDEX, STR_INDEX, UNIT_INDEX,
 };
 
-#[derive(Debug, Fail, PartialEq)]
+#[derive(Debug, Fail, Clone, PartialEq, Serialize, Deserialize)]
 pub enum TypeError {
     #[fail(display = "{}: Variable not defined: '{}'", location, name)]
     VarNotDefined {
@@ -180,32 +181,51 @@ impl TypeChecker {
         }
     }
 
-    fn generate_runtime_type_info(
+    pub fn generate_runtime_type_info(
         &self,
-        named_types: Vec<(Name, TypeId)>,
+        named_types: &Vec<(Name, TypeId)>,
     ) -> Vec<(Name, Vec<bool>)> {
         let mut type_info = Vec::new();
         for (_, type_id) in named_types {
-            self.generate_type_info(type_id)
+            self.generate_type_info(*type_id)
                 .map(|info| type_info.push(info));
         }
         type_info
     }
 
-    pub fn check_program(
-        &mut self,
-        program: Program,
-    ) -> Result<(Vec<Loc<StmtT>>, Vec<(Name, Vec<bool>)>), TypeError> {
+    pub fn check_program(&mut self, program: Program) -> ProgramT {
         let mut named_types = Vec::new();
+        let mut errors = Vec::new();
         for type_def in program.type_defs {
-            named_types.push(self.type_def(type_def)?);
+            match self.type_def(type_def) {
+                Ok(named_type) => {
+                    named_types.push(named_type);
+                }
+                Err(err) => {
+                    errors.push(err);
+                }
+            }
         }
-        self.read_functions(&program.stmts)?;
+        if let Err(err) = self.read_functions(&program.stmts) {
+            errors.push(err);
+        }
         let mut typed_stmts = Vec::new();
         for stmt in program.stmts {
-            typed_stmts.append(&mut self.stmt(stmt)?);
+            match self.stmt(stmt) {
+                Ok(stmt_t) => {
+                    let mut stmt_t = stmt_t;
+                    typed_stmts.append(&mut stmt_t);
+                }
+                Err(err) => {
+                    errors.push(err);
+                }
+            }
         }
-        Ok((typed_stmts, self.generate_runtime_type_info(named_types)))
+        ProgramT {
+            stmts: typed_stmts,
+            named_types,
+            errors,
+        }
     }
 
     // Reads functions defined in this block

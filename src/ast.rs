@@ -2,6 +2,7 @@ use lexer::LocationRange;
 use parser::ParseError;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use typechecker::TypeError;
 
 pub type Name = usize;
 pub type TypeId = usize;
@@ -18,6 +19,13 @@ pub struct Program {
     pub stmts: Vec<Loc<Stmt>>,
     pub type_defs: Vec<Loc<TypeDef>>,
     pub errors: Vec<ParseError>,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct ProgramT {
+    pub stmts: Vec<Loc<StmtT>>,
+    pub named_types: Vec<(Name, TypeId)>,
+    pub errors: Vec<TypeError>,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]

@@ -1,4 +1,4 @@
-use ast::{ExprT, Function, Loc, Name, Op, StmtT, Type, TypeId, UnaryOp, Value};
+use ast::{ExprT, Function, Loc, Name, Op, ProgramT, StmtT, Type, TypeId, UnaryOp, Value};
 use lexer::LocationRange;
 use printer::type_to_string;
 use std::convert::TryInto;
@@ -138,8 +138,8 @@ impl CodeGenerator {
         Ok(())
     }
 
-    pub fn generate_program(mut self, program: Vec<Loc<StmtT>>) -> Result<ProgramData> {
-        for stmt in program {
+    pub fn generate_program(mut self, program: ProgramT) -> Result<ProgramData> {
+        for stmt in program.stmts {
             (&mut self).generate_top_level_stmt(&stmt)?;
         }
         self.generate_default_imports()?;

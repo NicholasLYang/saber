@@ -74,8 +74,12 @@ fn read_file(file_name: &str) -> Result<()> {
         println!("{}", error);
     }
     let mut typechecker = TypeChecker::new(parser.get_name_table());
-    let (typed_program, named_types) = typechecker.check_program(program)?;
-    let type_info_str = named_types
+    let program_t = typechecker.check_program(program);
+    let runtime_type_info = typechecker.generate_runtime_type_info(&program_t.named_types);
+    for error in &program_t.errors {
+        println!("{}", error);
+    }
+    let type_info_str = runtime_type_info
         .iter()
         .map(|(name, type_info)| format!("{}:{}", name, format_bool_vec(&type_info)))
         .collect::<Vec<String>>()
@@ -87,7 +91,7 @@ fn read_file(file_name: &str) -> Result<()> {
         type_info_str, STR_INDEX
     )?;
     let code_generator = CodeGenerator::new(typechecker);
-    let program = code_generator.generate_program(typed_program)?;
+    let program = code_generator.generate_program(program_t)?;
     let mut emitter = Emitter::new();
     emitter.emit_program(program)?;
     let js_str = format!("export const code =\"{}\"", emitter.output_base64());
