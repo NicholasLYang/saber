@@ -24,6 +24,16 @@ export const printString = (memory: WebAssembly.Memory) => (bytePtr: number) => 
     console.log(decoder.decode(out));
 };
 
+// Prints value
+// @param {number} ptr - An index into 32 bit array. Should point to type id
+export function printValue(memory: WebAssembly.Memory, ptr: number) {
+    const memArray = new Uint32Array(memory.buffer);
+    const size = memArray[ptr - 2] & ~1;
+    const refCount = memArray[ptr - 1];
+    const typeId = memArray[ptr];
+    console.log(`SIZE: ${size}, REF COUNT ${refCount}, TYPE ID ${typeId}`);
+}
+
 const PAGE_SIZE = 65536;
 
 // Takes in size in bytes
