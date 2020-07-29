@@ -4,7 +4,8 @@ struct Person {
 
 let foo = \() => {
   let p = Person { name: "Nicholas" };
-  printString(p.name);
+  let name = p.name;
+  printString(name);
 }
 
 export foo;

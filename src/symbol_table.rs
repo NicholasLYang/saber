@@ -44,7 +44,8 @@ pub enum EntryType {
 
 pub static ALLOC_INDEX: u32 = 0;
 pub static DEALLOC_INDEX: u32 = 1;
-pub static STREQ_INDEX: u32 = 2;
+pub static CLONE_INDEX: u32 = 2;
+pub static STREQ_INDEX: u32 = 3;
 
 impl SymbolTable {
     pub fn new() -> Self {
@@ -54,7 +55,7 @@ impl SymbolTable {
                 is_function_scope: false,
                 parent: None,
             }],
-            function_index: 3,
+            function_index: 4,
             var_types: Vec::new(),
             current_scope: 0,
         }

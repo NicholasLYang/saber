@@ -2,7 +2,7 @@ use ast::{ExprT, Function, Loc, Name, Op, ProgramT, StmtT, Type, TypeId, UnaryOp
 use lexer::LocationRange;
 use printer::type_to_string;
 use std::convert::TryInto;
-use symbol_table::{EntryType, SymbolTable, ALLOC_INDEX, DEALLOC_INDEX, STREQ_INDEX};
+use symbol_table::{EntryType, SymbolTable, ALLOC_INDEX, CLONE_INDEX, DEALLOC_INDEX, STREQ_INDEX};
 use typechecker::{is_ref_type, TypeChecker};
 use utils::{NameTable, TypeTable, FLOAT_INDEX, STR_INDEX};
 use wasm::{
@@ -90,6 +90,18 @@ impl CodeGenerator {
             field_str: "dealloc".into(),
             kind: ImportKind::Function {
                 type_: dealloc_type_index,
+            },
+        });
+        let clone_type = FunctionType {
+            param_types: vec![WasmType::i32],
+            return_type: None,
+        };
+        let clone_type_index = self.program_data.insert_type(clone_type);
+        self.program_data.import_section.push(ImportEntry {
+            module_str: "std".into(),
+            field_str: "clone".into(),
+            kind: ImportKind::Function {
+                type_: clone_type_index,
             },
         });
         let streq_type = FunctionType {
@@ -413,6 +425,12 @@ impl CodeGenerator {
                 let index = self.get_var_index(*name)?;
                 let mut opcodes = self.generate_expr(&expr)?;
                 opcodes.push(OpCode::SetLocal(index.try_into().unwrap()));
+                /*
+                This works, except it gives an extra refcount when you initialize a value
+                if is_ref_type(expr.inner.get_type()) {
+                    opcodes.push(OpCode::GetLocal(index.try_into().unwrap()));
+                    opcodes.push(OpCode::Call(CLONE_INDEX));
+                }*/
                 Ok(opcodes)
             }
             StmtT::Block(stmts) => {
