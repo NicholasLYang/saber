@@ -2,6 +2,7 @@
 name = "saber"
 version = "0.1.0"
 authors = ["Nicholas Yang <ny585@nyu.edu>"]
+edition = "2018"
 
 [dependencies]
 base64 = "0.12.3"

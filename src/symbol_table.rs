@@ -1,4 +1,4 @@
-use ast::{Name, TypeId};
+use crate::ast::{Name, TypeId};
 use im::hashmap::HashMap;
 
 #[derive(Debug, PartialEq, Clone)]

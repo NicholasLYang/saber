@@ -1,14 +1,16 @@
-use ast::{ExprT, Function, Loc, Name, Op, ProgramT, StmtT, Type, TypeId, UnaryOp, Value};
-use lexer::LocationRange;
-use printer::type_to_string;
-use std::convert::TryInto;
-use symbol_table::{EntryType, SymbolTable, ALLOC_INDEX, CLONE_INDEX, DEALLOC_INDEX, STREQ_INDEX};
-use typechecker::{is_ref_type, TypeChecker};
-use utils::{NameTable, TypeTable, FLOAT_INDEX, STR_INDEX};
-use wasm::{
+use crate::ast::{ExprT, Function, Loc, Name, Op, ProgramT, StmtT, Type, TypeId, UnaryOp, Value};
+use crate::lexer::LocationRange;
+use crate::printer::type_to_string;
+use crate::symbol_table::{
+    EntryType, SymbolTable, ALLOC_INDEX, CLONE_INDEX, DEALLOC_INDEX, STREQ_INDEX,
+};
+use crate::typechecker::{is_ref_type, TypeChecker};
+use crate::utils::{NameTable, TypeTable, FLOAT_INDEX, STR_INDEX};
+use crate::wasm::{
     ExportEntry, ExternalKind, FunctionBody, FunctionType, ImportEntry, ImportKind, LocalEntry,
     OpCode, ProgramData, WasmType,
 };
+use std::convert::TryInto;
 
 #[derive(Debug, Fail, PartialEq)]
 pub enum GenerationError {

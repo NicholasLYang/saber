@@ -1,16 +1,16 @@
-use ast::{
+use crate::ast::{
     Expr, ExprT, Function, Loc, Name, Op, Pat, Program, ProgramT, Stmt, StmtT, Type, TypeDef,
     TypeId, TypeSig, UnaryOp, Value,
 };
-use im::hashmap::HashMap;
-use lexer::LocationRange;
-use printer::type_to_string;
-use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use symbol_table::{EntryType, SymbolTable};
-use utils::{
+use crate::lexer::LocationRange;
+use crate::printer::type_to_string;
+use crate::symbol_table::{EntryType, SymbolTable};
+use crate::utils::{
     NameTable, TypeTable, BOOL_INDEX, CHAR_INDEX, FLOAT_INDEX, INT_INDEX, STR_INDEX, UNIT_INDEX,
 };
+use im::hashmap::HashMap;
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 #[derive(Debug, Fail, Clone, PartialEq, Serialize, Deserialize)]
 pub enum TypeError {

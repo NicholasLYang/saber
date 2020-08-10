@@ -1,11 +1,11 @@
 use crate::types::Result;
-use byteorder::{LittleEndian, WriteBytesExt};
-use std::convert::TryInto;
-use std::io::prelude::*;
-use wasm::{
+use crate::wasm::{
     ElemSegment, ExportEntry, FunctionBody, FunctionType, GlobalType, ImportEntry, ImportKind,
     OpCode, ProgramData, WasmType,
 };
+use byteorder::{LittleEndian, WriteBytesExt};
+use std::convert::TryInto;
+use std::io::prelude::*;
 
 pub struct Emitter {
     output: Vec<u8>,

@@ -1,7 +1,7 @@
-use ast::{Type, TypeId};
+use crate::ast::{Type, TypeId};
+use crate::lexer::Token;
+use crate::utils::{NameTable, TypeTable};
 use itertools::Itertools;
-use lexer::Token;
-use utils::{NameTable, TypeTable};
 
 pub fn type_to_string(name_table: &NameTable, type_table: &TypeTable, type_id: TypeId) -> String {
     match type_table.get_type(type_id) {

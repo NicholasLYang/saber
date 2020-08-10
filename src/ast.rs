@@ -1,8 +1,8 @@
-use lexer::LocationRange;
-use parser::ParseError;
+use crate::lexer::LocationRange;
+use crate::parser::ParseError;
+use crate::typechecker::TypeError;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use typechecker::TypeError;
 
 pub type Name = usize;
 pub type TypeId = usize;

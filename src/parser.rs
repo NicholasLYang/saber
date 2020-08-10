@@ -1,10 +1,10 @@
 use crate::ast::{Expr, Name, Op, Pat, Stmt, TypeSig, Value};
+use crate::ast::{Loc, Program, TypeDef, UnaryOp};
 use crate::lexer::{Lexer, LexicalError, LocationRange, Token, TokenDiscriminants};
-use ast::{Loc, Program, TypeDef, UnaryOp};
-use printer::token_to_string;
+use crate::printer::token_to_string;
+use crate::utils::NameTable;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
-use utils::NameTable;
 
 pub struct Parser<'input> {
     pub lexer: Lexer<'input>,

@@ -1,4 +1,4 @@
-use ast::{Type, TypeId};
+use crate::ast::{Type, TypeId};
 use bimap::BiMap;
 
 #[derive(Debug)]

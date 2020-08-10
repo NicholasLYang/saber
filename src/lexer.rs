@@ -1,7 +1,7 @@
+use crate::utils::NameTable;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Debug, Display, Formatter};
 use std::str::CharIndices;
-use utils::NameTable;
 
 #[derive(Clone, Debug, PartialEq, EnumDiscriminants, Serialize, Deserialize)]
 #[strum_discriminants(derive(Serialize, Deserialize))]
