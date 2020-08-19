@@ -619,14 +619,6 @@ impl TypeChecker {
         }
     }
 
-    /**
-     *
-     * BEFORE calling this function, please set up a new scope. Why before?
-     * Because if we're calling this with a function binding, i.e. StmtT::Function,
-     * then we need to insert the name into the scope, but if we're calling this with
-     * an anonymous function, i.e. ExprT::Function, then we can't do that
-     *
-     **/
     fn function(
         &mut self,
         params: Pat,
@@ -645,8 +637,10 @@ impl TypeChecker {
         self.return_type = Some(return_type);
 
         let body_location = body.location;
+
         // Check body
         let body = self.expr(body)?;
+
         let body_type = body.inner.get_type();
         std::mem::swap(&mut old_return_type, &mut self.return_type);
         // If the body type is unit, we don't try to unify the body type
