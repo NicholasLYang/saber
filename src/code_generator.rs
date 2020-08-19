@@ -490,31 +490,20 @@ impl CodeGenerator {
                 let index = self.get_var_index(*name)?;
                 Ok(vec![OpCode::GetLocal(index.try_into().unwrap())])
             }
-            ExprT::Call {
+            ExprT::DirectCall {
+                callee,
+                args,
+                type_: _,
+            } => {
+                let mut opcodes = self.generate_expr(args)?;
+                opcodes.push(OpCode::Call((*callee).try_into().unwrap()));
+                Ok(opcodes)
+            }
+            ExprT::IndirectCall {
                 callee,
                 args,
                 type_,
             } => {
-                if let ExprT::Var { name, type_: _ } = &callee.inner {
-                    let mut opcodes = Vec::new();
-                    let entry = self.symbol_table.lookup_name(*name).ok_or(
-                        GenerationError::FunctionNotDefined {
-                            name: self.name_table.get_str(&name).to_string(),
-                        },
-                    )?;
-                    if let EntryType::Function {
-                        index,
-                        params_type: _,
-                        return_type: _,
-                        type_: _,
-                    } = &entry.entry_type
-                    {
-                        let index = *index;
-                        opcodes.append(&mut self.generate_expr(args)?);
-                        opcodes.push(OpCode::Call((index).try_into().unwrap()));
-                        return Ok(opcodes);
-                    };
-                }
                 let args_wasm_type = self.get_args_type(args.inner.get_type(), args.location)?;
                 let return_wasm_type = self.generate_wasm_type(*type_, expr.location)?;
                 let func_type = FunctionType {

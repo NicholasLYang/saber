@@ -6,6 +6,7 @@ use std::fmt;
 
 pub type Name = usize;
 pub type TypeId = usize;
+pub type FunctionId = usize;
 
 // Wrapper to provide location to AST nodes
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -135,7 +136,12 @@ pub enum ExprT {
         type_: TypeId,
     },
     Field(Box<Loc<ExprT>>, Name, TypeId),
-    Call {
+    DirectCall {
+        callee: FunctionId,
+        args: Box<Loc<ExprT>>,
+        type_: TypeId,
+    },
+    IndirectCall {
         callee: Box<Loc<ExprT>>,
         args: Box<Loc<ExprT>>,
         type_: TypeId,
@@ -316,7 +322,12 @@ impl ExprT {
                 type_,
             } => *type_,
             ExprT::Field(_, _, type_) => *type_,
-            ExprT::Call {
+            ExprT::DirectCall {
+                callee: _,
+                args: _,
+                type_,
+            } => *type_,
+            ExprT::IndirectCall {
                 callee: _,
                 args: _,
                 type_,

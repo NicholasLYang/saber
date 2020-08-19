@@ -652,20 +652,7 @@ impl TypeChecker {
         // If the body type is unit, we don't try to unify the body type
         // with return type.
         let return_type = if body_type != UNIT_INDEX {
-            self.unify(old_return_type.unwrap(), body_type)
-                .ok_or_else(|| {
-                    let type1 = type_to_string(
-                        &self.name_table,
-                        &self.type_table,
-                        old_return_type.unwrap(),
-                    );
-                    let type2 = type_to_string(&self.name_table, &self.type_table, body_type);
-                    TypeError::UnificationFailure {
-                        location: body_location,
-                        type1,
-                        type2,
-                    }
-                })?
+            self.unify_or_err(old_return_type.unwrap(), body_type, body_location)?
         } else {
             old_return_type.unwrap()
         };
@@ -819,38 +806,52 @@ impl TypeChecker {
             }
             Expr::Call { callee, args } => {
                 let typed_callee = self.expr(*callee)?;
+                let typed_args = self.expr(*args)?;
+                if let ExprT::Var { name, type_: _ } = &typed_callee.inner {
+                    if let Some(entry) = self.symbol_table.lookup_name(*name) {
+                        if let EntryType::Function {
+                            index,
+                            params_type,
+                            return_type,
+                            type_: _,
+                        } = entry.entry_type
+                        {
+                            self.unify_or_err(params_type, typed_args.inner.get_type(), location)?;
+                            return Ok(Loc {
+                                location,
+                                inner: ExprT::DirectCall {
+                                    callee: index,
+                                    args: Box::new(typed_args),
+                                    type_: return_type,
+                                },
+                            });
+                        }
+                    }
+                }
                 let callee_type = typed_callee.inner.get_type();
                 let (params_type, return_type) = match self.type_table.get_type(callee_type) {
                     Type::Arrow(params_type, return_type) => (*params_type, *return_type),
                     Type::Var(_) => {
                         let params_type = self.get_fresh_type_var();
                         let return_type = self.get_fresh_type_var();
-                        self.type_table
+                        let new_id = self
+                            .type_table
                             .insert(Type::Arrow(params_type, return_type));
+                        self.type_table.update(callee_type, Type::Solved(new_id));
                         (params_type, return_type)
                     }
                     _ => return Err(TypeError::CalleeNotFunction),
                 };
-                let typed_args = self.expr(*args)?;
                 let args_type = typed_args.inner.get_type();
-                if self.is_unifiable(params_type, args_type) {
-                    Ok(Loc {
-                        location,
-                        inner: ExprT::Call {
-                            callee: Box::new(typed_callee),
-                            args: Box::new(typed_args),
-                            type_: return_type,
-                        },
-                    })
-                } else {
-                    let type1 = type_to_string(&self.name_table, &self.type_table, params_type);
-                    let type2 = type_to_string(&self.name_table, &self.type_table, args_type);
-                    Err(TypeError::UnificationFailure {
-                        location,
-                        type1,
-                        type2,
-                    })
-                }
+                self.unify_or_err(params_type, args_type, typed_args.location)?;
+                Ok(Loc {
+                    location,
+                    inner: ExprT::IndirectCall {
+                        callee: Box::new(typed_callee),
+                        args: Box::new(typed_args),
+                        type_: return_type,
+                    },
+                })
             }
             Expr::Block(stmts, end_expr) => {
                 self.read_functions(&stmts)?;
@@ -883,15 +884,7 @@ impl TypeChecker {
                 if let Some(else_block) = else_block {
                     let typed_else_block = self.expr(*else_block)?;
                     let else_type = typed_else_block.inner.get_type();
-                    if !self.is_unifiable(then_type, else_type) {
-                        let type1 = type_to_string(&self.name_table, &self.type_table, then_type);
-                        let type2 = type_to_string(&self.name_table, &self.type_table, else_type);
-                        return Err(TypeError::UnificationFailure {
-                            location,
-                            type1,
-                            type2,
-                        });
-                    }
+                    self.unify_or_err(then_type, else_type, location)?;
                     Ok(Loc {
                         location,
                         inner: ExprT::If(
@@ -901,14 +894,8 @@ impl TypeChecker {
                             then_type,
                         ),
                     })
-                } else if !self.is_unifiable(UNIT_INDEX, then_type) {
-                    let type2 = type_to_string(&self.name_table, &self.type_table, then_type);
-                    Err(TypeError::UnificationFailure {
-                        location,
-                        type1: "()".to_string(),
-                        type2,
-                    })
                 } else {
+                    self.unify_or_err(UNIT_INDEX, then_type, location)?;
                     Ok(Loc {
                         location,
                         inner: ExprT::If(
@@ -939,13 +926,7 @@ impl TypeChecker {
                     fields_t.push((name, expr_t));
                 }
                 let expr_type = self.type_table.insert(Type::Record(field_types));
-                let type_ = self.unify(type_id, expr_type).ok_or_else(|| {
-                    TypeError::UnificationFailure {
-                        type1: type_to_string(&self.name_table, &self.type_table, expr_type),
-                        type2: type_to_string(&self.name_table, &self.type_table, type_id),
-                        location,
-                    }
-                })?;
+                let type_ = self.unify_or_err(type_id, expr_type, location)?;
                 Ok(Loc {
                     location,
                     inner: ExprT::Record {
@@ -1106,5 +1087,19 @@ impl TypeChecker {
 
     fn is_unifiable(&mut self, type1: TypeId, type2: TypeId) -> bool {
         self.unify(type1, type2).is_some()
+    }
+
+    fn unify_or_err(
+        &mut self,
+        type1: TypeId,
+        type2: TypeId,
+        location: LocationRange,
+    ) -> Result<TypeId, TypeError> {
+        self.unify(type1, type2)
+            .ok_or_else(|| TypeError::UnificationFailure {
+                type1: type_to_string(&self.name_table, &self.type_table, type1),
+                type2: type_to_string(&self.name_table, &self.type_table, type2),
+                location,
+            })
     }
 }
