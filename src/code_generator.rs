@@ -160,7 +160,9 @@ impl CodeGenerator {
         Ok(self.program_data)
     }
 
-    pub fn generate_top_level_stmt(&mut self, stmt: &Loc<StmtT>) -> Result<()> {
+    fn generate_start_function(&mut self) {}
+
+    fn generate_top_level_stmt(&mut self, stmt: &Loc<StmtT>) -> Result<()> {
         match &stmt.inner {
             StmtT::Function {
                 name,
@@ -194,7 +196,8 @@ impl CodeGenerator {
                     },
                 )?;
                 if let EntryType::Function {
-                    index,
+                    func_index,
+                    var_index: _,
                     params_type: _,
                     return_type: _,
                     type_: _,
@@ -203,7 +206,7 @@ impl CodeGenerator {
                     let entry = ExportEntry {
                         field_str: name_str.as_bytes().to_vec(),
                         kind: ExternalKind::Function,
-                        index: (*index).try_into().unwrap(),
+                        index: (*func_index).try_into().unwrap(),
                     };
                     self.program_data.exports_section.push(entry);
                     Ok(())
@@ -218,7 +221,7 @@ impl CodeGenerator {
     }
 
     // Generates a Stmt::Function
-    pub fn generate_function_binding(
+    fn generate_function_binding(
         &mut self,
         name: Name,
         scope: usize,
@@ -230,13 +233,14 @@ impl CodeGenerator {
     ) -> Result<usize> {
         let entry = self.symbol_table.lookup_name_in_scope(name, scope).unwrap();
         let index = if let EntryType::Function {
-            index,
+            func_index,
+            var_index: _,
             params_type: _,
             return_type: _,
             type_: _,
         } = &entry.entry_type
         {
-            *index
+            *func_index
         } else {
             return Err(GenerationError::NotReachable);
         };
@@ -265,8 +269,6 @@ impl CodeGenerator {
         Ok((function_type, function_body))
     }
 
-    // Generates function type. Also inserts params into local_variables.
-    // Not sure it should do both but w/e it's here.
     fn generate_function_type(
         &mut self,
         return_type: &Option<WasmType>,
@@ -357,11 +359,12 @@ impl CodeGenerator {
             .entry_type
         {
             EntryType::Function {
-                index: _,
                 params_type: _,
                 return_type: _,
                 type_: _,
-            } => Err(GenerationError::NotReachable),
+                func_index: _,
+                var_index,
+            } => Ok(var_index),
             EntryType::Var { index, var_type: _ } => Ok(index),
         }
     }
@@ -390,6 +393,7 @@ impl CodeGenerator {
                     body,
                     stmt.location,
                 )?;
+
                 Ok(Vec::new())
             }
             StmtT::Expr(expr) => {

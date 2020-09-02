@@ -159,6 +159,8 @@ impl ProgramData {
                 limits: ResizableLimits(0, None),
             }),
         }];
+        // Add one for start function
+        let func_count = func_count + 1;
         ProgramData {
             type_section: Vec::new(),
             import_section,

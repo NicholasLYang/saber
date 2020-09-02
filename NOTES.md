@@ -66,3 +66,8 @@ Use a crate? https://github.com/brendanzab/codespan
 ## Memory Allocation
 
 Global #0 is gonna be pointer to current heap max
+
+## Setup Captures
+
+Problem: function bindings, i.e. StmtT::Function, are not actually variables and therefore cannot store data.
+Solution: Make them actual variables and have them store data.

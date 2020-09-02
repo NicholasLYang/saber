@@ -283,7 +283,8 @@ impl TypeChecker {
                     });
                 };
                 let (params_type, return_type) = if let EntryType::Function {
-                    index: _,
+                    func_index: _,
+                    var_index: _,
                     params_type,
                     return_type,
                     type_: _,
@@ -683,7 +684,8 @@ impl TypeChecker {
                         })?;
                 match &entry.entry_type {
                     EntryType::Function {
-                        index: _,
+                        func_index: _,
+                        var_index: _,
                         params_type: _,
                         return_type: _,
                         type_,
@@ -804,7 +806,8 @@ impl TypeChecker {
                 if let ExprT::Var { name, type_: _ } = &typed_callee.inner {
                     if let Some(entry) = self.symbol_table.lookup_name(*name) {
                         if let EntryType::Function {
-                            index,
+                            func_index,
+                            var_index: _,
                             params_type,
                             return_type,
                             type_: _,
@@ -814,7 +817,7 @@ impl TypeChecker {
                             return Ok(Loc {
                                 location,
                                 inner: ExprT::DirectCall {
-                                    callee: index,
+                                    callee: func_index,
                                     args: Box::new(typed_args),
                                     type_: return_type,
                                 },

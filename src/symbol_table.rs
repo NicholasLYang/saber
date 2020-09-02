@@ -46,7 +46,9 @@ pub struct SymbolTable {
 pub enum EntryType {
     Function {
         // Index into function array
-        index: usize,
+        func_index: usize,
+        // Index as variable
+        var_index: usize,
         params_type: TypeId,
         return_type: TypeId,
         type_: TypeId,
@@ -181,13 +183,9 @@ impl SymbolTable {
                 previous_func_scope: _,
             } = self.scopes[i].scope_type
             {
-                // If usage_func_scope is None, we're dealing with a global usage
-                // No captures here
-                usage_func_scope.map(|usage_func_scope| {
-                    if usage_func_scope != i {
-                        is_enclosed_var = true;
-                    }
-                });
+                if usage_func_scope.unwrap() != i {
+                    is_enclosed_var = true;
+                }
             }
             if self.scopes[i].symbols.contains_key(&name) {
                 {
@@ -226,7 +224,7 @@ impl SymbolTable {
     }
 
     pub fn insert_var(&mut self, name: Name, var_type: TypeId) {
-        self.var_types.push(var_type.clone());
+        self.var_types.push(var_type);
         self.scopes[self.current_scope].symbols.insert(
             name,
             SymbolEntry {
@@ -246,20 +244,20 @@ impl SymbolTable {
         return_type: TypeId,
         type_: TypeId,
     ) {
-        if self.lookup_name(name).is_none() {
-            self.scopes[self.current_scope].symbols.insert(
-                name,
-                SymbolEntry {
-                    is_enclosed_var: false,
-                    entry_type: EntryType::Function {
-                        index: self.function_index,
-                        params_type,
-                        return_type,
-                        type_,
-                    },
+        self.var_types.push(type_);
+        self.scopes[self.current_scope].symbols.insert(
+            name,
+            SymbolEntry {
+                is_enclosed_var: false,
+                entry_type: EntryType::Function {
+                    func_index: self.function_index,
+                    var_index: self.var_types.len() - 1,
+                    params_type,
+                    return_type,
+                    type_,
                 },
-            );
-            self.function_index += 1;
-        }
+            },
+        );
+        self.function_index += 1;
     }
 }
