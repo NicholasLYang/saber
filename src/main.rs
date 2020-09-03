@@ -69,7 +69,7 @@ fn read_file(file_name: &str) -> Result<()> {
     let contents = fs::read_to_string(file_name)?;
     let lexer = lexer::Lexer::new(&contents);
     let mut parser = Parser::new(lexer);
-    let program = parser.program()?;
+    let program = parser.program().expect("Error parsing");
     for error in &program.errors {
         println!("{}", error);
     }

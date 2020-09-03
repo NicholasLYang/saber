@@ -1,52 +1,63 @@
 use crate::ast::{Expr, Name, Op, Pat, Stmt, TypeSig, Value};
 use crate::ast::{Loc, Program, TypeDef, UnaryOp};
 use crate::lexer::{Lexer, LexicalError, LocationRange, Token, TokenDiscriminants};
+use crate::loc;
 use crate::printer::token_to_string;
 use crate::utils::NameTable;
 use serde::{Deserialize, Serialize};
-use std::fmt::Debug;
+use std::fmt::{self, Debug};
+use std::result::Result;
 
 pub struct Parser<'input> {
     pub lexer: Lexer<'input>,
-    errors: Vec<ParseError>,
-    pushedback_tokens: Vec<(Token, LocationRange)>,
+    errors: Vec<Loc<ParseError>>,
+    pushedback_tokens: Vec<Loc<Token>>,
 }
 
-#[derive(Debug, Fail, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum ParseError {
-    #[fail(
-        display = "Reached end of file without completing parse. Expected these tokens: {:?}",
-        expected_tokens
-    )]
     EndOfFile {
         expected_tokens: Vec<TokenDiscriminants>,
     },
-    #[fail(
-        display = "{}: Unexpected token {:?}, expected {:?}",
-        location, token, expected_tokens
-    )]
     UnexpectedToken {
         token: String,
         token_type: TokenDiscriminants,
         expected_tokens: String,
-        location: LocationRange,
     },
-    #[fail(display = "{}: Cannot destructure a function", location)]
-    DestructureFunction { location: LocationRange },
-    #[fail(
-        display = "{}: Cannot have a type signature on a let function binding (use type signatures in the function!)",
-        location
-    )]
-    FuncBindingTypeSig { location: LocationRange },
-    #[fail(display = "{}", err)]
-    LexicalError { err: LexicalError },
-    #[fail(display = "Should not be reachable")]
+    DestructureFunction,
+    FuncBindingTypeSig,
+    LexicalError {
+        err: LexicalError,
+    },
     NotReachable,
 }
 
-impl From<LexicalError> for ParseError {
-    fn from(err: LexicalError) -> Self {
-        ParseError::LexicalError { err }
+impl fmt::Display for ParseError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ParseError::EndOfFile {
+                expected_tokens,
+            } => write!(f, "Reached end of file without completing parse. Expected these tokens: {:?}",
+                        expected_tokens),
+            ParseError::UnexpectedToken {
+                token,
+                token_type: _,
+                expected_tokens,
+            } => write!(f, "Unexpected token {:?}, expected {:?}", token, expected_tokens),
+            ParseError::DestructureFunction => write!(f, "Cannot destructure a function"),
+            ParseError::FuncBindingTypeSig => write!(f, "Cannot have a type signature on a let function binding (use type signatures in the function!)"),
+            ParseError::LexicalError { err } => write!(f, "{}", err),
+            ParseError::NotReachable => write!(f, "Not reachable"),
+        }
+    }
+}
+
+impl From<Loc<LexicalError>> for Loc<ParseError> {
+    fn from(err: Loc<LexicalError>) -> Self {
+        Loc {
+            location: err.location,
+            inner: ParseError::LexicalError { err: err.inner },
+        }
     }
 }
 
@@ -67,41 +78,54 @@ impl<'input> Parser<'input> {
     fn expect(
         &mut self,
         expected: TokenDiscriminants,
-    ) -> Result<(Token, LocationRange), ParseError> {
+    ) -> Result<(Token, LocationRange), Loc<ParseError>> {
         let token = self.bump()?;
-        if let Some((token, location)) = token {
+        if let Some(Loc {
+            inner: token,
+            location,
+        }) = token
+        {
             let token_discriminant: TokenDiscriminants = (&token).into();
             if token_discriminant == expected {
                 Ok((token, location))
             } else {
-                Err(ParseError::UnexpectedToken {
-                    token: token_to_string(&self.lexer.name_table, &token),
-                    token_type: token.into(),
+                Err(Loc {
                     location,
-                    expected_tokens: format!("{}", expected),
+                    inner: ParseError::UnexpectedToken {
+                        token: token_to_string(&self.lexer.name_table, &token),
+                        token_type: token.into(),
+                        expected_tokens: format!("{}", expected),
+                    },
                 })
             }
         } else {
-            Err(ParseError::EndOfFile {
-                expected_tokens: vec![expected],
+            Err(Loc {
+                location: LocationRange(self.lexer.current_location, self.lexer.current_location),
+                inner: ParseError::EndOfFile {
+                    expected_tokens: vec![expected],
+                },
             })
         }
     }
 
-    fn pushback(&mut self, token: (Token, LocationRange)) {
+    fn pushback(&mut self, token: Loc<Token>) {
         self.pushedback_tokens.push(token);
     }
 
     fn match_one(
         &mut self,
         lookahead: TokenDiscriminants,
-    ) -> Result<Option<(Token, LocationRange)>, ParseError> {
-        if let Some((token, location)) = self.bump()? {
+    ) -> Result<Option<Loc<Token>>, Loc<ParseError>> {
+        if let Some(Loc {
+            inner: token,
+            location,
+        }) = self.bump()?
+        {
             let token_discriminant: TokenDiscriminants = (&token).into();
             if token_discriminant == lookahead {
-                Ok(Some((token, location)))
+                Ok(Some(loc!(token, location)))
             } else {
-                self.pushback((token, location));
+                self.pushback(loc!(token, location));
                 Ok(None)
             }
         } else {
@@ -112,7 +136,7 @@ impl<'input> Parser<'input> {
     fn match_multiple(
         &mut self,
         tokens: Vec<Token>,
-    ) -> Result<Option<(Token, LocationRange)>, ParseError> {
+    ) -> Result<Option<Loc<Token>>, Loc<ParseError>> {
         for token in tokens {
             if let Some(token) = self.match_one((&token).into())? {
                 return Ok(Some(token));
@@ -121,7 +145,7 @@ impl<'input> Parser<'input> {
         Ok(None)
     }
 
-    fn bump(&mut self) -> Result<Option<(Token, LocationRange)>, ParseError> {
+    fn bump(&mut self) -> Result<Option<Loc<Token>>, Loc<ParseError>> {
         let tok = match self.pushedback_tokens.pop() {
             Some(tok) => Ok(Some(tok)),
             None => match self.lexer.next() {
@@ -133,7 +157,7 @@ impl<'input> Parser<'input> {
     }
 
     #[allow(dead_code)]
-    fn peek(&mut self) -> Result<(), ParseError> {
+    fn peek(&mut self) -> Result<(), Loc<ParseError>> {
         let tok = self.bump()?;
         println!("TOK: {:?}", tok);
         if let Some(tok) = tok {
@@ -144,8 +168,12 @@ impl<'input> Parser<'input> {
 
     // Pop tokens until we reach the end token. For example, when parsing a stmt
     // this is semicolon
-    fn recover_from_error(&mut self, end_token: TokenDiscriminants) -> Result<(), ParseError> {
-        while let Some((token, _)) = self.bump()? {
+    fn recover_from_error(&mut self, end_token: TokenDiscriminants) -> Result<(), Loc<ParseError>> {
+        while let Some(Loc {
+            inner: token,
+            location: _,
+        }) = self.bump()?
+        {
             if end_token == token.into() {
                 return Ok(());
             }
@@ -153,8 +181,8 @@ impl<'input> Parser<'input> {
         Ok(())
     }
 
-    fn lookup_op_token(&mut self, token: Token) -> Result<Op, ParseError> {
-        match token {
+    fn lookup_op_token(&mut self, span: Loc<Token>) -> Result<Op, Loc<ParseError>> {
+        match span.inner {
             Token::EqualEqual => Ok(Op::EqualEqual),
             Token::BangEqual => Ok(Op::BangEqual),
             Token::Times => Ok(Op::Times),
@@ -165,15 +193,19 @@ impl<'input> Parser<'input> {
             Token::GreaterEqual => Ok(Op::GreaterEqual),
             Token::Less => Ok(Op::Less),
             Token::LessEqual => Ok(Op::LessEqual),
-            _ => Err(ParseError::NotReachable),
+            _ => Err(loc!(ParseError::NotReachable, span.location)),
         }
     }
 
-    pub fn program(&mut self) -> Result<Program, ParseError> {
+    pub fn program(&mut self) -> Result<Program, Loc<ParseError>> {
         let mut stmts = Vec::new();
         let mut type_defs = Vec::new();
         loop {
-            if let Some((_, left)) = self.match_one(TokenDiscriminants::Struct)? {
+            if let Some(Loc {
+                inner: _,
+                location: left,
+            }) = self.match_one(TokenDiscriminants::Struct)?
+            {
                 match self.type_def(left) {
                     Ok(def) => type_defs.push(def),
                     Err(err) => {
@@ -188,7 +220,10 @@ impl<'input> Parser<'input> {
                 match self.stmt() {
                     Ok(Some(stmt)) => stmts.push(stmt),
                     Ok(None) => {}
-                    Err(ParseError::EndOfFile { expected_tokens: _ }) => {
+                    Err(Loc {
+                        location: _,
+                        inner: ParseError::EndOfFile { expected_tokens: _ },
+                    }) => {
                         let mut errors = Vec::new();
                         std::mem::swap(&mut errors, &mut self.errors);
                         return Ok(Program {
@@ -205,22 +240,33 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn id(&mut self) -> Result<(Name, LocationRange), ParseError> {
+    fn id(&mut self) -> Result<(Name, LocationRange), Loc<ParseError>> {
         match self.bump()? {
-            Some((Token::Ident(id), loc)) => Ok((id, loc)),
-            Some((token, location)) => Err(ParseError::UnexpectedToken {
+            Some(Loc {
+                inner: Token::Ident(id),
                 location,
-                token: token_to_string(&self.lexer.name_table, &token),
-                token_type: token.into(),
-                expected_tokens: format!("{}", TokenDiscriminants::Ident),
-            }),
-            None => Err(ParseError::EndOfFile {
-                expected_tokens: vec![TokenDiscriminants::Ident],
-            }),
+            }) => Ok((id, location)),
+            Some(Loc {
+                inner: token,
+                location,
+            }) => Err(loc!(
+                ParseError::UnexpectedToken {
+                    token: token_to_string(&self.lexer.name_table, &token),
+                    token_type: token.into(),
+                    expected_tokens: format!("{}", TokenDiscriminants::Ident),
+                },
+                location
+            )),
+            None => Err(loc!(
+                ParseError::EndOfFile {
+                    expected_tokens: vec![TokenDiscriminants::Ident],
+                },
+                LocationRange(self.lexer.current_location, self.lexer.current_location),
+            )),
         }
     }
 
-    fn type_def(&mut self, left: LocationRange) -> Result<Loc<TypeDef>, ParseError> {
+    fn type_def(&mut self, left: LocationRange) -> Result<Loc<TypeDef>, Loc<ParseError>> {
         let (id, _) = self.id()?;
         self.expect(TokenDiscriminants::LBrace)?;
         let (fields, right) =
@@ -231,91 +277,114 @@ impl<'input> Parser<'input> {
         })
     }
 
-    fn record_type_field(&mut self) -> Result<(Name, Loc<TypeSig>), ParseError> {
+    fn record_type_field(&mut self) -> Result<(Name, Loc<TypeSig>), Loc<ParseError>> {
         let (id, _) = self.id()?;
         self.expect(TokenDiscriminants::Colon)?;
         let type_sig = self.type_()?;
         Ok((id, type_sig))
     }
 
-    pub fn stmt(&mut self) -> Result<Option<Loc<Stmt>>, ParseError> {
-        let tok = self.bump()?;
-        let res = match tok {
-            Some((Token::Let, loc)) => self.let_stmt(loc),
-            Some((Token::Return, loc)) => self.return_stmt(loc),
-            Some((Token::Export, loc)) => self.export_stmt(loc),
-            Some((Token::If, loc)) => {
-                let if_expr = self.if_expr(loc)?;
-                Ok(Loc {
-                    location: if_expr.location,
-                    inner: Stmt::Expr(if_expr),
-                })
+    pub fn stmt(&mut self) -> Result<Option<Loc<Stmt>>, Loc<ParseError>> {
+        if let Some(Loc {
+            inner: token,
+            location,
+        }) = self.bump()?
+        {
+            let res = match token {
+                Token::Let => self.let_stmt(location),
+                Token::Return => self.return_stmt(location),
+                Token::Export => self.export_stmt(location),
+                Token::If => {
+                    let if_expr = self.if_expr(location)?;
+                    let location = if_expr.location;
+                    Ok(loc!(Stmt::Expr(if_expr), location))
+                }
+                token => {
+                    self.pushback(loc!(token, location));
+                    self.expression_stmt()
+                }
+            };
+            match res {
+                Ok(res) => Ok(Some(res)),
+                Err(Loc {
+                    location,
+                    inner: ParseError::EndOfFile { expected_tokens },
+                }) => {
+                    return Err(Loc {
+                        location,
+                        inner: ParseError::EndOfFile { expected_tokens },
+                    })
+                }
+                Err(err) => {
+                    // Special case if the unexpected token is a semicolon
+                    // since that's our recovery token
+                    if let ParseError::UnexpectedToken {
+                        token: _,
+                        token_type,
+                        expected_tokens: _,
+                    } = &err.inner
+                    {
+                        if token_type == &TokenDiscriminants::Semicolon {
+                            self.errors.push(err);
+                            return Ok(None);
+                        }
+                    }
+                    self.errors.push(err);
+                    self.recover_from_error(TokenDiscriminants::Semicolon)?;
+                    Ok(None)
+                }
             }
-            Some((token, loc)) => {
-                self.pushback((token, loc));
-                self.expression_stmt()
-            }
-            None => {
-                return Err(ParseError::EndOfFile {
+        } else {
+            return Err(Loc {
+                location: LocationRange(self.lexer.current_location, self.lexer.current_location),
+                inner: ParseError::EndOfFile {
                     expected_tokens: vec![
                         TokenDiscriminants::Let,
                         TokenDiscriminants::Return,
                         TokenDiscriminants::Export,
                     ],
-                })
-            }
-        };
-        match res {
-            Ok(res) => Ok(Some(res)),
-            err @ Err(ParseError::EndOfFile { expected_tokens: _ }) => return err.map(Some),
-            Err(err) => {
-                // Special case if the unexpected token is a semicolon
-                // since that's our recovery token
-                if let ParseError::UnexpectedToken {
-                    token: _,
-                    token_type,
-                    location: _,
-                    expected_tokens: _,
-                } = &err
-                {
-                    if token_type == &TokenDiscriminants::Semicolon {
-                        self.errors.push(err);
-                        return Ok(None);
-                    }
-                }
-                self.errors.push(err);
-                self.recover_from_error(TokenDiscriminants::Semicolon)?;
-                Ok(None)
-            }
+                },
+            });
         }
     }
 
-    fn export_stmt(&mut self, left: LocationRange) -> Result<Loc<Stmt>, ParseError> {
+    fn export_stmt(&mut self, left: LocationRange) -> Result<Loc<Stmt>, Loc<ParseError>> {
         let tok = self.bump()?;
         match tok {
-            Some((Token::Ident(name), _)) => {
+            Some(Loc {
+                inner: Token::Ident(name),
+                location: _,
+            }) => {
                 let (_, right) = self.expect(TokenDiscriminants::Semicolon)?;
                 Ok(Loc {
                     location: LocationRange(left.0, right.1),
                     inner: Stmt::Export(name),
                 })
             }
-            Some((token, location)) => {
-                self.pushback((token.clone(), location.clone()));
-                Err(ParseError::UnexpectedToken {
-                    token: token_to_string(&self.lexer.name_table, &token),
-                    token_type: token.into(),
-                    expected_tokens: format!("{}", TokenDiscriminants::Ident),
-                    location,
-                })
+            Some(Loc {
+                inner: token,
+                location,
+            }) => {
+                self.pushback(loc!(token.clone(), location));
+                Err(loc!(
+                    ParseError::UnexpectedToken {
+                        token: token_to_string(&self.lexer.name_table, &token),
+                        token_type: token.into(),
+                        expected_tokens: format!("{}", TokenDiscriminants::Ident),
+                    },
+                    location
+                ))
             }
-            None => Err(ParseError::EndOfFile {
-                expected_tokens: vec![TokenDiscriminants::Ident],
-            }),
+            None => Err(loc!(
+                ParseError::EndOfFile {
+                    expected_tokens: vec![TokenDiscriminants::Ident],
+                },
+                LocationRange(self.lexer.current_location, self.lexer.current_location)
+            )),
         }
     }
 
-    fn return_stmt(&mut self, left: LocationRange) -> Result<Loc<Stmt>, ParseError> {
+    fn return_stmt(&mut self, left: LocationRange) -> Result<Loc<Stmt>, Loc<ParseError>> {
         let expr = self.expr()?;
         let (_, right) = self.expect(TokenDiscriminants::Semicolon)?;
         Ok(Loc {
@@ -324,7 +393,7 @@ impl<'input> Parser<'input> {
         })
     }
 
-    fn let_stmt(&mut self, left: LocationRange) -> Result<Loc<Stmt>, ParseError> {
+    fn let_stmt(&mut self, left: LocationRange) -> Result<Loc<Stmt>, Loc<ParseError>> {
         let pat = self.pattern()?;
         self.expect(TokenDiscriminants::Equal)?;
         let rhs_expr = self.expr()?;
@@ -343,21 +412,22 @@ impl<'input> Parser<'input> {
                     location: LocationRange(left.0, location.1),
                     inner: Stmt::Function(name, params, return_type, body),
                 }),
-                Pat::Id(_, _, _) => Err(ParseError::FuncBindingTypeSig { location }),
+                Pat::Id(_, _, _) => Err(loc!(ParseError::FuncBindingTypeSig, location)),
                 Pat::Record(_, _, location) | Pat::Empty(location) | Pat::Tuple(_, location) => {
-                    Err(ParseError::DestructureFunction { location })
+                    Err(loc!(ParseError::DestructureFunction, location))
                 }
             }
         } else {
             self.expect(TokenDiscriminants::Semicolon)?;
-            Ok(Loc {
-                location: LocationRange(left.0, rhs_expr.location.1),
-                inner: Stmt::Asgn(pat, rhs_expr),
-            })
+            let right = rhs_expr.location;
+            Ok(loc!(
+                Stmt::Asgn(pat, rhs_expr),
+                LocationRange(left.0, right.1)
+            ))
         }
     }
 
-    fn expression_stmt(&mut self) -> Result<Loc<Stmt>, ParseError> {
+    fn expression_stmt(&mut self) -> Result<Loc<Stmt>, Loc<ParseError>> {
         let expr = self.expr()?;
         let (_, right) = self.expect(TokenDiscriminants::Semicolon)?;
         Ok(Loc {
@@ -366,33 +436,44 @@ impl<'input> Parser<'input> {
         })
     }
 
-    fn expr(&mut self) -> Result<Loc<Expr>, ParseError> {
-        match self.bump()? {
-            Some((Token::Slash, left)) => self.function(left),
-            Some((Token::LBrace, left)) => self.expr_block(left),
-            Some((Token::If, left)) => self.if_expr(left),
-            Some((Token::Ident(id), left)) => {
-                if self.match_one(TokenDiscriminants::LBrace)?.is_some() {
-                    self.record_literal(id, left)
-                } else {
-                    self.pushback((Token::Ident(id), left));
+    fn expr(&mut self) -> Result<Loc<Expr>, Loc<ParseError>> {
+        if let Some(Loc {
+            inner: token,
+            location: left,
+        }) = self.bump()?
+        {
+            match token {
+                Token::Slash => self.function(left),
+                Token::LBrace => self.expr_block(left),
+                Token::If => self.if_expr(left),
+                Token::Ident(id) => {
+                    if self.match_one(TokenDiscriminants::LBrace)?.is_some() {
+                        self.record_literal(id, left)
+                    } else {
+                        self.pushback(loc!(Token::Ident(id), left));
+                        self.equality()
+                    }
+                }
+                token => {
+                    self.pushback(loc!(token, left));
                     self.equality()
                 }
             }
-            Some(span) => {
-                self.pushback(span);
-                self.equality()
-            }
-            None => self.equality(),
+        } else {
+            self.equality()
         }
     }
 
-    fn if_expr(&mut self, left: LocationRange) -> Result<Loc<Expr>, ParseError> {
+    fn if_expr(&mut self, left: LocationRange) -> Result<Loc<Expr>, Loc<ParseError>> {
         // Yeah...I'm not allowing functions or blocks in the cond spot
         let cond = self.equality()?;
         let (_, block_left) = self.expect(TokenDiscriminants::LBrace)?;
         let then_block = self.expr_block(block_left)?;
-        let else_block = if let Some((_, else_left)) = self.match_one(TokenDiscriminants::Else)? {
+        let else_block = if let Some(Loc {
+            inner: _,
+            location: else_left,
+        }) = self.match_one(TokenDiscriminants::Else)?
+        {
             self.expect(TokenDiscriminants::LBrace)?;
             Some(Box::new(self.expr_block(else_left)?))
         } else {
@@ -410,10 +491,14 @@ impl<'input> Parser<'input> {
         })
     }
 
-    fn expr_block(&mut self, left: LocationRange) -> Result<Loc<Expr>, ParseError> {
+    fn expr_block(&mut self, left: LocationRange) -> Result<Loc<Expr>, Loc<ParseError>> {
         let mut stmts = Vec::new();
         loop {
-            if let Some((_, right)) = self.match_one(TokenDiscriminants::RBrace)? {
+            if let Some(Loc {
+                inner: _,
+                location: right,
+            }) = self.match_one(TokenDiscriminants::RBrace)?
+            {
                 return Ok(Loc {
                     location: LocationRange(left.0, right.1),
                     inner: Expr::Block(stmts, None),
@@ -429,7 +514,11 @@ impl<'input> Parser<'input> {
             } else {
                 // Otherwise we could either be in an expr stmt or an ending expr situation
                 let expr = self.expr()?;
-                if let Some((_, right)) = self.match_one(TokenDiscriminants::Semicolon)? {
+                if let Some(Loc {
+                    inner: _,
+                    location: right,
+                }) = self.match_one(TokenDiscriminants::Semicolon)?
+                {
                     stmts.push(Loc {
                         location: LocationRange(expr.location.0, right.1),
                         inner: Stmt::Expr(expr),
@@ -445,40 +534,40 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn function(&mut self, left: LocationRange) -> Result<Loc<Expr>, ParseError> {
+    fn function(&mut self, left: LocationRange) -> Result<Loc<Expr>, Loc<ParseError>> {
         let params = self.pattern()?;
         let return_type = self.type_sig()?;
         self.expect(TokenDiscriminants::FatArrow)?;
-        let token = self.bump()?;
-        let body = match token {
-            Some((Token::LBrace, left)) => self.expr_block(left)?,
-            Some((Token::LParen, left)) => {
+        let span = self.bump()?.ok_or(loc!(
+            ParseError::EndOfFile {
+                // TODO: Streamline error reporting. I should group the
+                // tokens into ones expected for each kind of syntax rule.
+                // For instance, these are a combo of the block lookahead
+                // token, the expression grouping lookahead token and the
+                // expression lookahead token
+                expected_tokens: vec![
+                    TokenDiscriminants::LBrace,
+                    TokenDiscriminants::LParen,
+                    TokenDiscriminants::True,
+                    TokenDiscriminants::False,
+                    TokenDiscriminants::Integer,
+                    TokenDiscriminants::Float,
+                    TokenDiscriminants::String,
+                ],
+            },
+            LocationRange(self.lexer.current_location, self.lexer.current_location)
+        ))?;
+        let body = match span.inner {
+            Token::LBrace => self.expr_block(span.location)?,
+            Token::LParen => {
                 let mut expr = self.expr()?;
                 let (_, right) = self.expect(TokenDiscriminants::RParen)?;
-                expr.location = LocationRange(left.0, right.1);
+                expr.location = LocationRange(span.location.0, right.1);
                 expr
             }
-            Some((token, left)) => {
-                self.pushback((token, left));
+            _ => {
+                self.pushback(span);
                 self.expr()?
-            }
-            // TODO: Streamline error reporting. I should group the
-            // tokens into ones expected for each kind of syntax rule.
-            // For instance, these are a combo of the block lookahead
-            // token, the expression grouping lookahead token and the
-            // expression lookahead token
-            None => {
-                return Err(ParseError::EndOfFile {
-                    expected_tokens: vec![
-                        TokenDiscriminants::LBrace,
-                        TokenDiscriminants::LParen,
-                        TokenDiscriminants::True,
-                        TokenDiscriminants::False,
-                        TokenDiscriminants::Integer,
-                        TokenDiscriminants::Float,
-                        TokenDiscriminants::String,
-                    ],
-                });
             }
         };
         Ok(Loc {
@@ -491,10 +580,10 @@ impl<'input> Parser<'input> {
         })
     }
 
-    fn equality(&mut self) -> Result<Loc<Expr>, ParseError> {
+    fn equality(&mut self) -> Result<Loc<Expr>, Loc<ParseError>> {
         let lhs = self.comparison()?;
-        if let Some((token, _)) = self.match_multiple(vec![Token::EqualEqual, Token::BangEqual])? {
-            let op = self.lookup_op_token(token)?;
+        if let Some(span) = self.match_multiple(vec![Token::EqualEqual, Token::BangEqual])? {
+            let op = self.lookup_op_token(span)?;
             let rhs = self.comparison()?;
             Ok(Loc {
                 location: LocationRange(lhs.location.0, rhs.location.1),
@@ -509,15 +598,15 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn comparison(&mut self) -> Result<Loc<Expr>, ParseError> {
+    fn comparison(&mut self) -> Result<Loc<Expr>, Loc<ParseError>> {
         let lhs = self.addition()?;
-        if let Some((token, _)) = self.match_multiple(vec![
+        if let Some(span) = self.match_multiple(vec![
             Token::GreaterEqual,
             Token::Greater,
             Token::Less,
             Token::LessEqual,
         ])? {
-            let op = self.lookup_op_token(token)?;
+            let op = self.lookup_op_token(span)?;
             let rhs = self.addition()?;
             Ok(Loc {
                 location: LocationRange(lhs.location.0, rhs.location.1),
@@ -532,10 +621,10 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn addition(&mut self) -> Result<Loc<Expr>, ParseError> {
+    fn addition(&mut self) -> Result<Loc<Expr>, Loc<ParseError>> {
         let mut expr = self.multiplication()?;
-        while let Some((token, _)) = self.match_multiple(vec![Token::Plus, Token::Minus])? {
-            let op = self.lookup_op_token(token)?;
+        while let Some(span) = self.match_multiple(vec![Token::Plus, Token::Minus])? {
+            let op = self.lookup_op_token(span)?;
             let rhs = self.multiplication()?;
             expr = Loc {
                 location: LocationRange(expr.location.0, rhs.location.1),
@@ -549,10 +638,10 @@ impl<'input> Parser<'input> {
         Ok(expr)
     }
 
-    fn multiplication(&mut self) -> Result<Loc<Expr>, ParseError> {
+    fn multiplication(&mut self) -> Result<Loc<Expr>, Loc<ParseError>> {
         let mut expr = self.unary()?;
-        while let Some((token, _)) = self.match_multiple(vec![Token::Times, Token::Div])? {
-            let op = self.lookup_op_token(token)?;
+        while let Some(span) = self.match_multiple(vec![Token::Times, Token::Div])? {
+            let op = self.lookup_op_token(span)?;
             let rhs = self.unary()?;
             expr = Loc {
                 location: LocationRange(expr.location.0, rhs.location.1),
@@ -566,12 +655,16 @@ impl<'input> Parser<'input> {
         Ok(expr)
     }
 
-    fn unary(&mut self) -> Result<Loc<Expr>, ParseError> {
-        if let Some((token, left)) = self.match_multiple(vec![Token::Bang, Token::Minus])? {
+    fn unary(&mut self) -> Result<Loc<Expr>, Loc<ParseError>> {
+        if let Some(Loc {
+            inner: token,
+            location: left,
+        }) = self.match_multiple(vec![Token::Bang, Token::Minus])?
+        {
             let op = match token {
                 Token::Bang => UnaryOp::Not,
                 Token::Minus => UnaryOp::Minus,
-                _ => return Err(ParseError::NotReachable),
+                _ => return Err(loc!(ParseError::NotReachable, left)),
             };
             let rhs = self.unary()?;
             Ok(Loc {
@@ -586,31 +679,39 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn call(&mut self) -> Result<Loc<Expr>, ParseError> {
+    fn call(&mut self) -> Result<Loc<Expr>, Loc<ParseError>> {
         let mut expr = self.primary()?;
         loop {
-            if let Some((_, left)) = self.match_one(TokenDiscriminants::LParen)? {
+            if let Some(Loc {
+                inner: _,
+                location: left,
+            }) = self.match_one(TokenDiscriminants::LParen)?
+            {
                 expr = self.finish_call(expr, left)?;
             } else if self.match_one(TokenDiscriminants::Dot)?.is_some() {
-                match self.bump()? {
-                    Some((Token::Ident(name), right)) => {
+                let span = self.bump()?.ok_or(loc!(
+                    ParseError::EndOfFile {
+                        expected_tokens: vec![TokenDiscriminants::Ident],
+                    },
+                    LocationRange(self.lexer.current_location, self.lexer.current_location)
+                ))?;
+                match span.inner {
+                    Token::Ident(name) => {
                         expr = Loc {
-                            location: LocationRange(expr.location.0, right.1),
+                            location: LocationRange(expr.location.0, span.location.1),
                             inner: Expr::Field(Box::new(expr), name),
                         };
                     }
-                    Some((token, location)) => {
-                        return Err(ParseError::UnexpectedToken {
-                            token: token_to_string(&self.lexer.name_table, &token),
-                            token_type: token.into(),
-                            location,
-                            expected_tokens: format!("{}", TokenDiscriminants::Ident),
-                        })
-                    }
-                    None => {
-                        return Err(ParseError::EndOfFile {
-                            expected_tokens: vec![TokenDiscriminants::Ident],
-                        })
+                    token => {
+                        return Err(loc!(
+                            ParseError::UnexpectedToken {
+                                token: token_to_string(&self.lexer.name_table, &token),
+                                token_type: token.into(),
+
+                                expected_tokens: format!("{}", TokenDiscriminants::Ident),
+                            },
+                            span.location
+                        ))
                     }
                 };
             } else {
@@ -624,7 +725,7 @@ impl<'input> Parser<'input> {
         &mut self,
         callee: Loc<Expr>,
         left: LocationRange,
-    ) -> Result<Loc<Expr>, ParseError> {
+    ) -> Result<Loc<Expr>, Loc<ParseError>> {
         let args = {
             let (mut exprs, right) = self.comma::<Loc<Expr>>(&Self::expr, Token::RParen)?;
             if exprs.len() == 1 {
@@ -645,11 +746,9 @@ impl<'input> Parser<'input> {
         })
     }
 
-    fn primary(&mut self) -> Result<Loc<Expr>, ParseError> {
-        let (token, location) = if let Some(span) = self.bump()? {
-            span
-        } else {
-            return Err(ParseError::EndOfFile {
+    fn primary(&mut self) -> Result<Loc<Expr>, Loc<ParseError>> {
+        let span = self.bump()?.ok_or(loc!(
+            ParseError::EndOfFile {
                 expected_tokens: vec![
                     TokenDiscriminants::True,
                     TokenDiscriminants::False,
@@ -658,9 +757,11 @@ impl<'input> Parser<'input> {
                     TokenDiscriminants::String,
                     TokenDiscriminants::LParen,
                 ],
-            });
-        };
-        match token {
+            },
+            LocationRange(self.lexer.current_location, self.lexer.current_location)
+        ))?;
+        let location = span.location;
+        match span.inner {
             Token::True => Ok(Loc {
                 location,
                 inner: Expr::Primary {
@@ -721,12 +822,14 @@ impl<'input> Parser<'input> {
                     TokenDiscriminants::String,
                     TokenDiscriminants::LParen,
                 );
-                Err(ParseError::UnexpectedToken {
-                    token: token_to_string(&self.lexer.name_table, &token),
-                    token_type: token.into(),
-                    location,
-                    expected_tokens,
-                })
+                Err(loc!(
+                    ParseError::UnexpectedToken {
+                        token: token_to_string(&self.lexer.name_table, &token),
+                        token_type: token.into(),
+                        expected_tokens,
+                    },
+                    location
+                ))
             }
         }
     }
@@ -735,7 +838,7 @@ impl<'input> Parser<'input> {
         &mut self,
         name: Name,
         name_loc: LocationRange,
-    ) -> Result<Loc<Expr>, ParseError> {
+    ) -> Result<Loc<Expr>, Loc<ParseError>> {
         let (fields, end_loc) =
             self.comma::<(Name, Loc<Expr>)>(&Self::record_field, Token::RBrace)?;
         Ok(Loc {
@@ -744,7 +847,7 @@ impl<'input> Parser<'input> {
         })
     }
 
-    fn record_field(&mut self) -> Result<(Name, Loc<Expr>), ParseError> {
+    fn record_field(&mut self) -> Result<(Name, Loc<Expr>), Loc<ParseError>> {
         let (field_name, name_loc) = self.id()?;
         // If we find a comma, we treat `foo,` as `foo: foo,`
         let expr = if self.match_one(TokenDiscriminants::Comma)?.is_some() {
@@ -759,21 +862,25 @@ impl<'input> Parser<'input> {
         Ok((field_name, expr))
     }
 
-    fn pattern(&mut self) -> Result<Pat, ParseError> {
-        let (token, left) = if let Some((token, loc)) = self.bump()? {
-            (token, loc)
-        } else {
-            return Err(ParseError::EndOfFile {
+    fn pattern(&mut self) -> Result<Pat, Loc<ParseError>> {
+        let span = self.bump()?.ok_or(loc!(
+            ParseError::EndOfFile {
                 expected_tokens: vec![
                     TokenDiscriminants::LParen,
                     TokenDiscriminants::LBrace,
                     TokenDiscriminants::Ident,
                 ],
-            });
-        };
-        match token {
+            },
+            LocationRange(self.lexer.current_location, self.lexer.current_location)
+        ))?;
+        let left = span.location;
+        match span.inner {
             Token::LParen => {
-                if let Some((_, right)) = self.match_one(TokenDiscriminants::RParen)? {
+                if let Some(Loc {
+                    inner: _,
+                    location: right,
+                }) = self.match_one(TokenDiscriminants::RParen)?
+                {
                     return Ok(Pat::Empty(LocationRange(left.0, right.0)));
                 }
 
@@ -810,39 +917,49 @@ impl<'input> Parser<'input> {
                 }
             }
             token => {
-                return Err(ParseError::UnexpectedToken {
-                    token: token_to_string(&self.lexer.name_table, &token),
-                    token_type: token.into(),
-                    location: left,
-                    expected_tokens: format!(
-                        "{}, {}, {}",
-                        TokenDiscriminants::LParen,
-                        TokenDiscriminants::LBrace,
-                        TokenDiscriminants::Ident,
-                    ),
-                })
+                return Err(loc!(
+                    ParseError::UnexpectedToken {
+                        token: token_to_string(&self.lexer.name_table, &token),
+                        token_type: token.into(),
+                        expected_tokens: format!(
+                            "{}, {}, {}",
+                            TokenDiscriminants::LParen,
+                            TokenDiscriminants::LBrace,
+                            TokenDiscriminants::Ident,
+                        ),
+                    },
+                    left
+                ))
             }
         }
     }
 
-    fn record_pattern(&mut self) -> Result<Name, ParseError> {
-        let token = self.bump()?;
-        match token {
-            Some((Token::Ident(name), _)) => Ok(name),
-            Some((token, location)) => Err(ParseError::UnexpectedToken {
-                token: token_to_string(&self.lexer.name_table, &token),
-                token_type: token.into(),
-                location,
-                expected_tokens: format!("{}", TokenDiscriminants::Ident),
-            }),
-            _ => Err(ParseError::EndOfFile {
+    fn record_pattern(&mut self) -> Result<Name, Loc<ParseError>> {
+        let span = self.bump()?.ok_or(loc!(
+            ParseError::EndOfFile {
                 expected_tokens: vec![TokenDiscriminants::Ident],
-            }),
+            },
+            LocationRange(self.lexer.current_location, self.lexer.current_location)
+        ))?;
+        match span.inner {
+            Token::Ident(name) => Ok(name),
+            token => Err(loc!(
+                ParseError::UnexpectedToken {
+                    token: token_to_string(&self.lexer.name_table, &token),
+                    token_type: token.into(),
+                    expected_tokens: format!("{}", TokenDiscriminants::Ident),
+                },
+                span.location
+            )),
         }
     }
 
-    fn type_sig(&mut self) -> Result<Option<(Loc<TypeSig>, LocationRange)>, ParseError> {
-        if let Some((_, left)) = self.match_one(TokenDiscriminants::Colon)? {
+    fn type_sig(&mut self) -> Result<Option<(Loc<TypeSig>, LocationRange)>, Loc<ParseError>> {
+        if let Some(Loc {
+            inner: _,
+            location: left,
+        }) = self.match_one(TokenDiscriminants::Colon)?
+        {
             let type_sig = self.type_()?;
             let right = type_sig.location;
             Ok(Some((type_sig, LocationRange(left.0, right.1))))
@@ -851,10 +968,16 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn type_(&mut self) -> Result<Loc<TypeSig>, ParseError> {
-        let token = self.bump()?;
-        match token {
-            Some((Token::Ident(name), location)) => {
+    fn type_(&mut self) -> Result<Loc<TypeSig>, Loc<ParseError>> {
+        let token = self.bump()?.ok_or(loc!(
+            ParseError::EndOfFile {
+                expected_tokens: vec![TokenDiscriminants::LBracket, TokenDiscriminants::Ident],
+            },
+            LocationRange(self.lexer.current_location, self.lexer.current_location)
+        ))?;
+        let location = token.location;
+        match token.inner {
+            Token::Ident(name) => {
                 let sig = Loc {
                     location,
                     inner: TypeSig::Name(name),
@@ -869,51 +992,58 @@ impl<'input> Parser<'input> {
                     Ok(sig)
                 }
             }
-            Some((Token::LBracket, left)) => {
+            Token::LBracket => {
                 let array_type = self.type_()?;
                 let (_, right) = self.expect(TokenDiscriminants::RBracket)?;
                 Ok(Loc {
-                    location: LocationRange(left.0, right.1),
+                    location: LocationRange(location.0, right.1),
                     inner: TypeSig::Array(Box::new(array_type)),
                 })
             }
-            Some((Token::LParen, left)) => {
+            Token::LParen => {
                 let (param_types, _) = self.comma(&Self::type_, Token::RParen)?;
                 self.expect(TokenDiscriminants::Arrow)?;
                 let return_type = self.type_()?;
                 Ok(Loc {
-                    location: LocationRange(left.0, return_type.location.1),
+                    location: LocationRange(location.0, return_type.location.1),
                     inner: TypeSig::Arrow(param_types, Box::new(return_type)),
                 })
             }
-            Some((token, location)) => Err(ParseError::UnexpectedToken {
-                token: token_to_string(&self.lexer.name_table, &token),
-                token_type: token.into(),
-                location,
-                expected_tokens: format!(
-                    "{}, {}",
-                    TokenDiscriminants::LBracket,
-                    TokenDiscriminants::Ident
-                ),
-            }),
-            None => Err(ParseError::EndOfFile {
-                expected_tokens: vec![TokenDiscriminants::LBracket, TokenDiscriminants::Ident],
-            }),
+            token => Err(loc!(
+                ParseError::UnexpectedToken {
+                    token: token_to_string(&self.lexer.name_table, &token),
+                    token_type: token.into(),
+                    expected_tokens: format!(
+                        "{}, {}",
+                        TokenDiscriminants::LBracket,
+                        TokenDiscriminants::Ident
+                    ),
+                },
+                location
+            )),
         }
     }
 
     fn comma<T: Debug>(
         &mut self,
-        parse_fn: &dyn Fn(&mut Self) -> Result<T, ParseError>,
+        parse_fn: &dyn Fn(&mut Self) -> Result<T, Loc<ParseError>>,
         end_token: Token,
-    ) -> Result<(Vec<T>, LocationRange), ParseError> {
+    ) -> Result<(Vec<T>, LocationRange), Loc<ParseError>> {
         let mut elems: Vec<T> = Vec::new();
-        if let Some((_, right)) = self.match_one((&end_token).into())? {
+        if let Some(Loc {
+            inner: _,
+            location: right,
+        }) = self.match_one((&end_token).into())?
+        {
             return Ok((elems, right));
         }
         loop {
             elems.push(parse_fn(self)?);
-            if let Some((_, right)) = self.match_one((&end_token).into())? {
+            if let Some(Loc {
+                inner: _,
+                location: right,
+            }) = self.match_one((&end_token).into())?
+            {
                 return Ok((elems, right));
             }
             self.expect(TokenDiscriminants::Comma)?;
@@ -1000,7 +1130,7 @@ mod tests {
     }
 
     #[test]
-    fn id() -> Result<(), ParseError> {
+    fn id() -> Result<(), Loc<ParseError>> {
         let expected = vec![
             Loc {
                 location: LocationRange(Location(1, 1), Location(1, 4)),
@@ -1037,7 +1167,7 @@ mod tests {
     }
 
     #[test]
-    fn pattern() -> Result<(), ParseError> {
+    fn pattern() -> Result<(), Loc<ParseError>> {
         let expected = vec![
             Pat::Id(0, None, LocationRange(Location(1, 1), Location(1, 4))),
             Pat::Id(
@@ -1070,7 +1200,7 @@ mod tests {
     }
 
     #[test]
-    fn arithmetic() -> Result<(), ParseError> {
+    fn arithmetic() -> Result<(), Loc<ParseError>> {
         let expected = Loc {
             location: LocationRange(Location(1, 1), Location(1, 16)),
             inner: Expr::BinOp {
@@ -1127,7 +1257,7 @@ mod tests {
     }
 
     #[test]
-    fn function() -> Result<(), ParseError> {
+    fn function() -> Result<(), Loc<ParseError>> {
         let expected = Loc {
             location: LocationRange(Location(1, 1), Location(1, 12)),
             inner: Expr::Function {

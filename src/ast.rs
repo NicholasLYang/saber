@@ -15,11 +15,30 @@ pub struct Loc<T> {
     pub inner: T,
 }
 
+#[macro_export]
+macro_rules! loc {
+    ($inner:expr, $location:expr) => {
+        Loc {
+            inner: $inner,
+            location: $location,
+        }
+    };
+    ($inner:expr, $location:expr,) => {
+        loc!($inner, $location)
+    };
+}
+
+impl<T: fmt::Display> fmt::Display for Loc<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.inner)
+    }
+}
+
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct Program {
     pub stmts: Vec<Loc<Stmt>>,
     pub type_defs: Vec<Loc<TypeDef>>,
-    pub errors: Vec<ParseError>,
+    pub errors: Vec<Loc<ParseError>>,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]

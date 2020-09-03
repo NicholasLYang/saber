@@ -1,3 +1,5 @@
+use crate::ast::Loc;
+use crate::loc;
 use crate::utils::NameTable;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Debug, Display, Formatter};
@@ -151,20 +153,26 @@ fn is_id_body(ch: char) -> bool {
     ch == '_' || ch.is_ascii_digit() || ch.is_ascii_alphabetic()
 }
 
-#[derive(Debug, Fail, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum LexicalError {
-    #[fail(display = "{}: Invalid character '{}'", location, ch)]
-    InvalidCharacter { ch: char, location: LocationRange },
+    InvalidCharacter { ch: char },
+    UnterminatedString,
+}
 
-    #[fail(display = "{}: String was not terminated", location)]
-    UnterminatedString { location: LocationRange },
+impl fmt::Display for LexicalError {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match self {
+            LexicalError::InvalidCharacter { ch } => write!(f, "Invalid character '{}'", ch),
+            LexicalError::UnterminatedString => write!(f, "String was not terminated"),
+        }
+    }
 }
 
 pub struct Lexer<'input> {
     source: &'input str,
     chars: CharIndices<'input>,
     pub name_table: NameTable,
-    current_location: usize,
+    pub current_location: usize,
     lookahead: Option<(usize, char)>,
     lookahead2: Option<(usize, char)>,
 }
@@ -209,12 +217,12 @@ impl<'input> Lexer<'input> {
             Some((i, ch)) => {
                 if match_ch == ch {
                     self.bump();
-                    Ok((matched_token, LocationRange(start_loc, i)))
+                    Ok(loc!(matched_token, LocationRange(start_loc, i)))
                 } else {
-                    Ok((alt_token, LocationRange(start_loc, i - 1)))
+                    Ok(loc!(alt_token, LocationRange(start_loc, i - 1)))
                 }
             }
-            None => Ok((alt_token, LocationRange(start_loc, start_loc))),
+            None => Ok(loc!(alt_token, LocationRange(start_loc, start_loc))),
         }
     }
 
@@ -252,14 +260,15 @@ impl<'input> Lexer<'input> {
             Some(i) => {
                 self.bump();
                 let end_index = self.current_location;
-                Ok((
+                Ok(loc!(
                     Token::String(self.source[start_index + 1..i].to_string()),
                     LocationRange(start_index, end_index),
                 ))
             }
-            None => Err(LexicalError::UnterminatedString {
-                location: LocationRange(start_index, self.current_location),
-            }),
+            None => Err(loc!(
+                LexicalError::UnterminatedString,
+                LocationRange(start_index, self.current_location)
+            )),
         }
     }
 
@@ -279,7 +288,7 @@ impl<'input> Lexer<'input> {
         }
         let end_index = end_index.unwrap_or_else(|| self.source.len());
         if is_decimal {
-            Ok((
+            Ok(loc!(
                 Token::Float(
                     self.source[start_index..end_index]
                         .parse()
@@ -288,7 +297,7 @@ impl<'input> Lexer<'input> {
                 LocationRange(start_index, end_index),
             ))
         } else {
-            Ok((
+            Ok(loc!(
                 Token::Integer(
                     self.source[start_index..end_index]
                         .parse()
@@ -324,49 +333,79 @@ impl<'input> Lexer<'input> {
                 }
             }
         };
-        Ok((token, LocationRange(start_index, end_index)))
+        Ok(loc!(token, LocationRange(start_index, end_index)))
     }
 }
 
 impl<'input> Iterator for Lexer<'input> {
-    type Item = Result<(Token, LocationRange), LexicalError>;
+    type Item = Result<Loc<Token>, Loc<LexicalError>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.skip_whitespace();
         let start_index = self.current_location;
         if let Some((end_index, ch)) = self.bump() {
             match ch {
-                '{' => Some(Ok((Token::LBrace, LocationRange(start_index, end_index)))),
-                '}' => Some(Ok((Token::RBrace, LocationRange(start_index, end_index)))),
-                '(' => Some(Ok((Token::LParen, LocationRange(start_index, end_index)))),
-                ')' => Some(Ok((Token::RParen, LocationRange(start_index, end_index)))),
-                '[' => Some(Ok((Token::LBracket, LocationRange(start_index, end_index)))),
-                ']' => Some(Ok((Token::RBracket, LocationRange(start_index, end_index)))),
-                ';' => Some(Ok((
-                    Token::Semicolon,
-                    LocationRange(start_index, end_index),
+                '{' => Some(Ok(loc!(
+                    Token::LBrace,
+                    LocationRange(start_index, end_index)
                 ))),
-                ',' => Some(Ok((Token::Comma, LocationRange(start_index, end_index)))),
-                '.' => Some(Ok((Token::Dot, LocationRange(start_index, end_index)))),
-                '\\' => Some(Ok((Token::Slash, LocationRange(start_index, end_index)))),
-                ':' => Some(Ok((Token::Colon, LocationRange(start_index, end_index)))),
+                '}' => Some(Ok(loc!(
+                    Token::RBrace,
+                    LocationRange(start_index, end_index)
+                ))),
+                '(' => Some(Ok(loc!(
+                    Token::LParen,
+                    LocationRange(start_index, end_index)
+                ))),
+                ')' => Some(Ok(loc!(
+                    Token::RParen,
+                    LocationRange(start_index, end_index)
+                ))),
+                '[' => Some(Ok(loc!(
+                    Token::LBracket,
+                    LocationRange(start_index, end_index)
+                ))),
+                ']' => Some(Ok(loc!(
+                    Token::RBracket,
+                    LocationRange(start_index, end_index)
+                ))),
+                ';' => Some(Ok(loc!(
+                    Token::Semicolon,
+                    LocationRange(start_index, end_index)
+                ))),
+                ',' => Some(Ok(loc!(
+                    Token::Comma,
+                    LocationRange(start_index, end_index)
+                ))),
+                '.' => Some(Ok(loc!(Token::Dot, LocationRange(start_index, end_index)))),
+                '\\' => Some(Ok(loc!(
+                    Token::Slash,
+                    LocationRange(start_index, end_index)
+                ))),
+                ':' => Some(Ok(loc!(
+                    Token::Colon,
+                    LocationRange(start_index, end_index)
+                ))),
                 '+' => Some(self.lookahead_match(start_index, Token::PlusEqual, Token::Plus, '=')),
                 '-' => match self.lookahead {
                     Some((_, '>')) => {
                         self.bump();
-                        Some(Ok((
+                        Some(Ok(loc!(
                             Token::Arrow,
                             LocationRange(start_index, self.current_location),
                         )))
                     }
                     Some((_, '=')) => {
                         self.bump();
-                        Some(Ok((
+                        Some(Ok(loc!(
                             Token::MinusEqual,
                             LocationRange(start_index, self.current_location),
                         )))
                     }
-                    _ => Some(Ok((Token::Minus, LocationRange(start_index, end_index)))),
+                    _ => Some(Ok(loc!(
+                        Token::Minus,
+                        LocationRange(start_index, end_index)
+                    ))),
                 },
                 '*' => {
                     Some(self.lookahead_match(start_index, Token::TimesEqual, Token::Times, '='))
@@ -378,30 +417,33 @@ impl<'input> Iterator for Lexer<'input> {
                     }
                     Some((_, '=')) => {
                         self.bump();
-                        Some(Ok((
+                        Some(Ok(loc!(
                             Token::DivEqual,
                             LocationRange(start_index, self.current_location),
                         )))
                     }
-                    _ => Some(Ok((Token::Div, LocationRange(start_index, end_index)))),
+                    _ => Some(Ok(loc!(Token::Div, LocationRange(start_index, end_index)))),
                 },
                 '!' => Some(self.lookahead_match(start_index, Token::BangEqual, Token::Bang, '=')),
                 '=' => match self.lookahead {
                     Some((_, '>')) => {
                         self.bump();
-                        Some(Ok((
+                        Some(Ok(loc!(
                             Token::FatArrow,
                             LocationRange(start_index, self.current_location),
                         )))
                     }
                     Some((_, '=')) => {
                         self.bump();
-                        Some(Ok((
+                        Some(Ok(loc!(
                             Token::EqualEqual,
                             LocationRange(start_index, self.current_location),
                         )))
                     }
-                    _ => Some(Ok((Token::Equal, LocationRange(start_index, end_index)))),
+                    _ => Some(Ok(loc!(
+                        Token::Equal,
+                        LocationRange(start_index, end_index)
+                    ))),
                 },
                 '>' => Some(self.lookahead_match(
                     start_index,
@@ -416,9 +458,9 @@ impl<'input> Iterator for Lexer<'input> {
                 ch if is_id_start(ch) => Some(self.read_identifier(end_index)),
                 ch if ch.is_ascii_digit() => Some(self.read_number(end_index)),
                 ch => {
-                    let error = LexicalError::InvalidCharacter {
-                        ch,
+                    let error = Loc {
                         location: LocationRange(start_index, end_index),
+                        inner: LexicalError::InvalidCharacter { ch },
                     };
                     Some(Err(error))
                 }
