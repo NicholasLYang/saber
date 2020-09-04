@@ -771,6 +771,7 @@ impl CodeGenerator {
                 }
             }
             Value::String(s) => {
+                println!("GENERATING STRING: {}", s);
                 let mut bytes = s.as_bytes().to_vec();
                 let raw_str_length: i32 = bytes.len().try_into().expect("String is too long");
                 // Make bytes a multiple of 4 for ease of use;

@@ -12,6 +12,7 @@ export const printHeap = (memory: WebAssembly.Memory) => {
 };
 
 export const printString = (memory: WebAssembly.Memory) => (bytePtr: number) => {
+    console.log("PRINTING");
     const memArray = new Uint32Array(memory.buffer);
     let ptr = bytePtr/4;
     const len = memArray[ptr];

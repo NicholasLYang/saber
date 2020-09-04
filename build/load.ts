@@ -20,7 +20,14 @@ async function instantiate() {
     const module = await WebAssembly.compile(buffer);
     const memory = new WebAssembly.Memory({ initial: 1 });
     const importObject = {
-        std: { alloc: alloc(memory), dealloc: dealloc(memory), streq: streq(memory), clone: clone(memory), printInt: console.log, printFloat: console.log, printString: printString(memory) },
+        std: {
+            alloc: alloc(memory),
+            dealloc: dealloc(memory),
+            clone: clone(memory),
+            streq: streq(memory),
+            printInt: console.log,
+            printFloat: console.log,
+            printString: printString(memory) },
         mem: { heap: memory }};
     const instance = await WebAssembly.instantiate(module, importObject);
     let wasm: any = instance.exports;
