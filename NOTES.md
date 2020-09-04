@@ -55,6 +55,9 @@ Update: I originally started with a HashMap, then I figured that a HashMap was a
 went with just an array. Honestly once the language starts being used by someone semi-seriously, I'll optimize
 that.
 
+Update 2: I now split Call expressions into ExprT::CallDirect and ExprT::CallIndirect. This makes codegen
+a lot easier for calls.
+
 ## Closures
 
 Should closures copy or reference variables? If they're copied that makes my life a lot easier. But it's probably
@@ -62,6 +65,8 @@ super inefficient, so I'd probably need to make it copy-on-write, but that'd als
 
 ## Errors
 Use a crate? https://github.com/brendanzab/codespan
+
+Update: Started using it
 
 ## Memory Allocation
 
@@ -71,3 +76,6 @@ Global #0 is gonna be pointer to current heap max
 
 Problem: function bindings, i.e. StmtT::Function, are not actually variables and therefore cannot store data.
 Solution: Make them actual variables and have them store data.
+
+## Build System
+Too many things to do right now. Should have one simple compile script that runs

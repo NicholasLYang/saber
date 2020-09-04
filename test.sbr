@@ -1,11 +1,5 @@
-struct Person {
-  name: string
-}
-
 let foo = \() => {
-  let p = Person { name: "Nicholas" };
-  let name = p.name;
-  printString(name);
+  printString("Hello");
 }
 
 export foo;

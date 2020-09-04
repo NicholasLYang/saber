@@ -25,7 +25,6 @@ async function instantiate() {
     const instance = await WebAssembly.instantiate(module, importObject);
     let wasm: any = instance.exports;
     wasm.foo();
-    printHeap(memory);
 };
 
 

@@ -4,6 +4,7 @@ use crate::lexer::{Lexer, LexicalError, LocationRange, Token, TokenDiscriminants
 use crate::loc;
 use crate::printer::token_to_string;
 use crate::utils::NameTable;
+use codespan_reporting::diagnostic::{Diagnostic, Label};
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Debug};
 use std::result::Result;
@@ -49,6 +50,17 @@ impl fmt::Display for ParseError {
             ParseError::LexicalError { err } => write!(f, "{}", err),
             ParseError::NotReachable => write!(f, "Not reachable"),
         }
+    }
+}
+
+impl Into<Diagnostic<()>> for &Loc<ParseError> {
+    fn into(self) -> Diagnostic<()> {
+        let range: std::ops::Range<usize> = self.location.into();
+        Diagnostic::error()
+            .with_message("Parse Error")
+            .with_labels(vec![
+                Label::primary((), range).with_message(self.inner.to_string())
+            ])
     }
 }
 

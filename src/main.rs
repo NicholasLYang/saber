@@ -18,6 +18,10 @@ use crate::parser::Parser;
 use crate::typechecker::TypeChecker;
 use crate::types::Result;
 use code_generator::CodeGenerator;
+use codespan_reporting::diagnostic::Diagnostic;
+use codespan_reporting::files::SimpleFile;
+use codespan_reporting::term;
+use codespan_reporting::term::termcolor::{ColorChoice, StandardStream};
 use std::env;
 use std::fs::{self, File};
 use std::io::Write;
@@ -67,11 +71,15 @@ fn format_bool_vec(vec: &Vec<bool>) -> String {
 
 fn read_file(file_name: &str) -> Result<()> {
     let contents = fs::read_to_string(file_name)?;
+    let writer = StandardStream::stderr(ColorChoice::Always);
+    let config = codespan_reporting::term::Config::default();
+    let file = SimpleFile::new(file_name, contents.as_str());
     let lexer = lexer::Lexer::new(&contents);
     let mut parser = Parser::new(lexer);
     let program = parser.program().expect("Error parsing");
     for error in &program.errors {
-        println!("{}", error);
+        let diagnostic: Diagnostic<()> = error.into();
+        term::emit(&mut writer.lock(), &config, &file, &diagnostic).unwrap();
     }
     let mut typechecker = TypeChecker::new(parser.get_name_table());
     let program_t = typechecker.check_program(program);

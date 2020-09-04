@@ -217,8 +217,8 @@ impl SymbolTable {
         match self.scopes[scope].scope_type {
             ScopeType::Function {
                 captures: _,
-                previous_func_scope,
-            } => previous_func_scope,
+                previous_func_scope: _,
+            } => Some(scope),
             ScopeType::Regular { func_scope } => func_scope,
         }
     }

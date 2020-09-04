@@ -1,1 +1,1 @@
-export const typeInfo = {14:[true]};export const STR_INDEX = 3;
+export const typeInfo = {};export const STR_INDEX = 3;
