@@ -12,13 +12,13 @@ export const printHeap = (memory: WebAssembly.Memory) => {
 };
 
 export const printString = (memory: WebAssembly.Memory) => (bytePtr: number) => {
-    console.log("PRINTING");
     const memArray = new Uint32Array(memory.buffer);
     let ptr = bytePtr/4;
-    const len = memArray[ptr];
-    const out = new Uint32Array(len/4);
-    for (let offset = 0; offset < len/4; offset++) {
-        const i = offset + ptr + 1;
+    const byteLen = memArray[ptr + 1];
+    const len = Math.ceil(byteLen/4);
+    const out = new Uint32Array(len);
+    for (let offset = 0; offset < len; offset++) {
+        const i = offset + ptr + 2;
         out[offset] = memArray[i];
     }
     const decoder = new TextDecoder();
@@ -80,6 +80,12 @@ export const alloc = (memory: WebAssembly.Memory) => (size: number) => {
     memArray[ptr + 1] = 1;
     return (ptr + 2) * 4;
 };
+
+export const debugAlloc = (memory: WebAssembly.Memory) => (size: number) => {
+    const ptr = alloc(memory)(size);
+    console.log(`ALLOCATED ${size} AT PTR ${ptr}`);
+    return ptr;
+}
 
 export const dealloc = (memory: WebAssembly.Memory) => (bytePtr: number) => {
     let memArray = new Uint32Array(memory.buffer);

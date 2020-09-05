@@ -1,5 +1,5 @@
 import { code } from "./code";
-import {alloc, clone, dealloc, printHeap, printString, streq} from "./runtime";
+import {alloc, clone, dealloc, debugAlloc, printHeap, printString, streq} from "./runtime";
 
 function atob(a: string) {
     return new Buffer(a, 'base64').toString('binary');
