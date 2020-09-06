@@ -4,7 +4,7 @@ use crate::ast::{
 };
 use crate::lexer::LocationRange;
 use crate::printer::type_to_string;
-use crate::symbol_table::{FunctionInfo, SymbolTable};
+use crate::symbol_table::{FunctionInfo, ScopeId, SymbolTable};
 use crate::utils::{
     NameTable, TypeTable, BOOL_INDEX, CHAR_INDEX, FLOAT_INDEX, INT_INDEX, STR_INDEX, UNIT_INDEX,
 };
@@ -287,7 +287,7 @@ impl TypeChecker {
                 } else {
                     return Err(TypeError::ShadowingFunction { location });
                 };
-                let function = self.function(params, *body, return_type)?;
+                let (function, _) = self.function(func_name, params, *body)?;
                 Ok(vec![Loc {
                     location,
                     inner: StmtT::Function {
@@ -615,11 +615,18 @@ impl TypeChecker {
 
     fn function(
         &mut self,
+        name: Name,
         params: Pat,
         body: Loc<Expr>,
-        return_type: TypeId,
-    ) -> Result<Function, TypeError> {
-        let previous_scope = self.symbol_table.push_scope(true);
+    ) -> Result<(Function, TypeId), TypeError> {
+        let entry = self.symbol_table.lookup_name(name);
+        let entry = entry.as_ref().unwrap();
+        // Yeah yeah this ain't pretty but the name should be there
+        let func_info = entry.function_info.as_ref().unwrap();
+        let type_ = entry.var_type;
+        let scope = func_info.func_scope;
+        let return_type = func_info.return_type;
+        self.symbol_table.swap_scope(scope);
         let old_var_types = self.symbol_table.reset_vars();
         let func_params = self.get_func_params(&params)?;
         for (name, type_) in &func_params {
@@ -651,13 +658,16 @@ impl TypeChecker {
         };
 
         let local_variables = self.symbol_table.restore_vars(old_var_types);
-        let scope_index = self.symbol_table.restore_scope(previous_scope);
-        Ok(Function {
-            params: func_params,
-            body: Box::new(body),
-            local_variables,
-            scope_index,
-        })
+        let scope_index = self.symbol_table.restore_scope();
+        Ok((
+            Function {
+                params: func_params,
+                body: Box::new(body),
+                local_variables,
+                scope_index,
+            },
+            type_,
+        ))
     }
 
     fn expr(&mut self, expr: Loc<Expr>) -> Result<Loc<ExprT>, TypeError> {
@@ -731,17 +741,17 @@ impl TypeChecker {
             } => {
                 let name = self.name_table.get_fresh_name();
                 let params_type = self.pat(&params)?;
-                let return_type = if let Some(return_type_sig) = return_type_sig {
-                    self.lookup_type_sig(&return_type_sig)?
+                let return_type = if let Some(type_sig) = return_type_sig {
+                    self.lookup_type_sig(&type_sig)?
                 } else {
                     self.get_fresh_type_var()
                 };
-                let function = self.function(params, *body, return_type)?;
                 let type_ = self
                     .type_table
                     .insert(Type::Arrow(params_type, return_type));
                 self.symbol_table
                     .insert_function(name, params_type, return_type, type_);
+                let (function, type_) = self.function(name, params, *body)?;
                 let func = Loc {
                     location,
                     inner: ExprT::Function {
@@ -785,6 +795,7 @@ impl TypeChecker {
                     if let Some(entry) = self.symbol_table.lookup_name(*name) {
                         if let Some(FunctionInfo {
                             func_index,
+                            func_scope: _,
                             params_type,
                             return_type,
                         }) = entry.function_info
@@ -794,7 +805,6 @@ impl TypeChecker {
                                 location,
                                 inner: ExprT::DirectCall {
                                     callee: func_index,
-                                    captures_var_index: entry.var_index,
                                     args: Box::new(typed_args),
                                     type_: return_type,
                                 },
@@ -830,7 +840,7 @@ impl TypeChecker {
             Expr::Block(stmts, end_expr) => {
                 self.read_functions(&stmts)?;
                 let mut typed_stmts = Vec::new();
-                let previous_scope = self.symbol_table.push_scope(false);
+                self.symbol_table.push_scope();
                 for stmt in stmts {
                     typed_stmts.append(&mut self.stmt(stmt)?);
                 }
@@ -840,7 +850,7 @@ impl TypeChecker {
                 } else {
                     (UNIT_INDEX, None)
                 };
-                let scope_index = self.symbol_table.restore_scope(previous_scope);
+                let scope_index = self.symbol_table.restore_scope();
                 Ok(Loc {
                     location,
                     inner: ExprT::Block {

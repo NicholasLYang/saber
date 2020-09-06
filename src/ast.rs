@@ -157,7 +157,6 @@ pub enum ExprT {
     Field(Box<Loc<ExprT>>, Name, TypeId),
     DirectCall {
         callee: FunctionId,
-        captures_var_index: usize,
         args: Box<Loc<ExprT>>,
         type_: TypeId,
     },

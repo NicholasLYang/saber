@@ -197,6 +197,7 @@ impl CodeGenerator {
                 )?;
                 if let Some(FunctionInfo {
                     func_index,
+                    func_scope: _,
                     params_type: _,
                     return_type: _,
                 }) = &sym_entry.function_info
@@ -235,13 +236,13 @@ impl CodeGenerator {
             .as_ref()
             .ok_or(GenerationError::NotReachable)?
             .func_index;
-        let old_scope = self.symbol_table.restore_scope(scope);
+        let old_scope = self.symbol_table.swap_scope(scope);
         let (type_, body) =
             self.generate_function(scope, return_type, params, local_variables, body, location)?;
         let type_index = self.program_data.insert_type(type_);
         self.program_data.code_section[index] = Some(body);
         self.program_data.function_section[index] = Some(type_index);
-        self.symbol_table.restore_scope(old_scope);
+        self.symbol_table.swap_scope(old_scope);
         Ok(index)
     }
 
@@ -532,7 +533,6 @@ impl CodeGenerator {
             }
             ExprT::DirectCall {
                 callee,
-                captures_var_index,
                 args,
                 type_: _,
             } => {
@@ -568,7 +568,7 @@ impl CodeGenerator {
                         scope_index,
                     },
             } => {
-                self.symbol_table.restore_scope(*scope_index);
+                self.symbol_table.swap_scope(*scope_index);
                 let (_, return_type) = if let Type::Arrow(params_type, return_type) =
                     self.type_table.get_type(*type_)
                 {
@@ -604,7 +604,7 @@ impl CodeGenerator {
                 type_: _,
                 scope_index,
             } => {
-                self.symbol_table.restore_scope(*scope_index);
+                self.symbol_table.swap_scope(*scope_index);
                 let mut opcodes = Vec::new();
                 for stmt in stmts {
                     opcodes.append(&mut self.generate_stmt(stmt, false)?);
