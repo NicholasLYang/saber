@@ -4,7 +4,7 @@ use crate::ast::{
 };
 use crate::lexer::LocationRange;
 use crate::printer::type_to_string;
-use crate::symbol_table::{EntryType, SymbolTable};
+use crate::symbol_table::{FunctionInfo, SymbolTable};
 use crate::utils::{
     NameTable, TypeTable, BOOL_INDEX, CHAR_INDEX, FLOAT_INDEX, INT_INDEX, STR_INDEX, UNIT_INDEX,
 };
@@ -282,15 +282,8 @@ impl TypeChecker {
                         location,
                     });
                 };
-                let (params_type, return_type) = if let EntryType::Function {
-                    func_index: _,
-                    var_index: _,
-                    params_type,
-                    return_type,
-                    type_: _,
-                } = &sym_entry.entry_type
-                {
-                    (*params_type, *return_type)
+                let (params_type, return_type) = if let Some(func_info) = &sym_entry.function_info {
+                    (func_info.params_type, func_info.return_type)
                 } else {
                     return Err(TypeError::ShadowingFunction { location });
                 };
@@ -682,28 +675,13 @@ impl TypeChecker {
                             location,
                             name: self.name_table.get_str(&name).to_string(),
                         })?;
-                match &entry.entry_type {
-                    EntryType::Function {
-                        func_index: _,
-                        var_index: _,
-                        params_type: _,
-                        return_type: _,
-                        type_,
-                    } => Ok(Loc {
-                        location,
-                        inner: ExprT::Var {
-                            name,
-                            type_: *type_,
-                        },
-                    }),
-                    EntryType::Var { var_type, index: _ } => Ok(Loc {
-                        location,
-                        inner: ExprT::Var {
-                            name,
-                            type_: var_type.clone(),
-                        },
-                    }),
-                }
+                Ok(Loc {
+                    location,
+                    inner: ExprT::Var {
+                        name,
+                        type_: entry.var_type,
+                    },
+                })
             }
             Expr::BinOp { op, lhs, rhs } => {
                 let typed_lhs = self.expr(*lhs)?;
@@ -805,19 +783,18 @@ impl TypeChecker {
                 let typed_args = self.expr(*args)?;
                 if let ExprT::Var { name, type_: _ } = &typed_callee.inner {
                     if let Some(entry) = self.symbol_table.lookup_name(*name) {
-                        if let EntryType::Function {
+                        if let Some(FunctionInfo {
                             func_index,
-                            var_index: _,
                             params_type,
                             return_type,
-                            type_: _,
-                        } = entry.entry_type
+                        }) = entry.function_info
                         {
                             self.unify_or_err(params_type, typed_args.inner.get_type(), location)?;
                             return Ok(Loc {
                                 location,
                                 inner: ExprT::DirectCall {
                                     callee: func_index,
+                                    captures_var_index: entry.var_index,
                                     args: Box::new(typed_args),
                                     type_: return_type,
                                 },

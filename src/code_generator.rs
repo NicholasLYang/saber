@@ -2,7 +2,7 @@ use crate::ast::{ExprT, Function, Loc, Name, Op, ProgramT, StmtT, Type, TypeId, 
 use crate::lexer::LocationRange;
 use crate::printer::type_to_string;
 use crate::symbol_table::{
-    EntryType, SymbolTable, ALLOC_INDEX, CLONE_INDEX, DEALLOC_INDEX, STREQ_INDEX,
+    FunctionInfo, SymbolTable, ALLOC_INDEX, CLONE_INDEX, DEALLOC_INDEX, STREQ_INDEX,
 };
 use crate::typechecker::{is_ref_type, TypeChecker};
 use crate::utils::{NameTable, TypeTable, FLOAT_INDEX, STR_INDEX};
@@ -195,13 +195,11 @@ impl CodeGenerator {
                         name: name_str.to_string(),
                     },
                 )?;
-                if let EntryType::Function {
+                if let Some(FunctionInfo {
                     func_index,
-                    var_index: _,
                     params_type: _,
                     return_type: _,
-                    type_: _,
-                } = &sym_entry.entry_type
+                }) = &sym_entry.function_info
                 {
                     let entry = ExportEntry {
                         field_str: name_str.as_bytes().to_vec(),
@@ -232,21 +230,14 @@ impl CodeGenerator {
         location: LocationRange,
     ) -> Result<usize> {
         let entry = self.symbol_table.lookup_name_in_scope(name, scope).unwrap();
-        let index = if let EntryType::Function {
-            func_index,
-            var_index: _,
-            params_type: _,
-            return_type: _,
-            type_: _,
-        } = &entry.entry_type
-        {
-            *func_index
-        } else {
-            return Err(GenerationError::NotReachable);
-        };
+        let index = entry
+            .function_info
+            .as_ref()
+            .ok_or(GenerationError::NotReachable)?
+            .func_index;
         let old_scope = self.symbol_table.restore_scope(scope);
         let (type_, body) =
-            self.generate_function(return_type, params, local_variables, body, location)?;
+            self.generate_function(scope, return_type, params, local_variables, body, location)?;
         let type_index = self.program_data.insert_type(type_);
         self.program_data.code_section[index] = Some(body);
         self.program_data.function_section[index] = Some(type_index);
@@ -254,8 +245,44 @@ impl CodeGenerator {
         Ok(index)
     }
 
+    // Outer scope is scope that the function is defined in
+    // Func scope is the scope of the function
+    fn generate_function_captures(
+        &mut self,
+        var_index: usize,
+        func_scope_index: usize,
+    ) -> Vec<OpCode> {
+        let outer_scope_index = self
+            .symbol_table
+            .get_parent_scope(func_scope_index)
+            .unwrap();
+        let old_scope = self.symbol_table.swap_scope(outer_scope_index);
+        let captures = self.symbol_table.get_captures(func_scope_index).unwrap();
+        let mut opcodes = vec![
+            OpCode::I32Const((captures.len() * 4).try_into().unwrap()),
+            OpCode::Call(ALLOC_INDEX),
+            OpCode::SetGlobal(0),
+            OpCode::GetGlobal(0),
+        ];
+        for (name, _, _) in captures.iter() {
+            opcodes.push(OpCode::GetGlobal(0));
+            let (index, _) = self.symbol_table.codegen_lookup(*name).unwrap();
+            opcodes.push(OpCode::GetLocal(index.try_into().unwrap()));
+            opcodes.push(OpCode::I32Store(2, 0));
+            // ptr = ptr + 4;
+            opcodes.push(OpCode::GetGlobal(0));
+            opcodes.push(OpCode::I32Const(4));
+            opcodes.push(OpCode::I32Add);
+            opcodes.push(OpCode::SetGlobal(0));
+        }
+        opcodes.push(OpCode::SetLocal(var_index.try_into().unwrap()));
+        self.symbol_table.swap_scope(old_scope);
+        opcodes
+    }
+
     pub fn generate_function(
         &mut self,
+        scope_id: usize,
         return_type: TypeId,
         params: &[(Name, TypeId)],
         local_variables: &Vec<TypeId>,
@@ -264,18 +291,26 @@ impl CodeGenerator {
     ) -> Result<(FunctionType, FunctionBody)> {
         let return_type = self.generate_wasm_type(return_type, location)?;
         self.return_type = return_type.clone();
-        let function_type = self.generate_function_type(&return_type, params, location)?;
+        let function_type =
+            self.generate_function_type(scope_id, &return_type, params, location)?;
         let function_body = self.generate_function_body(body, local_variables, params.len())?;
         Ok((function_type, function_body))
     }
 
     fn generate_function_type(
         &mut self,
+        scope_id: usize,
         return_type: &Option<WasmType>,
         params: &[(Name, TypeId)],
         location: LocationRange,
     ) -> Result<FunctionType> {
         let mut wasm_param_types = Vec::new();
+        for (_, _, type_) in self.symbol_table.get_captures(scope_id).unwrap() {
+            let wasm_type = self
+                .generate_wasm_type(*type_, location)?
+                .ok_or(GenerationError::EmptyType)?;
+            wasm_param_types.push(wasm_type);
+        }
         for (_, param_type) in params {
             let wasm_type = self
                 .generate_wasm_type(*param_type, location)?
@@ -351,24 +386,6 @@ impl CodeGenerator {
         }
     }
 
-    fn get_var_index(&mut self, var: Name) -> Result<usize> {
-        match self
-            .symbol_table
-            .lookup_name(var)
-            .expect("Variable must be in scope")
-            .entry_type
-        {
-            EntryType::Function {
-                params_type: _,
-                return_type: _,
-                type_: _,
-                func_index: _,
-                var_index,
-            } => Ok(var_index),
-            EntryType::Var { index, var_type: _ } => Ok(index),
-        }
-    }
-
     fn generate_stmt(&mut self, stmt: &Loc<StmtT>, is_last: bool) -> Result<Vec<OpCode>> {
         match &stmt.inner {
             StmtT::Function {
@@ -383,7 +400,7 @@ impl CodeGenerator {
                         scope_index,
                     },
             } => {
-                self.symbol_table.restore_scope(*scope_index);
+                let old_scope = self.symbol_table.swap_scope(*scope_index);
                 self.generate_function_binding(
                     *name,
                     *scope_index,
@@ -393,8 +410,10 @@ impl CodeGenerator {
                     body,
                     stmt.location,
                 )?;
-
-                Ok(Vec::new())
+                let var_index = self.symbol_table.lookup_name(*name).unwrap().var_index;
+                let opcodes = self.generate_function_captures(var_index, *scope_index);
+                self.symbol_table.swap_scope(old_scope);
+                Ok(opcodes)
             }
             StmtT::Expr(expr) => {
                 let mut opcodes = self.generate_expr(expr)?;
@@ -428,8 +447,21 @@ impl CodeGenerator {
                 }
             }
             StmtT::Asgn(name, expr) => {
-                let index = self.get_var_index(*name)?;
-                let mut opcodes = self.generate_expr(&expr)?;
+                let (index, is_enclosed) = self.symbol_table.codegen_lookup(*name).unwrap();
+                let is_boxed_value = is_enclosed && !is_ref_type(expr.inner.get_type());
+                let mut opcodes = Vec::new();
+                if is_boxed_value {
+                    opcodes.push(OpCode::I32Const(4));
+                    opcodes.push(OpCode::Call(ALLOC_INDEX));
+                    // Ugh why does wasm not have a dup operation?
+                    opcodes.push(OpCode::SetGlobal(0));
+                    opcodes.push(OpCode::GetGlobal(0));
+                    opcodes.push(OpCode::GetGlobal(0));
+                }
+                opcodes.append(&mut self.generate_expr(&expr)?);
+                if is_boxed_value {
+                    opcodes.push(OpCode::I32Store(2, 0));
+                }
                 opcodes.push(OpCode::SetLocal(index.try_into().unwrap()));
                 /*
                 This works, except it gives an extra refcount when you initialize a value
@@ -490,12 +522,17 @@ impl CodeGenerator {
     fn generate_expr(&mut self, expr: &Loc<ExprT>) -> Result<Vec<OpCode>> {
         match &expr.inner {
             ExprT::Primary { value, type_: _ } => self.generate_primary(value),
-            ExprT::Var { name, type_: _ } => {
-                let index = self.get_var_index(*name)?;
-                Ok(vec![OpCode::GetLocal(index.try_into().unwrap())])
+            ExprT::Var { name, type_ } => {
+                let (index, is_enclosed) = self.symbol_table.codegen_lookup(*name).unwrap();
+                let mut opcodes = vec![OpCode::GetLocal(index.try_into().unwrap())];
+                if is_enclosed && !is_ref_type(*type_) {
+                    opcodes.push(OpCode::I32Load(2, 0));
+                }
+                Ok(opcodes)
             }
             ExprT::DirectCall {
                 callee,
+                captures_var_index,
                 args,
                 type_: _,
             } => {
@@ -577,11 +614,9 @@ impl CodeGenerator {
                 }
                 let entries = self.symbol_table.get_scope_entries(*scope_index);
                 for (_, entry) in entries {
-                    if let EntryType::Var { var_type, index } = &entry.entry_type {
-                        if is_ref_type(*var_type) {
-                            opcodes.push(OpCode::GetLocal((*index).try_into().unwrap()));
-                            opcodes.push(OpCode::Call(DEALLOC_INDEX));
-                        }
+                    if is_ref_type(entry.var_type) || entry.is_enclosed_var {
+                        opcodes.push(OpCode::GetLocal((entry.var_index).try_into().unwrap()));
+                        opcodes.push(OpCode::Call(DEALLOC_INDEX));
                     }
                 }
                 Ok(opcodes)

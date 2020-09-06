@@ -1,5 +1,10 @@
 let foo = \() => {
-  printString("Hello");
+  let a = 10;
+  let bar = \() => {
+    let b = 20;
+    printInt(a);
+  }
+  bar();
 }
 
 export foo;

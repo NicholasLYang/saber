@@ -79,3 +79,4 @@ Solution: Make them actual variables and have them store data.
 
 ## Build System
 Too many things to do right now. Should have one simple compile script that runs
+

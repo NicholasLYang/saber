@@ -33,37 +33,6 @@ By participating in this project you agree to abide by its terms.
 
 We highly recommend reading it over carefully before contributing.
 
-## TODO
-- General
-  - ~~Fix all the damn copies and bad, non idiomatic Rust.~~
-  - ~~Probably add a ref count for types (really no need to copy them
-    since they're relatively immutable)~~
-- Parsing
-  - ~~Convert to expression based syntax~~
-  - Trailing comma?
-- Typechecking
-  - ~~Typecheck functions~~
-  - ~~Typecheck records~~
-  - ~~Add named types~~
-  - Constraint solve type variables
-  - Add sum and product types
-- Lexical Analysis
-  - Get closures working
-- Code gen
-  - ~~Get something working.~~
-  - ~~Add local variables~~
-  - ~~Add control flow~~ (Kinda)
-  - ~~Add function calls~~
-  - ~~Add nested functions~~ 
-  - ~~Add first class functions~~
-  - ~~Add structs/records~~
-  - ~~Add strings~~
-  - Garbage collection!
-- Tests/Debugging
-  - ~~Write some tests~~
-  - ~~Add locations in errors with row/col~~
-  - ~~Add better error messages using name and type tables~~
-
 ## Design
 
 Goals:
