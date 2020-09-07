@@ -539,10 +539,12 @@ impl CodeGenerator {
             }
             ExprT::DirectCall {
                 callee,
+                captures_index,
                 args,
                 type_: _,
             } => {
-                let mut opcodes = self.generate_expr(args)?;
+                let mut opcodes = vec![OpCode::GetLocal((*captures_index).try_into().unwrap())];
+                opcodes.append(&mut self.generate_expr(args)?);
                 opcodes.push(OpCode::Call((*callee).try_into().unwrap()));
                 Ok(opcodes)
             }

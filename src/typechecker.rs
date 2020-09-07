@@ -787,11 +787,13 @@ impl TypeChecker {
                             return_type,
                         }) = entry.function_info
                         {
+                            let captures_index = entry.var_index;
                             self.unify_or_err(params_type, typed_args.inner.get_type(), location)?;
                             return Ok(Loc {
                                 location,
                                 inner: ExprT::DirectCall {
                                     callee: func_index,
+                                    captures_index,
                                     args: Box::new(typed_args),
                                     type_: return_type,
                                 },
