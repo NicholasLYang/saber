@@ -2,7 +2,7 @@ let foo = \() => {
   let a = 10;
   let bar = \() => {
     let b = 20;
-    printInt(a);
+//    printInt(a);
   }
   bar();
 }

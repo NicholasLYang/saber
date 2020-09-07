@@ -238,7 +238,7 @@ impl CodeGenerator {
             .func_index;
         let old_scope = self.symbol_table.swap_scope(scope);
         let (type_, body) =
-            self.generate_function(scope, return_type, params, local_variables, body, location)?;
+            self.generate_function(return_type, params, local_variables, body, location)?;
         let type_index = self.program_data.insert_type(type_);
         self.program_data.code_section[index] = Some(body);
         self.program_data.function_section[index] = Some(type_index);
@@ -285,7 +285,6 @@ impl CodeGenerator {
 
     pub fn generate_function(
         &mut self,
-        scope_id: usize,
         return_type: TypeId,
         params: &[(Name, TypeId)],
         local_variables: &Vec<TypeId>,
@@ -294,26 +293,18 @@ impl CodeGenerator {
     ) -> Result<(FunctionType, FunctionBody)> {
         let return_type = self.generate_wasm_type(return_type, location)?;
         self.return_type = return_type.clone();
-        let function_type =
-            self.generate_function_type(scope_id, &return_type, params, location)?;
+        let function_type = self.generate_function_type(&return_type, params, location)?;
         let function_body = self.generate_function_body(body, local_variables, params.len())?;
         Ok((function_type, function_body))
     }
 
     fn generate_function_type(
         &mut self,
-        scope_id: usize,
         return_type: &Option<WasmType>,
         params: &[(Name, TypeId)],
         location: LocationRange,
     ) -> Result<FunctionType> {
-        let mut wasm_param_types = Vec::new();
-        for (_, _, type_) in self.symbol_table.get_captures(scope_id).unwrap() {
-            let wasm_type = self
-                .generate_wasm_type(*type_, location)?
-                .ok_or(GenerationError::EmptyType)?;
-            wasm_param_types.push(wasm_type);
-        }
+        let mut wasm_param_types = vec![WasmType::i32];
         for (_, param_type) in params {
             let wasm_type = self
                 .generate_wasm_type(*param_type, location)?
@@ -467,12 +458,6 @@ impl CodeGenerator {
                     opcodes.push(OpCode::I32Store(2, 0));
                 }
                 opcodes.push(OpCode::SetLocal(var_index.try_into().unwrap()));
-                /*
-                This works, except it gives an extra refcount when you initialize a value
-                if is_ref_type(expr.inner.get_type()) {
-                    opcodes.push(OpCode::GetLocal(index.try_into().unwrap()));
-                    opcodes.push(OpCode::Call(CLONE_INDEX));
-                }*/
                 Ok(opcodes)
             }
             StmtT::Block(stmts) => {
