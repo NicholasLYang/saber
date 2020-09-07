@@ -38,7 +38,7 @@ pub struct SymbolTable {
     // typechecking the function, we reset and spit out
     // the variable types
     var_types: Vec<TypeId>,
-    current_scope: ScopeId,
+    pub current_scope: ScopeId,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -48,6 +48,11 @@ pub struct FunctionInfo {
     pub func_scope: ScopeId,
     pub params_type: TypeId,
     pub return_type: TypeId,
+}
+
+pub enum VarIndex {
+    Local(usize),
+    Capture(usize),
 }
 
 pub static ALLOC_INDEX: u32 = 0;
@@ -95,9 +100,8 @@ impl SymbolTable {
             parent_func_scope,
         };
         self.scopes.push(new_scope);
-        let previous_scope = self.current_scope;
         self.current_scope = self.scopes.len() - 1;
-        previous_scope
+        self.current_scope
     }
 
     pub fn swap_scope(&mut self, scope: ScopeId) -> ScopeId {
@@ -199,22 +203,12 @@ impl SymbolTable {
     // or just local.
     // Only goes up to the next function barrier
     // NOTE: This API sucks (unmarked bools are confusing) so don't keep it
-    pub fn codegen_lookup(&self, name: usize) -> Option<(usize, bool)> {
+    pub fn codegen_lookup(&self, name: usize) -> Option<VarIndex> {
         let mut index = Some(self.current_scope);
         while let Some(i) = index {
             if let Some(entry) = self.scopes[i].symbols.get(&name) {
-                let var_index = entry.var_index;
-                let offset = self
-                    .get_func_scope(i)
-                    .map(|func_scope| match &self.scopes[func_scope].scope_type {
-                        ScopeType::Function {
-                            captures,
-                            func_index: _,
-                        } => captures.len(),
-                        ScopeType::Regular => panic!("Not reachable"),
-                    })
-                    .unwrap_or(0);
-                return Some((var_index + offset, false));
+                let index = entry.var_index;
+                return Some(VarIndex::Local(index));
             }
             if let ScopeType::Function {
                 captures,
@@ -224,7 +218,7 @@ impl SymbolTable {
                 return captures
                     .iter()
                     .position(|(n, _, _)| name == *n)
-                    .map(|index| (index, true));
+                    .map(|index| VarIndex::Capture(index));
             }
             index = self.scopes[i].parent;
         }
@@ -296,8 +290,18 @@ impl SymbolTable {
             parent_func_scope: self.get_func_scope(self.current_scope),
             parent: Some(self.current_scope),
         });
-        self.current_scope = func_scope;
         self.function_index += 1;
         func_scope
+    }
+
+    pub fn print_scope_chain(&self) {
+        let scope = self.current_scope;
+        print!("{}", scope);
+        let mut scope = self.scopes[scope].parent;
+        while let Some(s) = scope {
+            print!(" -> {}", s);
+            scope = self.scopes[s].parent;
+        }
+        println!();
     }
 }

@@ -583,34 +583,21 @@ impl TypeChecker {
     ) -> Result<Vec<Loc<StmtT>>, TypeError> {
         let pat_type = self.pat(&pat)?;
         let typed_rhs = self.expr(rhs)?;
-        if let Some(type_) = self.unify(pat_type, typed_rhs.inner.get_type()) {
-            let name = if let Pat::Id(name, _, _) = pat {
-                name
-            } else {
-                self.name_table.get_fresh_name()
-            };
-            self.symbol_table.insert_var(name, type_);
-            let mut pat_bindings =
-                self.generate_pattern_bindings(&pat, name, typed_rhs.inner.get_type(), location)?;
-            let mut bindings = vec![Loc {
-                location,
-                inner: StmtT::Asgn(name, typed_rhs),
-            }];
-            bindings.append(&mut pat_bindings);
-            Ok(bindings)
+        let type_ = self.unify_or_err(pat_type, typed_rhs.inner.get_type(), location)?;
+        let name = if let Pat::Id(name, _, _) = pat {
+            name
         } else {
-            let type1 = type_to_string(&self.name_table, &self.type_table, pat_type);
-            let type2 = type_to_string(
-                &self.name_table,
-                &self.type_table,
-                typed_rhs.inner.get_type(),
-            );
-            Err(TypeError::UnificationFailure {
-                location,
-                type1,
-                type2,
-            })
-        }
+            self.name_table.get_fresh_name()
+        };
+        self.symbol_table.insert_var(name, type_);
+        let mut pat_bindings =
+            self.generate_pattern_bindings(&pat, name, typed_rhs.inner.get_type(), location)?;
+        let mut bindings = vec![Loc {
+            location,
+            inner: StmtT::Asgn(name, typed_rhs),
+        }];
+        bindings.append(&mut pat_bindings);
+        Ok(bindings)
     }
 
     fn function(
@@ -838,9 +825,9 @@ impl TypeChecker {
                 })
             }
             Expr::Block(stmts, end_expr) => {
+                let scope_index = self.symbol_table.push_scope();
                 self.read_functions(&stmts)?;
                 let mut typed_stmts = Vec::new();
-                self.symbol_table.push_scope();
                 for stmt in stmts {
                     typed_stmts.append(&mut self.stmt(stmt)?);
                 }
@@ -850,7 +837,7 @@ impl TypeChecker {
                 } else {
                     (UNIT_INDEX, None)
                 };
-                let scope_index = self.symbol_table.restore_scope();
+                self.symbol_table.restore_scope();
                 Ok(Loc {
                     location,
                     inner: ExprT::Block {

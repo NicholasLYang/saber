@@ -2,7 +2,7 @@ use crate::ast::{ExprT, Function, Loc, Name, Op, ProgramT, StmtT, Type, TypeId, 
 use crate::lexer::LocationRange;
 use crate::printer::type_to_string;
 use crate::symbol_table::{
-    FunctionInfo, SymbolTable, ALLOC_INDEX, CLONE_INDEX, DEALLOC_INDEX, STREQ_INDEX,
+    FunctionInfo, SymbolTable, VarIndex, ALLOC_INDEX, CLONE_INDEX, DEALLOC_INDEX, STREQ_INDEX,
 };
 use crate::typechecker::{is_ref_type, TypeChecker};
 use crate::utils::{NameTable, TypeTable, FLOAT_INDEX, STR_INDEX};
@@ -265,16 +265,18 @@ impl CodeGenerator {
             OpCode::SetGlobal(0),
             OpCode::GetGlobal(0),
         ];
-        for (name, _, _) in captures.iter() {
+        for (i, (name, _, _)) in captures.iter().enumerate() {
             opcodes.push(OpCode::GetGlobal(0));
-            let (index, _) = self.symbol_table.codegen_lookup(*name).unwrap();
-            opcodes.push(OpCode::GetLocal(index.try_into().unwrap()));
-            opcodes.push(OpCode::I32Store(2, 0));
-            // ptr = ptr + 4;
-            opcodes.push(OpCode::GetGlobal(0));
-            opcodes.push(OpCode::I32Const(4));
-            opcodes.push(OpCode::I32Add);
-            opcodes.push(OpCode::SetGlobal(0));
+            match self.symbol_table.codegen_lookup(*name).unwrap() {
+                VarIndex::Local(index) => {
+                    opcodes.push(OpCode::GetLocal(index.try_into().unwrap()));
+                }
+                VarIndex::Capture(index) => {
+                    opcodes.push(OpCode::GetLocal(0)); // Captures are always first local
+                    opcodes.push(OpCode::I32Load(2, (index * 4).try_into().unwrap()));
+                }
+            }
+            opcodes.push(OpCode::I32Store(2, (i * 4).try_into().unwrap()));
         }
         opcodes.push(OpCode::SetLocal(var_index.try_into().unwrap()));
         self.symbol_table.swap_scope(old_scope);
@@ -448,10 +450,11 @@ impl CodeGenerator {
                 }
             }
             StmtT::Asgn(name, expr) => {
-                let (index, is_enclosed) = self.symbol_table.codegen_lookup(*name).unwrap();
-                let is_boxed_value = is_enclosed && !is_ref_type(expr.inner.get_type());
+                let entry = self.symbol_table.lookup_name(*name).unwrap();
+                let is_enclosed_var = entry.is_enclosed_var;
+                let var_index = entry.var_index;
                 let mut opcodes = Vec::new();
-                if is_boxed_value {
+                if is_enclosed_var {
                     opcodes.push(OpCode::I32Const(4));
                     opcodes.push(OpCode::Call(ALLOC_INDEX));
                     // Ugh why does wasm not have a dup operation?
@@ -460,10 +463,10 @@ impl CodeGenerator {
                     opcodes.push(OpCode::GetGlobal(0));
                 }
                 opcodes.append(&mut self.generate_expr(&expr)?);
-                if is_boxed_value {
+                if is_enclosed_var {
                     opcodes.push(OpCode::I32Store(2, 0));
                 }
-                opcodes.push(OpCode::SetLocal(index.try_into().unwrap()));
+                opcodes.push(OpCode::SetLocal(var_index.try_into().unwrap()));
                 /*
                 This works, except it gives an extra refcount when you initialize a value
                 if is_ref_type(expr.inner.get_type()) {
@@ -523,12 +526,15 @@ impl CodeGenerator {
     fn generate_expr(&mut self, expr: &Loc<ExprT>) -> Result<Vec<OpCode>> {
         match &expr.inner {
             ExprT::Primary { value, type_: _ } => self.generate_primary(value),
-            ExprT::Var { name, type_ } => {
-                let (index, is_enclosed) = self.symbol_table.codegen_lookup(*name).unwrap();
-                let mut opcodes = vec![OpCode::GetLocal(index.try_into().unwrap())];
-                if is_enclosed && !is_ref_type(*type_) {
-                    opcodes.push(OpCode::I32Load(2, 0));
-                }
+            ExprT::Var { name, type_: _ } => {
+                let index = self.symbol_table.codegen_lookup(*name).unwrap();
+                let opcodes = match index {
+                    VarIndex::Local(index) => vec![OpCode::GetLocal(index.try_into().unwrap())],
+                    VarIndex::Capture(index) => vec![
+                        OpCode::GetLocal(0),
+                        OpCode::I32Load(2, (index * 4).try_into().unwrap()),
+                    ],
+                };
                 Ok(opcodes)
             }
             ExprT::DirectCall {
