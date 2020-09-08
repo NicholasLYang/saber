@@ -40,5 +40,7 @@
   - Start figuring out LSP
 - Symbol Table
   - Clean up, oh man it's messy rn
-  - Consolidate var stuff into Entry and make an Option<FunctionInfo>
-  - Make it easier to get a function's captures. Consolidate function scope with function entry?
+  - ~~Consolidate var stuff into Entry and make an Option~~
+  - ~~Make it easier to get a function's captures. Consolidate function scope with function entry?~~  
+- Runtime
+  - Add closure captures as structs to runtime  

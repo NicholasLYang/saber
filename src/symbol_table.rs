@@ -22,8 +22,6 @@ pub enum ScopeType {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct SymbolEntry {
-    // Is the variable captured by a function?
-    pub is_enclosed_var: bool,
     pub var_index: usize,
     pub var_type: TypeId,
     pub function_info: Option<FunctionInfo>,
@@ -59,6 +57,9 @@ pub static ALLOC_INDEX: u32 = 0;
 pub static DEALLOC_INDEX: u32 = 1;
 pub static CLONE_INDEX: u32 = 2;
 pub static STREQ_INDEX: u32 = 3;
+pub static PRINT_INT_INDEX: u32 = 4;
+pub static PRINT_FLOAT_INDEX: u32 = 5;
+pub static PRINT_STRING_INDEX: u32 = 6;
 
 impl SymbolTable {
     pub fn new() -> Self {
@@ -149,7 +150,11 @@ impl SymbolTable {
         self.scopes[scope].symbols.iter()
     }
 
-    pub fn get_captures(&self, scope: usize) -> Option<&Vec<(Name, ScopeId, TypeId)>> {
+    pub fn get_captures(&self) -> Option<&Vec<(Name, ScopeId, TypeId)>> {
+        self.get_captures_in_scope(self.current_scope)
+    }
+
+    pub fn get_captures_in_scope(&self, scope: usize) -> Option<&Vec<(Name, ScopeId, TypeId)>> {
         match &self.scopes[scope].scope_type {
             ScopeType::Function {
                 captures,
@@ -188,8 +193,6 @@ impl SymbolTable {
                                 });
                             }
                         }
-                        let mut entry = self.scopes[i].symbols.get_mut(&name).unwrap();
-                        entry.is_enclosed_var = true;
                     }
                 }
                 return self.scopes[i].symbols.get(&name);
@@ -235,6 +238,7 @@ impl SymbolTable {
         }
     }
 
+    #[allow(dead_code)]
     pub fn get_parent_scope(&self, scope: ScopeId) -> Option<ScopeId> {
         self.scopes[scope].parent
     }
@@ -244,9 +248,8 @@ impl SymbolTable {
         self.scopes[self.current_scope].symbols.insert(
             name,
             SymbolEntry {
-                is_enclosed_var: false,
                 var_type,
-                var_index: self.var_types.len() - 1,
+                var_index: self.var_types.len(),
                 function_info: None,
             },
         );
@@ -270,8 +273,7 @@ impl SymbolTable {
         self.scopes[self.current_scope].symbols.insert(
             name,
             SymbolEntry {
-                is_enclosed_var: false,
-                var_index: self.var_types.len() - 1,
+                var_index: self.var_types.len(),
                 var_type: type_,
                 function_info: Some(FunctionInfo {
                     func_index: self.function_index,
@@ -294,6 +296,7 @@ impl SymbolTable {
         func_scope
     }
 
+    #[allow(dead_code)]
     pub fn print_scope_chain(&self) {
         let scope = self.current_scope;
         print!("{}", scope);

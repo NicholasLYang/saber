@@ -3,6 +3,7 @@ use crate::ast::{
     TypeId, TypeSig, UnaryOp, Value,
 };
 use crate::lexer::LocationRange;
+use crate::loc;
 use crate::printer::type_to_string;
 use crate::symbol_table::{FunctionInfo, ScopeId, SymbolTable};
 use crate::utils::{
@@ -79,6 +80,8 @@ pub struct TypeChecker {
     type_table: TypeTable,
     // Symbol table
     name_table: NameTable,
+    // Struct types
+    struct_types: Vec<(Name, TypeId)>,
 }
 
 fn build_type_names(name_table: &mut NameTable) -> HashMap<Name, TypeId> {
@@ -138,6 +141,7 @@ impl TypeChecker {
             type_var_index: 0,
             type_table,
             name_table,
+            struct_types: Vec::new(),
         }
     }
 
@@ -194,12 +198,11 @@ impl TypeChecker {
     }
 
     pub fn check_program(&mut self, program: Program) -> ProgramT {
-        let mut named_types = Vec::new();
         let mut errors = Vec::new();
         for type_def in program.type_defs {
             match self.type_def(type_def) {
-                Ok(named_type) => {
-                    named_types.push(named_type);
+                Ok(struct_type) => {
+                    self.struct_types.push(struct_type);
                 }
                 Err(err) => {
                     errors.push(err);
@@ -221,6 +224,8 @@ impl TypeChecker {
                 }
             }
         }
+        let mut named_types = Vec::new();
+        std::mem::swap(&mut named_types, &mut self.struct_types);
         ProgramT {
             stmts: typed_stmts,
             named_types,
@@ -600,6 +605,30 @@ impl TypeChecker {
         Ok(bindings)
     }
 
+    fn create_captures_tuple(&mut self, location: LocationRange) -> Option<Loc<ExprT>> {
+        let captures = self.symbol_table.get_captures().unwrap();
+        if captures.len() == 0 {
+            return None;
+        }
+        let mut fields = Vec::new();
+        let mut types = Vec::new();
+        for (name, _, type_) in captures {
+            fields.push(Loc {
+                location,
+                inner: ExprT::Var {
+                    name: *name,
+                    type_: *type_,
+                },
+            });
+            types.push(*type_);
+        }
+        let type_id = self.type_table.insert(Type::Tuple(types));
+        let name = self.name_table.get_fresh_name();
+        self.struct_types.push((name, type_id));
+        println!("NAME: {}, TYPE ID: {}", name, type_id);
+        Some(loc!(ExprT::Tuple(fields, type_id), location))
+    }
+
     fn function(
         &mut self,
         name: Name,
@@ -608,7 +637,6 @@ impl TypeChecker {
     ) -> Result<(Function, TypeId), TypeError> {
         let entry = self.symbol_table.lookup_name(name);
         let entry = entry.as_ref().unwrap();
-        // Yeah yeah this ain't pretty but the name should be there
         let func_info = entry.function_info.as_ref().unwrap();
         let type_ = entry.var_type;
         let scope = func_info.func_scope;
@@ -617,7 +645,7 @@ impl TypeChecker {
         let old_var_types = self.symbol_table.reset_vars();
         let func_params = self.get_func_params(&params)?;
         for (name, type_) in &func_params {
-            self.symbol_table.insert_var(name.clone(), *type_);
+            self.symbol_table.insert_var(*name, *type_);
         }
         // Save the current return type
         let mut old_return_type = self.return_type;
@@ -644,6 +672,8 @@ impl TypeChecker {
             self.type_table.update(return_type, Type::Unit);
         };
 
+        let captures = self.create_captures_tuple(body.location);
+
         let local_variables = self.symbol_table.restore_vars(old_var_types);
         let scope_index = self.symbol_table.restore_scope();
         Ok((
@@ -652,6 +682,7 @@ impl TypeChecker {
                 body: Box::new(body),
                 local_variables,
                 scope_index,
+                captures: captures.map(Box::new),
             },
             type_,
         ))

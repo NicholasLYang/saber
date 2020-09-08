@@ -2,7 +2,8 @@ use crate::ast::{ExprT, Function, Loc, Name, Op, ProgramT, StmtT, Type, TypeId, 
 use crate::lexer::LocationRange;
 use crate::printer::type_to_string;
 use crate::symbol_table::{
-    FunctionInfo, SymbolTable, VarIndex, ALLOC_INDEX, CLONE_INDEX, DEALLOC_INDEX, STREQ_INDEX,
+    FunctionInfo, SymbolTable, VarIndex, ALLOC_INDEX, CLONE_INDEX, DEALLOC_INDEX,
+    PRINT_STRING_INDEX, STREQ_INDEX,
 };
 use crate::typechecker::{is_ref_type, TypeChecker};
 use crate::utils::{NameTable, TypeTable, FLOAT_INDEX, STR_INDEX};
@@ -160,8 +161,6 @@ impl CodeGenerator {
         Ok(self.program_data)
     }
 
-    fn generate_start_function(&mut self) {}
-
     fn generate_top_level_stmt(&mut self, stmt: &Loc<StmtT>) -> Result<()> {
         match &stmt.inner {
             StmtT::Function {
@@ -172,6 +171,7 @@ impl CodeGenerator {
                     Function {
                         params,
                         local_variables,
+                        captures: _,
                         body,
                         scope_index,
                     },
@@ -237,6 +237,11 @@ impl CodeGenerator {
             .ok_or(GenerationError::NotReachable)?
             .func_index;
         let old_scope = self.symbol_table.swap_scope(scope);
+        println!(
+            "GENERATING FUNC {} IN SCOPE {}",
+            self.name_table.get_str(&name),
+            scope
+        );
         let (type_, body) =
             self.generate_function(return_type, params, local_variables, body, location)?;
         let type_index = self.program_data.insert_type(type_);
@@ -244,43 +249,6 @@ impl CodeGenerator {
         self.program_data.function_section[index] = Some(type_index);
         self.symbol_table.swap_scope(old_scope);
         Ok(index)
-    }
-
-    // Outer scope is scope that the function is defined in
-    // Func scope is the scope of the function
-    fn generate_function_captures(
-        &mut self,
-        var_index: usize,
-        func_scope_index: usize,
-    ) -> Vec<OpCode> {
-        let outer_scope_index = self
-            .symbol_table
-            .get_parent_scope(func_scope_index)
-            .unwrap();
-        let old_scope = self.symbol_table.swap_scope(outer_scope_index);
-        let captures = self.symbol_table.get_captures(func_scope_index).unwrap();
-        let mut opcodes = vec![
-            OpCode::I32Const((captures.len() * 4).try_into().unwrap()),
-            OpCode::Call(ALLOC_INDEX),
-            OpCode::SetGlobal(0),
-            OpCode::GetGlobal(0),
-        ];
-        for (i, (name, _, _)) in captures.iter().enumerate() {
-            opcodes.push(OpCode::GetGlobal(0));
-            match self.symbol_table.codegen_lookup(*name).unwrap() {
-                VarIndex::Local(index) => {
-                    opcodes.push(OpCode::GetLocal(index.try_into().unwrap()));
-                }
-                VarIndex::Capture(index) => {
-                    opcodes.push(OpCode::GetLocal(0)); // Captures are always first local
-                    opcodes.push(OpCode::I32Load(2, (index * 4).try_into().unwrap()));
-                }
-            }
-            opcodes.push(OpCode::I32Store(2, (i * 4).try_into().unwrap()));
-        }
-        opcodes.push(OpCode::SetLocal(var_index.try_into().unwrap()));
-        self.symbol_table.swap_scope(old_scope);
-        opcodes
     }
 
     pub fn generate_function(
@@ -390,10 +358,19 @@ impl CodeGenerator {
                     Function {
                         params,
                         local_variables,
+                        captures,
                         body,
                         scope_index,
                     },
             } => {
+                let var_index = self.symbol_table.lookup_name(*name).unwrap().var_index;
+                let opcodes = if let Some(captures) = captures.as_ref() {
+                    let mut opcodes = self.generate_expr(captures)?;
+                    opcodes.push(OpCode::SetLocal(var_index.try_into().unwrap()));
+                    opcodes
+                } else {
+                    Vec::new()
+                };
                 let old_scope = self.symbol_table.swap_scope(*scope_index);
                 self.generate_function_binding(
                     *name,
@@ -404,8 +381,6 @@ impl CodeGenerator {
                     body,
                     stmt.location,
                 )?;
-                let var_index = self.symbol_table.lookup_name(*name).unwrap().var_index;
-                let opcodes = self.generate_function_captures(var_index, *scope_index);
                 self.symbol_table.swap_scope(old_scope);
                 Ok(opcodes)
             }
@@ -442,21 +417,11 @@ impl CodeGenerator {
             }
             StmtT::Asgn(name, expr) => {
                 let entry = self.symbol_table.lookup_name(*name).unwrap();
-                let is_enclosed_var = entry.is_enclosed_var;
                 let var_index = entry.var_index;
-                let mut opcodes = Vec::new();
-                if is_enclosed_var {
-                    opcodes.push(OpCode::I32Const(4));
-                    opcodes.push(OpCode::Call(ALLOC_INDEX));
-                    // Ugh why does wasm not have a dup operation?
-                    opcodes.push(OpCode::SetGlobal(0));
-                    opcodes.push(OpCode::GetGlobal(0));
-                    opcodes.push(OpCode::GetGlobal(0));
-                }
-                opcodes.append(&mut self.generate_expr(&expr)?);
-                if is_enclosed_var {
-                    opcodes.push(OpCode::I32Store(2, 0));
-                }
+                let mut opcodes = self.generate_expr(&expr)?;
+                println!("NAME: {} {}", name, self.name_table.get_str(name));
+                println!("VAR INDEX: {}", var_index);
+                println!("EXPR: {:?}", expr);
                 opcodes.push(OpCode::SetLocal(var_index.try_into().unwrap()));
                 Ok(opcodes)
             }
@@ -512,13 +477,21 @@ impl CodeGenerator {
         match &expr.inner {
             ExprT::Primary { value, type_: _ } => self.generate_primary(value),
             ExprT::Var { name, type_: _ } => {
+                println!(
+                    "NAME: {} SCOPE: {}",
+                    self.name_table.get_str(name),
+                    self.symbol_table.current_scope
+                );
                 let index = self.symbol_table.codegen_lookup(*name).unwrap();
                 let opcodes = match index {
                     VarIndex::Local(index) => vec![OpCode::GetLocal(index.try_into().unwrap())],
-                    VarIndex::Capture(index) => vec![
-                        OpCode::GetLocal(0),
-                        OpCode::I32Load(2, (index * 4).try_into().unwrap()),
-                    ],
+                    VarIndex::Capture(index) => {
+                        let index = index + 1;
+                        vec![
+                            OpCode::GetLocal(0),
+                            OpCode::I32Load(2, (index * 4).try_into().unwrap()),
+                        ]
+                    }
                 };
                 Ok(opcodes)
             }
@@ -528,7 +501,13 @@ impl CodeGenerator {
                 args,
                 type_: _,
             } => {
-                let mut opcodes = vec![OpCode::GetLocal((*captures_index).try_into().unwrap())];
+                // NOTE: This is super brittle again, as if we add another runtime function,
+                // we'll need to change this comparison
+                let mut opcodes = if *callee <= PRINT_STRING_INDEX.try_into().unwrap() {
+                    Vec::new()
+                } else {
+                    vec![OpCode::GetLocal((*captures_index).try_into().unwrap())]
+                };
                 opcodes.append(&mut self.generate_expr(args)?);
                 opcodes.push(OpCode::Call((*callee).try_into().unwrap()));
                 Ok(opcodes)
@@ -557,6 +536,7 @@ impl CodeGenerator {
                     Function {
                         params,
                         body,
+                        captures,
                         local_variables,
                         scope_index,
                     },
@@ -582,7 +562,13 @@ impl CodeGenerator {
                 )?;
                 self.program_data.elements_section.elems.push(index);
                 let table_index = self.program_data.elements_section.elems.len() - 1;
-                Ok(vec![OpCode::I32Const(table_index.try_into().unwrap())])
+                let mut opcodes = if let Some(captures) = captures.as_ref() {
+                    self.generate_expr(captures)?
+                } else {
+                    vec![OpCode::I32Const(0)]
+                };
+                opcodes.push(OpCode::I32Const(table_index.try_into().unwrap()));
+                Ok(opcodes)
             }
             ExprT::Tuple(elems, type_id) => {
                 if elems.len() == 0 {
@@ -597,7 +583,7 @@ impl CodeGenerator {
                 type_: _,
                 scope_index,
             } => {
-                self.symbol_table.swap_scope(*scope_index);
+                let old_scope = self.symbol_table.swap_scope(*scope_index);
                 let mut opcodes = Vec::new();
                 for stmt in stmts {
                     opcodes.append(&mut self.generate_stmt(stmt, false)?);
@@ -607,11 +593,12 @@ impl CodeGenerator {
                 }
                 let entries = self.symbol_table.get_scope_entries(*scope_index);
                 for (_, entry) in entries {
-                    if is_ref_type(entry.var_type) || entry.is_enclosed_var {
+                    if is_ref_type(entry.var_type) {
                         opcodes.push(OpCode::GetLocal((entry.var_index).try_into().unwrap()));
                         opcodes.push(OpCode::Call(DEALLOC_INDEX));
                     }
                 }
+                self.symbol_table.swap_scope(old_scope);
                 Ok(opcodes)
             }
             ExprT::If(cond, then_block, else_block, type_) => {
@@ -723,6 +710,7 @@ impl CodeGenerator {
     where
         I: Iterator<Item = &'a Loc<ExprT>>,
     {
+        let mut offset = 0;
         // We add 1 field for type id
         let length = length + 1;
         // Since all types are either pointers or 32 bit ints/floats,
@@ -742,12 +730,8 @@ impl CodeGenerator {
         // TODO: Add proper error handling for too many types.
         opcodes.push(OpCode::I32Const(type_id.try_into().unwrap()));
         // *ptr = type_id
-        opcodes.push(OpCode::I32Store(2, 0));
-        opcodes.push(OpCode::GetGlobal(0));
-        opcodes.push(OpCode::I32Const(4));
-        opcodes.push(OpCode::I32Add);
-        opcodes.push(OpCode::SetGlobal(0));
-
+        opcodes.push(OpCode::I32Store(2, offset));
+        offset += 4;
         // We need to write the struct to memory. This consists of
         // looping through entries, generating the opcodes and
         // storing them in the heap
@@ -755,7 +739,7 @@ impl CodeGenerator {
             // No, you're not seeing double. We push
             // the value of Global 0 to "save" it
             // in case it gets mutated when we generate
-            // the field.
+            // the struct.
             opcodes.push(OpCode::GetGlobal(0));
             // We push it again as an address for store
             opcodes.push(OpCode::GetGlobal(0));
@@ -765,8 +749,8 @@ impl CodeGenerator {
                 .unwrap_or(WasmType::Empty);
             let store_code = match wasm_type {
                 // Alignment of 2, offset of 0
-                WasmType::i32 => OpCode::I32Store(2, 0),
-                WasmType::f32 => OpCode::F32Store(2, 0),
+                WasmType::i32 => OpCode::I32Store(2, offset),
+                WasmType::f32 => OpCode::F32Store(2, offset),
                 _ => {
                     return Err(GenerationError::NotImplemented {
                         reason: "Cannot generate code to store types other than i32 and f32",
@@ -774,16 +758,11 @@ impl CodeGenerator {
                 }
             };
             opcodes.push(store_code);
-            // We restore here. g1 is already on the stack
-            // so we add 4 to it and save
-            opcodes.push(OpCode::I32Const(4));
-            opcodes.push(OpCode::I32Add);
             opcodes.push(OpCode::SetGlobal(0));
+            offset += 4;
         }
         // return heap_ptr - sizeof(record)
         opcodes.push(OpCode::GetGlobal(0));
-        opcodes.push(OpCode::I32Const(record_size));
-        opcodes.push(OpCode::I32Sub);
         Ok(opcodes)
     }
 

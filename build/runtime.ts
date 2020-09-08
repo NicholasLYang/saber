@@ -99,7 +99,10 @@ export const dealloc = (memory: WebAssembly.Memory) => (bytePtr: number) => {
             return;
         }
         if (!(typeId in typeInfo)) {
-            throw new Error(`RuntimeError: Invalid type for struct. Most likely internal error`);
+            console.error(typeInfo);
+            console.log(`PTR: ${bytePtr}`);
+            printHeap(memory);
+            throw new Error(`RuntimeError: Invalid type ${typeId} for struct. Most likely internal error`);
         }
         const structInfo = typeInfo[typeId];
         structInfo.forEach((isRef: boolean, index: number) => {

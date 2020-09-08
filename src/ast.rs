@@ -183,6 +183,7 @@ pub struct Function {
     pub body: Box<Loc<ExprT>>,
     pub local_variables: Vec<TypeId>,
     pub scope_index: usize,
+    pub captures: Option<Box<Loc<ExprT>>>,
 }
 
 impl fmt::Display for Value {
