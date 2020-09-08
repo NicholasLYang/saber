@@ -224,7 +224,6 @@ impl TypeChecker {
                 }
             }
         }
-        println!("{:?}", self.struct_types);
         let mut named_types = Vec::new();
         std::mem::swap(&mut named_types, &mut self.struct_types);
         ProgramT {

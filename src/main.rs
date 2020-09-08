@@ -83,7 +83,6 @@ fn read_file(file_name: &str) -> Result<()> {
     }
     let mut typechecker = TypeChecker::new(parser.get_name_table());
     let program_t = typechecker.check_program(program);
-    println!("{:?}", program_t.named_types);
     let runtime_type_info = typechecker.generate_runtime_type_info(&program_t.named_types);
     for error in &program_t.errors {
         println!("{}", error);

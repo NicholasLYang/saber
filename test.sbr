@@ -2,7 +2,6 @@ let foo = \() => {
   let a = "Testing";
   let bar = \() => {
     let b = 20;
-    printString(a);
   }
   bar();
 }
