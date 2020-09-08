@@ -14,8 +14,9 @@
   - Constraint solve type variables (kinda done?)
   - Add sum and product types
   - Add generics
-- Lexical Analysis
-  - Get closures working  
+- Closures
+  - ~~Get closures working~~
+  - Get anonymous closures working  
 - Code gen
   - ~~Get something working.~~
   - ~~Add local variables~~
@@ -43,4 +44,4 @@
   - ~~Consolidate var stuff into Entry and make an Option~~
   - ~~Make it easier to get a function's captures. Consolidate function scope with function entry?~~  
 - Runtime
-  - Add closure captures as structs to runtime  
+  - ~~Add closure captures as structs to runtime~~  
