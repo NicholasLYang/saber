@@ -1,9 +1,11 @@
 let foo = \() => {
-  let a = "Testing";
+  let str = "Hello";
   let bar = \() => {
-    let b = 20;
+    return \() => {
+      printString(str);
+    };
   }
-  bar();
+  bar()();
 }
 
 export foo;

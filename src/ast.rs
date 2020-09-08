@@ -148,6 +148,7 @@ pub enum ExprT {
         function: Function,
         type_: TypeId,
         name: Name,
+        table_index: usize,
     },
     Record {
         name: Name,
@@ -340,6 +341,7 @@ impl ExprT {
             ExprT::Function {
                 function: _,
                 name: _,
+                table_index: _,
                 type_,
             } => *type_,
             ExprT::Field(_, _, type_) => *type_,

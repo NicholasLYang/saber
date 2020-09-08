@@ -55,9 +55,12 @@ pub enum VarIndex {
 
 pub static ALLOC_INDEX: u32 = 0;
 pub static DEALLOC_INDEX: u32 = 1;
+#[allow(dead_code)]
 pub static CLONE_INDEX: u32 = 2;
 pub static STREQ_INDEX: u32 = 3;
+#[allow(dead_code)]
 pub static PRINT_INT_INDEX: u32 = 4;
+#[allow(dead_code)]
 pub static PRINT_FLOAT_INDEX: u32 = 5;
 pub static PRINT_STRING_INDEX: u32 = 6;
 
@@ -267,7 +270,7 @@ impl SymbolTable {
         params_type: TypeId,
         return_type: TypeId,
         type_: TypeId,
-    ) -> ScopeId {
+    ) -> usize {
         self.var_types.push(type_);
         let func_scope = self.scopes.len();
         self.scopes[self.current_scope].symbols.insert(
@@ -292,8 +295,9 @@ impl SymbolTable {
             parent_func_scope: self.get_func_scope(self.current_scope),
             parent: Some(self.current_scope),
         });
+        let func_index = self.function_index;
         self.function_index += 1;
-        func_scope
+        func_index
     }
 
     #[allow(dead_code)]

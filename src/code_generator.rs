@@ -2,8 +2,8 @@ use crate::ast::{ExprT, Function, Loc, Name, Op, ProgramT, StmtT, Type, TypeId, 
 use crate::lexer::LocationRange;
 use crate::printer::type_to_string;
 use crate::symbol_table::{
-    FunctionInfo, SymbolTable, VarIndex, ALLOC_INDEX, CLONE_INDEX, DEALLOC_INDEX,
-    PRINT_STRING_INDEX, STREQ_INDEX,
+    FunctionInfo, SymbolTable, VarIndex, ALLOC_INDEX, DEALLOC_INDEX, PRINT_STRING_INDEX,
+    STREQ_INDEX,
 };
 use crate::typechecker::{is_ref_type, TypeChecker};
 use crate::utils::{NameTable, TypeTable, FLOAT_INDEX, STR_INDEX};
@@ -59,13 +59,14 @@ type Result<T> = std::result::Result<T, GenerationError>;
 
 impl CodeGenerator {
     pub fn new(typechecker: TypeChecker) -> Self {
+        let expr_func_count = typechecker.get_expr_func_index();
         let (symbol_table, name_table, type_table) = typechecker.get_tables();
         let func_count = symbol_table.get_function_index();
         CodeGenerator {
             symbol_table,
             name_table,
             type_table,
-            program_data: ProgramData::new(func_count),
+            program_data: ProgramData::new(func_count, expr_func_count),
             return_type: None,
         }
     }
@@ -305,17 +306,25 @@ impl CodeGenerator {
         })
     }
 
-    fn get_args_type(&self, arg_type: TypeId, location: LocationRange) -> Result<Vec<WasmType>> {
+    fn get_args_type(
+        &self,
+        arg_type: TypeId,
+        location: LocationRange,
+        mut initial_args: Vec<WasmType>,
+    ) -> Result<Vec<WasmType>> {
         if let Type::Tuple(elems) = self.type_table.get_type(arg_type) {
-            let mut wasm_types = Vec::new();
+            let mut wasm_types = initial_args;
             for elem in elems {
-                wasm_types.append(&mut self.get_args_type(*elem, location)?);
+                wasm_types = self.get_args_type(*elem, location, wasm_types)?;
             }
             Ok(wasm_types)
         } else {
             let wasm_type = match self.generate_wasm_type(arg_type, location)? {
-                Some(t) => vec![t],
-                None => Vec::new(),
+                Some(t) => {
+                    initial_args.push(t);
+                    initial_args
+                }
+                None => initial_args,
             };
             Ok(wasm_type)
         }
@@ -504,21 +513,35 @@ impl CodeGenerator {
                 args,
                 type_,
             } => {
-                let args_wasm_type = self.get_args_type(args.inner.get_type(), args.location)?;
+                let args_wasm_type =
+                    self.get_args_type(args.inner.get_type(), args.location, vec![WasmType::i32])?;
                 let return_wasm_type = self.generate_wasm_type(*type_, expr.location)?;
                 let func_type = FunctionType {
                     param_types: args_wasm_type,
                     return_type: return_wasm_type,
                 };
                 let type_sig_index = self.program_data.insert_type(func_type);
-                let mut opcodes = self.generate_expr(args)?;
+                // We have a GetGlobal here because global #1 always needs to
+                // be restored to its original value after CallIndirect
+                //
+                // Why global #1? Well we don't have that same discipline with global #0
+                // And we need to use it across generate_expr which is tricky
+                let mut opcodes = vec![OpCode::GetGlobal(1)];
                 opcodes.append(&mut self.generate_expr(callee)?);
+                opcodes.push(OpCode::SetGlobal(1));
+                opcodes.push(OpCode::GetGlobal(1));
+                opcodes.push(OpCode::I32Load(2, 8));
+                opcodes.append(&mut self.generate_expr(args)?);
+                opcodes.push(OpCode::GetGlobal(1));
+                opcodes.push(OpCode::I32Load(2, 4));
                 opcodes.push(OpCode::CallIndirect(type_sig_index.try_into().unwrap()));
+                opcodes.push(OpCode::SetGlobal(1));
                 Ok(opcodes)
             }
             ExprT::Function {
                 name,
                 type_,
+                table_index,
                 function:
                     Function {
                         params,
@@ -538,7 +561,7 @@ impl CodeGenerator {
                         location: expr.location,
                     });
                 };
-                let index = self.generate_function_binding(
+                let func_index = self.generate_function_binding(
                     *name,
                     *scope_index,
                     params,
@@ -547,15 +570,9 @@ impl CodeGenerator {
                     body,
                     expr.location,
                 )?;
-                self.program_data.elements_section.elems.push(index);
-                let table_index = self.program_data.elements_section.elems.len() - 1;
-                let mut opcodes = if let Some(captures) = captures.as_ref() {
-                    self.generate_expr(captures)?
-                } else {
-                    vec![OpCode::I32Const(0)]
-                };
-                opcodes.push(OpCode::I32Const(table_index.try_into().unwrap()));
-                Ok(opcodes)
+                self.program_data.elements_section.elems[*table_index] = Some(func_index);
+                let captures = captures.as_ref().unwrap();
+                self.generate_expr(captures)
             }
             ExprT::Tuple(elems, type_id) => {
                 if elems.len() == 0 {

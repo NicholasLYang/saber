@@ -151,7 +151,7 @@ pub struct ProgramData {
 }
 
 impl ProgramData {
-    pub fn new(func_count: usize) -> Self {
+    pub fn new(func_count: usize, expr_func_count: usize) -> Self {
         let import_section = vec![ImportEntry {
             module_str: "mem".as_bytes().to_vec(),
             field_str: "heap".as_bytes().to_vec(),
@@ -165,17 +165,26 @@ impl ProgramData {
             type_section: Vec::new(),
             import_section,
             function_section: vec![None; func_count],
-            global_section: vec![(
-                GlobalType {
-                    content_type: WasmType::i32,
-                    mutability: true,
-                },
-                vec![OpCode::I32Const(0)],
-            )],
+            global_section: vec![
+                (
+                    GlobalType {
+                        content_type: WasmType::i32,
+                        mutability: true,
+                    },
+                    vec![OpCode::I32Const(0)],
+                ),
+                (
+                    GlobalType {
+                        content_type: WasmType::i32,
+                        mutability: true,
+                    },
+                    vec![OpCode::I32Const(0)],
+                ),
+            ],
             exports_section: Vec::new(),
             elements_section: ElemSegment {
                 offset: vec![OpCode::I32Const(0), OpCode::End],
-                elems: Vec::new(),
+                elems: vec![None; expr_func_count],
             },
             code_section: vec![None; func_count],
             data_section: Vec::new(),
@@ -197,7 +206,7 @@ impl ProgramData {
 pub struct ElemSegment {
     pub offset: Vec<OpCode>,
     // List of function indices
-    pub elems: Vec<usize>,
+    pub elems: Vec<Option<usize>>,
 }
 
 #[derive(Debug)]

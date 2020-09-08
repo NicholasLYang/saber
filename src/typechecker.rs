@@ -11,6 +11,7 @@ use crate::utils::{
 };
 use im::hashmap::HashMap;
 use serde::{Deserialize, Serialize};
+use std::convert::TryInto;
 use std::sync::Arc;
 
 #[derive(Debug, Fail, Clone, PartialEq, Serialize, Deserialize)]
@@ -82,6 +83,8 @@ pub struct TypeChecker {
     name_table: NameTable,
     // Struct types
     struct_types: Vec<(Name, TypeId)>,
+    // Expr function index. Used for codegen
+    expr_func_index: usize,
 }
 
 fn build_type_names(name_table: &mut NameTable) -> HashMap<Name, TypeId> {
@@ -142,11 +145,16 @@ impl TypeChecker {
             type_table,
             name_table,
             struct_types: Vec::new(),
+            expr_func_index: 0,
         }
     }
 
     pub fn get_tables(self) -> (SymbolTable, NameTable, TypeTable) {
         (self.symbol_table, self.name_table, self.type_table)
+    }
+
+    pub fn get_expr_func_index(&self) -> usize {
+        self.expr_func_index
     }
 
     #[allow(dead_code)]
@@ -768,13 +776,36 @@ impl TypeChecker {
                     .insert(Type::Arrow(params_type, return_type));
                 self.symbol_table
                     .insert_function(name, params_type, return_type, type_);
+
                 let (function, type_) = self.function(name, params, *body)?;
+                let mut function = function;
+                let table_index = self.expr_func_index;
+                let table_index_expr = ExprT::Primary {
+                    value: Value::Integer(table_index.try_into().unwrap()),
+                    type_: INT_INDEX,
+                };
+                let mut capture_struct_fields = vec![loc!(table_index_expr, expr.location)];
+                let mut capture_struct_type = vec![INT_INDEX];
+                if let Some(captures) = function.captures {
+                    let captures_type = captures.inner.get_type();
+                    capture_struct_type.push(captures_type);
+                    capture_struct_fields.push(*captures);
+                }
+                let type_id = self.type_table.insert(Type::Tuple(capture_struct_type));
+                self.struct_types
+                    .push((self.name_table.get_fresh_name(), type_id));
+                function.captures = Some(Box::new(loc!(
+                    ExprT::Tuple(capture_struct_fields, type_id),
+                    expr.location
+                )));
+                self.expr_func_index += 1;
                 let func = Loc {
                     location,
                     inner: ExprT::Function {
                         function,
                         type_,
                         name,
+                        table_index,
                     },
                 };
                 Ok(func)

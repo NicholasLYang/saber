@@ -287,7 +287,7 @@ impl Emitter {
         opcodes.append(&mut segment.offset);
         opcodes.push(OpCode::Count(usize_to_u32(segment.elems.len())?));
         for index in segment.elems {
-            opcodes.push(OpCode::Index(usize_to_u32(index)?));
+            opcodes.push(OpCode::Index(usize_to_u32(index.unwrap())?));
         }
         self.write_section(opcodes)
     }
