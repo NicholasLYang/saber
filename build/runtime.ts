@@ -1,4 +1,4 @@
-const { typeInfo, STR_INDEX } = require("./type_info.js");
+import { typeInfo, STR_INDEX } from "./type_info";
 
 export const printHeap = (memory: WebAssembly.Memory) => {
     const memArray = new Uint8Array(memory.buffer);

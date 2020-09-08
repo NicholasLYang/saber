@@ -1,8 +1,8 @@
 let foo = \() => {
-  let a = 12;
+  let a = "Testing";
   let bar = \() => {
     let b = 20;
-    printInt(a);
+    printString(a);
   }
   bar();
 }

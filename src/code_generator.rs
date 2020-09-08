@@ -237,11 +237,6 @@ impl CodeGenerator {
             .ok_or(GenerationError::NotReachable)?
             .func_index;
         let old_scope = self.symbol_table.swap_scope(scope);
-        println!(
-            "GENERATING FUNC {} IN SCOPE {}",
-            self.name_table.get_str(&name),
-            scope
-        );
         let (type_, body) =
             self.generate_function(return_type, params, local_variables, body, location)?;
         let type_index = self.program_data.insert_type(type_);
@@ -419,9 +414,6 @@ impl CodeGenerator {
                 let entry = self.symbol_table.lookup_name(*name).unwrap();
                 let var_index = entry.var_index;
                 let mut opcodes = self.generate_expr(&expr)?;
-                println!("NAME: {} {}", name, self.name_table.get_str(name));
-                println!("VAR INDEX: {}", var_index);
-                println!("EXPR: {:?}", expr);
                 opcodes.push(OpCode::SetLocal(var_index.try_into().unwrap()));
                 Ok(opcodes)
             }
@@ -477,11 +469,6 @@ impl CodeGenerator {
         match &expr.inner {
             ExprT::Primary { value, type_: _ } => self.generate_primary(value),
             ExprT::Var { name, type_: _ } => {
-                println!(
-                    "NAME: {} SCOPE: {}",
-                    self.name_table.get_str(name),
-                    self.symbol_table.current_scope
-                );
                 let index = self.symbol_table.codegen_lookup(*name).unwrap();
                 let opcodes = match index {
                     VarIndex::Local(index) => vec![OpCode::GetLocal(index.try_into().unwrap())],

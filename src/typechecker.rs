@@ -5,7 +5,7 @@ use crate::ast::{
 use crate::lexer::LocationRange;
 use crate::loc;
 use crate::printer::type_to_string;
-use crate::symbol_table::{FunctionInfo, ScopeId, SymbolTable};
+use crate::symbol_table::{FunctionInfo, SymbolTable};
 use crate::utils::{
     NameTable, TypeTable, BOOL_INDEX, CHAR_INDEX, FLOAT_INDEX, INT_INDEX, STR_INDEX, UNIT_INDEX,
 };
@@ -224,6 +224,7 @@ impl TypeChecker {
                 }
             }
         }
+        println!("{:?}", self.struct_types);
         let mut named_types = Vec::new();
         std::mem::swap(&mut named_types, &mut self.struct_types);
         ProgramT {
@@ -625,7 +626,6 @@ impl TypeChecker {
         let type_id = self.type_table.insert(Type::Tuple(types));
         let name = self.name_table.get_fresh_name();
         self.struct_types.push((name, type_id));
-        println!("NAME: {}, TYPE ID: {}", name, type_id);
         Some(loc!(ExprT::Tuple(fields, type_id), location))
     }
 

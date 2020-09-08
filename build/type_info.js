@@ -1,1 +1,4 @@
-const typeInfo = {14:[true]};const STR_INDEX = 3;module.exports = {typeInfo, STR_INDEX};
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.typeInfo = { 15: [true] };
+exports.STR_INDEX = 3;
