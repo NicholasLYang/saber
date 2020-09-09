@@ -849,6 +849,15 @@ impl TypeChecker {
                         }) = entry.function_info
                         {
                             let captures_index = entry.var_index;
+                            println!(
+                                "PARAMS TYPE {} RETURN TYPE {}",
+                                type_to_string(&self.name_table, &self.type_table, params_type),
+                                type_to_string(
+                                    &self.name_table,
+                                    &self.type_table,
+                                    typed_args.inner.get_type()
+                                )
+                            );
                             self.unify_or_err(params_type, typed_args.inner.get_type(), location)?;
                             return Ok(Loc {
                                 location,
@@ -999,7 +1008,8 @@ impl TypeChecker {
     fn op(&mut self, op: &Op, lhs_type: TypeId, rhs_type: TypeId) -> Option<TypeId> {
         match op {
             Op::Plus | Op::Minus | Op::Times | Op::Div => {
-                if lhs_type == INT_INDEX && rhs_type == INT_INDEX {
+                if self.is_unifiable(lhs_type, INT_INDEX) && self.is_unifiable(rhs_type, INT_INDEX)
+                {
                     Some(INT_INDEX)
                 } else if lhs_type == FLOAT_INDEX && rhs_type == INT_INDEX {
                     Some(FLOAT_INDEX)
@@ -1107,14 +1117,16 @@ impl TypeChecker {
             }
             (Type::Int, Type::Bool) => Some(type_id1),
             (Type::Bool, Type::Int) => Some(type_id2),
-            (Type::Var(_), t) => {
-                self.type_table.update(type_id1, t.clone());
+            (Type::Var(_), _) => {
+                self.type_table.update(type_id1, Type::Solved(type_id2));
                 Some(type_id2)
             }
-            (t, Type::Var(_)) => {
-                self.type_table.update(type_id2, t.clone());
+            (_, Type::Var(_)) => {
+                self.type_table.update(type_id2, Type::Solved(type_id1));
                 Some(type_id1)
             }
+            (Type::Solved(t1), _) => self.unify(t1, type_id2),
+            (_, Type::Solved(t2)) => self.unify(type_id1, t2),
             _ => None,
         }
     }

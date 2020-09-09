@@ -1,11 +1,8 @@
 let foo = \() => {
-  let str = "Hello";
-  let bar = \() => {
-    return \() => {
-      printString(str);
-    };
+  let bar = a => {
+    return a + 5;
   }
-  bar()();
+  printInt(bar(10));
 }
 
 export foo;

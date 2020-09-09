@@ -168,6 +168,16 @@ impl<'input> Parser<'input> {
         tok
     }
 
+    fn bump_or_err(
+        &mut self,
+        expected_tokens: Vec<TokenDiscriminants>,
+    ) -> Result<Loc<Token>, Loc<ParseError>> {
+        self.bump()?.ok_or(loc!(
+            ParseError::EndOfFile { expected_tokens },
+            LocationRange(self.lexer.current_location, self.lexer.current_location)
+        ))
+    }
+
     #[allow(dead_code)]
     fn peek(&mut self) -> Result<(), Loc<ParseError>> {
         let tok = self.bump()?;
@@ -253,27 +263,21 @@ impl<'input> Parser<'input> {
     }
 
     fn id(&mut self) -> Result<(Name, LocationRange), Loc<ParseError>> {
-        match self.bump()? {
-            Some(Loc {
+        match self.bump_or_err(vec![TokenDiscriminants::Ident])? {
+            Loc {
                 inner: Token::Ident(id),
                 location,
-            }) => Ok((id, location)),
-            Some(Loc {
+            } => Ok((id, location)),
+            Loc {
                 inner: token,
                 location,
-            }) => Err(loc!(
+            } => Err(loc!(
                 ParseError::UnexpectedToken {
                     token: token_to_string(&self.lexer.name_table, &token),
                     token_type: token.into(),
                     expected_tokens: format!("{}", TokenDiscriminants::Ident),
                 },
                 location
-            )),
-            None => Err(loc!(
-                ParseError::EndOfFile {
-                    expected_tokens: vec![TokenDiscriminants::Ident],
-                },
-                LocationRange(self.lexer.current_location, self.lexer.current_location),
             )),
         }
     }
@@ -297,102 +301,79 @@ impl<'input> Parser<'input> {
     }
 
     pub fn stmt(&mut self) -> Result<Option<Loc<Stmt>>, Loc<ParseError>> {
-        if let Some(Loc {
-            inner: token,
-            location,
-        }) = self.bump()?
-        {
-            let res = match token {
-                Token::Let => self.let_stmt(location),
-                Token::Return => self.return_stmt(location),
-                Token::Export => self.export_stmt(location),
-                Token::If => {
-                    let if_expr = self.if_expr(location)?;
-                    let location = if_expr.location;
-                    Ok(loc!(Stmt::Expr(if_expr), location))
-                }
-                token => {
-                    self.pushback(loc!(token, location));
-                    self.expression_stmt()
-                }
-            };
-            match res {
-                Ok(res) => Ok(Some(res)),
-                Err(Loc {
+        let span = self.bump_or_err(vec![
+            TokenDiscriminants::Let,
+            TokenDiscriminants::Return,
+            TokenDiscriminants::Export,
+        ])?;
+        let location = span.location;
+        let res = match span.inner {
+            Token::Let => self.let_stmt(location),
+            Token::Return => self.return_stmt(location),
+            Token::Export => self.export_stmt(location),
+            Token::If => {
+                let if_expr = self.if_expr(location)?;
+                let location = if_expr.location;
+                Ok(loc!(Stmt::Expr(if_expr), location))
+            }
+            token => {
+                self.pushback(loc!(token, location));
+                self.expression_stmt()
+            }
+        };
+        match res {
+            Ok(res) => Ok(Some(res)),
+            Err(Loc {
+                location,
+                inner: ParseError::EndOfFile { expected_tokens },
+            }) => {
+                return Err(Loc {
                     location,
                     inner: ParseError::EndOfFile { expected_tokens },
-                }) => {
-                    return Err(Loc {
-                        location,
-                        inner: ParseError::EndOfFile { expected_tokens },
-                    })
-                }
-                Err(err) => {
-                    // Special case if the unexpected token is a semicolon
-                    // since that's our recovery token
-                    if let ParseError::UnexpectedToken {
-                        token: _,
-                        token_type,
-                        expected_tokens: _,
-                    } = &err.inner
-                    {
-                        if token_type == &TokenDiscriminants::Semicolon {
-                            self.errors.push(err);
-                            return Ok(None);
-                        }
-                    }
-                    self.errors.push(err);
-                    self.recover_from_error(TokenDiscriminants::Semicolon)?;
-                    Ok(None)
-                }
+                })
             }
-        } else {
-            return Err(Loc {
-                location: LocationRange(self.lexer.current_location, self.lexer.current_location),
-                inner: ParseError::EndOfFile {
-                    expected_tokens: vec![
-                        TokenDiscriminants::Let,
-                        TokenDiscriminants::Return,
-                        TokenDiscriminants::Export,
-                    ],
-                },
-            });
+            Err(err) => {
+                // Special case if the unexpected token is a semicolon
+                // since that's our recovery token
+                if let ParseError::UnexpectedToken {
+                    token: _,
+                    token_type,
+                    expected_tokens: _,
+                } = &err.inner
+                {
+                    if token_type == &TokenDiscriminants::Semicolon {
+                        self.errors.push(err);
+                        return Ok(None);
+                    }
+                }
+                self.errors.push(err);
+                self.recover_from_error(TokenDiscriminants::Semicolon)?;
+                Ok(None)
+            }
         }
     }
 
     fn export_stmt(&mut self, left: LocationRange) -> Result<Loc<Stmt>, Loc<ParseError>> {
-        let tok = self.bump()?;
-        match tok {
-            Some(Loc {
-                inner: Token::Ident(name),
-                location: _,
-            }) => {
+        let span = self.bump_or_err(vec![TokenDiscriminants::Ident])?;
+        match span.inner {
+            Token::Ident(name) => {
                 let (_, right) = self.expect(TokenDiscriminants::Semicolon)?;
                 Ok(Loc {
                     location: LocationRange(left.0, right.1),
                     inner: Stmt::Export(name),
                 })
             }
-            Some(Loc {
-                inner: token,
-                location,
-            }) => {
-                self.pushback(loc!(token.clone(), location));
+            token => {
+                self.pushback(loc!(token.clone(), span.location));
                 Err(loc!(
                     ParseError::UnexpectedToken {
                         token: token_to_string(&self.lexer.name_table, &token),
                         token_type: token.into(),
                         expected_tokens: format!("{}", TokenDiscriminants::Ident),
                     },
-                    location
+                    span.location
                 ))
             }
-            None => Err(loc!(
-                ParseError::EndOfFile {
-                    expected_tokens: vec![TokenDiscriminants::Ident],
-                },
-                LocationRange(self.lexer.current_location, self.lexer.current_location)
-            )),
         }
     }
 
@@ -459,13 +440,37 @@ impl<'input> Parser<'input> {
                 Token::LBrace => self.expr_block(left),
                 Token::If => self.if_expr(left),
                 Token::Ident(id) => {
-                    if self.match_one(TokenDiscriminants::LBrace)?.is_some() {
-                        self.record_literal(id, left)
-                    } else {
-                        self.pushback(loc!(Token::Ident(id), left));
-                        self.equality()
+                    let span = self.bump_or_err(vec![
+                        TokenDiscriminants::LBrace,
+                        TokenDiscriminants::LParen,
+                        TokenDiscriminants::True,
+                        TokenDiscriminants::False,
+                        TokenDiscriminants::Integer,
+                        TokenDiscriminants::Float,
+                        TokenDiscriminants::String,
+                    ])?;
+                    match span.inner {
+                        Token::LBrace => self.record_literal(id, left),
+                        Token::FatArrow => {
+                            let body = self.function_body()?;
+                            let location = LocationRange(left.0, body.location.1);
+                            Ok(loc!(
+                                Expr::Function {
+                                    params: Pat::Id(id, None, left),
+                                    return_type: None,
+                                    body: Box::new(body)
+                                },
+                                location
+                            ))
+                        }
+                        token => {
+                            self.pushback(loc!(token, span.location));
+                            self.pushback(loc!(Token::Ident(id), left));
+                            self.equality()
+                        }
                     }
                 }
+                Token::LParen
                 token => {
                     self.pushback(loc!(token, left));
                     self.equality()
@@ -546,10 +551,7 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn function(&mut self, left: LocationRange) -> Result<Loc<Expr>, Loc<ParseError>> {
-        let params = self.pattern()?;
-        let return_type = self.type_sig()?;
-        self.expect(TokenDiscriminants::FatArrow)?;
+    fn function_body(&mut self) -> Result<Loc<Expr>, Loc<ParseError>> {
         let span = self.bump()?.ok_or(loc!(
             ParseError::EndOfFile {
                 // TODO: Streamline error reporting. I should group the
@@ -569,19 +571,26 @@ impl<'input> Parser<'input> {
             },
             LocationRange(self.lexer.current_location, self.lexer.current_location)
         ))?;
-        let body = match span.inner {
-            Token::LBrace => self.expr_block(span.location)?,
+        match span.inner {
+            Token::LBrace => self.expr_block(span.location),
             Token::LParen => {
                 let mut expr = self.expr()?;
                 let (_, right) = self.expect(TokenDiscriminants::RParen)?;
                 expr.location = LocationRange(span.location.0, right.1);
-                expr
+                Ok(expr)
             }
             _ => {
                 self.pushback(span);
-                self.expr()?
+                self.expr()
             }
-        };
+        }
+    }
+
+    fn function(&mut self, left: LocationRange) -> Result<Loc<Expr>, Loc<ParseError>> {
+        let params = self.pattern()?;
+        let return_type = self.type_sig()?;
+        self.expect(TokenDiscriminants::FatArrow)?;
+        let body = self.function_body()?;
         Ok(Loc {
             location: LocationRange(left.0, body.location.1),
             inner: Expr::Function {

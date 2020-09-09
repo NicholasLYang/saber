@@ -1,1 +1,1 @@
-export const typeInfo: { [n: number]: boolean[] } = {16:[true],17:[false,true],18:[true]};export const STR_INDEX = 3;
+export const typeInfo: { [n: number]: boolean[] } = {};export const STR_INDEX = 3;

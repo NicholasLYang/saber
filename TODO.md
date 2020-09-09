@@ -3,6 +3,7 @@
   - ~~Fix all the damn copies and bad, non idiomatic Rust.~~
   - ~~Probably add a ref count for types (really no need to copy them
     since they're relatively immutable)~~
+  - Convert typechecking and code gen errors to codespan
 - Parsing
   - ~~Convert to expression based syntax~~
   - Trailing comma?
@@ -16,7 +17,7 @@
   - Add generics
 - Closures
   - ~~Get closures working~~
-  - Get anonymous closures working  
+  - ~~Get anonymous closures working~~  
 - Code gen
   - ~~Get something working.~~
   - ~~Add local variables~~

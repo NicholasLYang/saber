@@ -460,6 +460,8 @@ impl CodeGenerator {
                 ops2.push(OpCode::F32ConvertI32);
                 Ok(FLOAT_INDEX)
             }
+            (Type::Solved(t1), _) => self.promote_types(*t1, type2, ops1, ops2, location),
+            (_, Type::Solved(t2)) => self.promote_types(type1, *t2, ops1, ops2, location),
             (t1, t2) => {
                 if t1 == t2 {
                     Ok(type1)
