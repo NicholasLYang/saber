@@ -476,6 +476,19 @@ impl CodeGenerator {
         }
     }
 
+    fn generate_func_args(&mut self, args: &Loc<ExprT>) -> Result<Vec<OpCode>> {
+        match &args.inner {
+            ExprT::Tuple(entries, _) => {
+                let mut opcodes = Vec::new();
+                for entry in entries {
+                    opcodes.append(&mut self.generate_expr(entry)?)
+                }
+                Ok(opcodes)
+            }
+            _ => self.generate_expr(args),
+        }
+    }
+
     fn generate_expr(&mut self, expr: &Loc<ExprT>) -> Result<Vec<OpCode>> {
         match &expr.inner {
             ExprT::Primary { value, type_: _ } => self.generate_primary(value),
@@ -506,7 +519,7 @@ impl CodeGenerator {
                 } else {
                     vec![OpCode::GetLocal((*captures_index).try_into().unwrap())]
                 };
-                opcodes.append(&mut self.generate_expr(args)?);
+                opcodes.append(&mut self.generate_func_args(args)?);
                 opcodes.push(OpCode::Call((*callee).try_into().unwrap()));
                 Ok(opcodes)
             }

@@ -35,7 +35,7 @@ pub struct SymbolTable {
     // them into a vec, then when we finish
     // typechecking the function, we reset and spit out
     // the variable types
-    var_types: Vec<TypeId>,
+    pub var_types: Vec<TypeId>,
     pub current_scope: ScopeId,
 }
 
@@ -246,8 +246,9 @@ impl SymbolTable {
         self.scopes[scope].parent
     }
 
-    pub fn insert_var(&mut self, name: Name, var_type: TypeId) {
+    pub fn insert_var(&mut self, name: Name, var_type: TypeId) -> usize {
         self.var_types.push(var_type);
+        let index = self.var_types.len();
         self.scopes[self.current_scope].symbols.insert(
             name,
             SymbolEntry {
@@ -256,6 +257,7 @@ impl SymbolTable {
                 function_info: None,
             },
         );
+        index
     }
 
     // There's a lot of bookkeeping here

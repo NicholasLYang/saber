@@ -651,9 +651,6 @@ impl TypeChecker {
         self.symbol_table.swap_scope(scope);
         let old_var_types = self.symbol_table.reset_vars();
         let func_params = self.get_func_params(&params)?;
-        for (name, type_) in &func_params {
-            self.symbol_table.insert_var(*name, *type_);
-        }
         // Save the current return type
         let mut old_return_type = self.return_type;
 
