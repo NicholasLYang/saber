@@ -1,0 +1,7 @@
+let main = () => {
+  let a = (10, "foo");
+  let b = (a, 11);
+  printString(a.1);
+}
+
+export main;

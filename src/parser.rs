@@ -6,6 +6,7 @@ use crate::printer::token_to_string;
 use crate::utils::NameTable;
 use codespan_reporting::diagnostic::{Diagnostic, Label};
 use serde::{Deserialize, Serialize};
+use std::convert::TryInto;
 use std::fmt::{self, Debug};
 use std::result::Result;
 
@@ -32,6 +33,9 @@ pub enum ParseError {
     },
     AmbiguousArrowFunc,
     NotReachable,
+    InvalidIndex {
+        index: i32,
+    },
 }
 
 impl fmt::Display for ParseError {
@@ -50,6 +54,7 @@ impl fmt::Display for ParseError {
             ParseError::FuncBindingTypeSig => write!(f, "Cannot have a type signature on a let function binding (use type signatures in the function!)"),
             ParseError::LexicalError { err } => write!(f, "{}", err),
             ParseError::AmbiguousArrowFunc => write!(f, "You could be writing either a tuple or an arrow function. This implies that you're writing an arrow function, but something later on contradicts that"),
+            ParseError::InvalidIndex { index } => write!(f, "{} is not a valid index", index),
             ParseError::NotReachable => write!(f, "Not reachable"),
         }
     }
@@ -808,18 +813,27 @@ impl<'input> Parser<'input> {
             {
                 expr = self.finish_call(expr, left)?;
             } else if self.match_one(TokenDiscriminants::Dot)?.is_some() {
-                let span = self.bump()?.ok_or(loc!(
-                    ParseError::EndOfFile {
-                        expected_tokens: vec![TokenDiscriminants::Ident],
-                    },
-                    LocationRange(self.lexer.current_location, self.lexer.current_location)
-                ))?;
+                let span =
+                    self.bump_or_err(vec![TokenDiscriminants::Ident, TokenDiscriminants::Integer])?;
                 match span.inner {
                     Token::Ident(name) => {
                         expr = Loc {
                             location: LocationRange(expr.location.0, span.location.1),
                             inner: Expr::Field(Box::new(expr), name),
                         };
+                    }
+                    Token::Integer(index) => {
+                        let left = expr.location.0;
+                        expr = loc!(
+                            Expr::TupleField(
+                                Box::new(expr),
+                                index.try_into().map_err(|_| loc!(
+                                    ParseError::InvalidIndex { index },
+                                    span.location
+                                ))?
+                            ),
+                            LocationRange(left, span.location.1)
+                        );
                     }
                     token => {
                         return Err(loc!(

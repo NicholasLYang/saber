@@ -45,7 +45,9 @@ pub enum TypeError {
     #[fail(display = "Field {} does not exist in record", name)]
     FieldDoesNotExist { name: String },
     #[fail(display = "Type {} is not a record", type_)]
-    NotARecord { type_: Type },
+    NotARecord { type_: String },
+    #[fail(display = "Type {} is not a tuple", type_)]
+    NotATuple { type_: String },
     #[fail(display = "{} Cannot apply unary operator to {:?}", location, expr)]
     InvalidUnaryExpr {
         location: LocationRange,
@@ -60,6 +62,8 @@ pub enum TypeError {
         location
     )]
     ShadowingFunction { location: LocationRange },
+    #[fail(display = "Index {} is out of bounds of tuple {}", index, tuple_type)]
+    TupleIndexOutOfBounds { index: u32, tuple_type: String },
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -481,7 +485,7 @@ impl TypeChecker {
                 let mut params = Vec::new();
                 for name in names {
                     let field_type = if let Some(t) = &type_ {
-                        self.get_field_type(*t, *name)?
+                        self.get_field_type(*t, *name)?.1
                     } else {
                         self.get_fresh_type_var()
                     };
@@ -497,10 +501,11 @@ impl TypeChecker {
         &mut self,
         record_type: TypeId,
         field_name: usize,
-    ) -> Result<TypeId, TypeError> {
+    ) -> Result<(u32, TypeId), TypeError> {
         if let Type::Record(fields) = self.type_table.get_type(record_type) {
-            if let Some((_, type_)) = fields.iter().find(|(name, _)| *name == field_name) {
-                Ok(*type_)
+            if let Some(pos) = fields.iter().position(|(name, _)| *name == field_name) {
+                let (_, type_) = fields[pos];
+                Ok((pos.try_into().unwrap(), type_))
             } else {
                 Err(TypeError::FieldDoesNotExist {
                     name: self.name_table.get_str(&field_name).to_string(),
@@ -508,7 +513,7 @@ impl TypeChecker {
             }
         } else {
             Err(TypeError::NotARecord {
-                type_: self.type_table.get_type(record_type).clone(),
+                type_: type_to_string(&self.name_table, &self.type_table, record_type),
             })
         }
     }
@@ -529,7 +534,7 @@ impl TypeChecker {
             Pat::Id(_, _, _) | Pat::Empty(_) => Ok(Vec::new()),
             Pat::Record(names, _, _) => {
                 for name in names {
-                    let type_ = self.get_field_type(rhs_type, *name)?;
+                    let (index, type_) = self.get_field_type(rhs_type, *name)?;
                     self.symbol_table.insert_var(*name, type_.clone());
                     bindings.push(Loc {
                         location,
@@ -537,7 +542,7 @@ impl TypeChecker {
                             *name,
                             Loc {
                                 location,
-                                inner: ExprT::Field(
+                                inner: ExprT::TupleField(
                                     Box::new(Loc {
                                         location,
                                         inner: ExprT::Var {
@@ -545,7 +550,7 @@ impl TypeChecker {
                                             type_: rhs_type.clone(),
                                         },
                                     }),
-                                    *name,
+                                    index,
                                     type_,
                                 ),
                             },
@@ -565,7 +570,7 @@ impl TypeChecker {
                             name,
                             Loc {
                                 location,
-                                inner: ExprT::Field(
+                                inner: ExprT::TupleField(
                                     Box::new(Loc {
                                         location,
                                         inner: ExprT::Var {
@@ -573,7 +578,7 @@ impl TypeChecker {
                                             type_: rhs_type.clone(),
                                         },
                                     }),
-                                    i,
+                                    i.try_into().unwrap(),
                                     self.get_fresh_type_var(),
                                 ),
                             },
@@ -750,9 +755,12 @@ impl TypeChecker {
                     types.push(typed_elem.inner.get_type());
                     typed_elems.push(typed_elem);
                 }
+                let name = self.name_table.get_fresh_name();
+                let type_id = self.type_table.insert(Type::Tuple(types));
+                self.struct_types.push((name, type_id));
                 Ok(Loc {
                     location,
-                    inner: ExprT::Tuple(typed_elems, self.type_table.insert(Type::Tuple(types))),
+                    inner: ExprT::Tuple(typed_elems, type_id),
                 })
             }
 
@@ -972,28 +980,69 @@ impl TypeChecker {
                     },
                 })
             }
-            Expr::Field(lhs, name) => {
+            Expr::TupleField(lhs, index) => {
                 let lhs_t = self.expr(*lhs)?;
-                let type_ = if let Type::Record(fields) =
-                    self.type_table.get_type(lhs_t.inner.get_type())
-                {
-                    let field = fields.iter().find(|(field_name, _)| *field_name == name);
-
-                    if let Some(field) = field {
-                        field.1
+                let lhs_type = self.type_table.get_type(lhs_t.inner.get_type());
+                if let Type::Tuple(entries) = lhs_type {
+                    let usize_index: usize = index.try_into().unwrap();
+                    if usize_index < entries.len() {
+                        let type_ = entries[usize_index];
+                        Ok(loc!(
+                            ExprT::TupleField(Box::new(lhs_t), index, type_),
+                            location
+                        ))
                     } else {
-                        let name_str = self.name_table.get_str(&name);
-                        return Err(TypeError::FieldDoesNotExist {
-                            name: name_str.to_string(),
-                        });
+                        Err(TypeError::TupleIndexOutOfBounds {
+                            index,
+                            tuple_type: type_to_string(
+                                &self.name_table,
+                                &self.type_table,
+                                lhs_t.inner.get_type(),
+                            ),
+                        })
                     }
                 } else {
-                    self.get_fresh_type_var()
-                };
-                Ok(Loc {
-                    location,
-                    inner: ExprT::Field(Box::new(lhs_t), name, type_),
-                })
+                    Err(TypeError::NotATuple {
+                        type_: type_to_string(
+                            &self.name_table,
+                            &self.type_table,
+                            lhs_t.inner.get_type(),
+                        ),
+                    })
+                }
+            }
+            Expr::Field(lhs, name) => {
+                let lhs_t = self.expr(*lhs)?;
+                let type_ = self.type_table.get_type(lhs_t.inner.get_type());
+                if let Type::Record(fields) = type_ {
+                    let position = fields
+                        .iter()
+                        .position(|(field_name, _)| *field_name == name);
+
+                    if let Some(pos) = position {
+                        Ok(Loc {
+                            location,
+                            inner: ExprT::TupleField(
+                                Box::new(lhs_t),
+                                pos.try_into().unwrap(),
+                                fields[pos].1,
+                            ),
+                        })
+                    } else {
+                        let name_str = self.name_table.get_str(&name);
+                        Err(TypeError::FieldDoesNotExist {
+                            name: name_str.to_string(),
+                        })
+                    }
+                } else {
+                    Err(TypeError::NotARecord {
+                        type_: type_to_string(
+                            &self.name_table,
+                            &self.type_table,
+                            lhs_t.inner.get_type(),
+                        ),
+                    })
+                }
             }
         }
     }

@@ -692,35 +692,24 @@ impl CodeGenerator {
                     Ok(opcodes)
                 }
             },
-            ExprT::Field(lhs, name, _) => {
+            ExprT::TupleField(lhs, index, type_) => {
                 let mut opcodes = self.generate_expr(&**lhs)?;
-                let lhs_type = lhs.inner.get_type();
-                if let Type::Record(fields) = self.type_table.get_type(lhs_type) {
-                    let field_position = fields
-                        .iter()
-                        .position(|(field_name, _)| *field_name == *name)
-                        .ok_or(GenerationError::NotImplemented {
-                            reason: "Field doesn't exist: Should be caught by typechecker",
-                        })?;
-                    let field_wasm_type = self
-                        .generate_wasm_type(fields[field_position].1, expr.location)?
-                        .unwrap_or(WasmType::Empty);
-                    // Account for type_id
-                    let field_loc = field_position + 1;
-                    let offset: u32 = (4 * field_loc).try_into().unwrap();
-                    let load_code = match field_wasm_type {
-                        WasmType::i32 => OpCode::I32Load(2, offset),
-                        WasmType::f32 => OpCode::F32Load(2, offset),
-                        WasmType::Empty => OpCode::Drop,
-                        _ => {
-                            return Err(GenerationError::NotReachable);
-                        }
-                    };
-                    opcodes.push(load_code);
-                    Ok(opcodes)
-                } else {
-                    Err(GenerationError::NotReachable)
-                }
+                let field_wasm_type = self
+                    .generate_wasm_type(*type_, expr.location)?
+                    .unwrap_or(WasmType::Empty);
+                // Account for type_id
+                let field_loc = index + 1;
+                let offset: u32 = (4 * field_loc).try_into().unwrap();
+                let load_code = match field_wasm_type {
+                    WasmType::i32 => OpCode::I32Load(2, offset),
+                    WasmType::f32 => OpCode::F32Load(2, offset),
+                    WasmType::Empty => OpCode::Drop,
+                    _ => {
+                        return Err(GenerationError::NotReachable);
+                    }
+                };
+                opcodes.push(load_code);
+                Ok(opcodes)
             }
             ExprT::Record {
                 name: _,
