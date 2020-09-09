@@ -24,7 +24,6 @@ static MAGIC_NUM: u32 = 0x6d73_6100;
 static VERSION: u32 = 0x1;
 
 pub fn emit_code<T: Write>(mut dest: T, op_code: OpCode) -> Result<()> {
-    println!("{:?}", op_code);
     match op_code {
         OpCode::MagicNumber => dest.write_u32::<LittleEndian>(MAGIC_NUM),
         OpCode::Version => dest.write_u32::<LittleEndian>(VERSION),
@@ -59,6 +58,7 @@ pub fn emit_code<T: Write>(mut dest: T, op_code: OpCode) -> Result<()> {
         OpCode::I32Div => dest.write_u8(0x6d),
         OpCode::I32Xor => dest.write_u8(0x73),
         OpCode::I32Eq => dest.write_u8(0x46),
+        OpCode::I32LessSigned => dest.write_u8(0x48),
         OpCode::I32GreaterSigned => dest.write_u8(0x4a),
         //OpCode::I32GreaterUnsigned => dest.write_u8(0x4b),
         OpCode::F32Add => dest.write_u8(0x92),

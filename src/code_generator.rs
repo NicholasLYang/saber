@@ -53,6 +53,7 @@ pub struct CodeGenerator {
     // All the generated code
     program_data: ProgramData,
     return_type: Option<WasmType>,
+    current_function: Option<usize>,
 }
 
 type Result<T> = std::result::Result<T, GenerationError>;
@@ -68,6 +69,7 @@ impl CodeGenerator {
             type_table,
             program_data: ProgramData::new(func_count, expr_func_count),
             return_type: None,
+            current_function: None,
         }
     }
 
@@ -201,6 +203,7 @@ impl CodeGenerator {
                     func_scope: _,
                     params_type: _,
                     return_type: _,
+                    is_top_level: _,
                 }) = &sym_entry.function_info
                 {
                     let entry = ExportEntry {
@@ -237,6 +240,8 @@ impl CodeGenerator {
             .as_ref()
             .ok_or(GenerationError::NotReachable)?
             .func_index;
+        let old_func = self.current_function;
+        self.current_function = Some(index);
         let old_scope = self.symbol_table.swap_scope(scope);
         let (type_, body) =
             self.generate_function(return_type, params, local_variables, body, location)?;
@@ -244,6 +249,7 @@ impl CodeGenerator {
         self.program_data.code_section[index] = Some(body);
         self.program_data.function_section[index] = Some(type_index);
         self.symbol_table.swap_scope(old_scope);
+        self.current_function = old_func;
         Ok(index)
     }
 
@@ -514,10 +520,20 @@ impl CodeGenerator {
             } => {
                 // NOTE: This is super brittle again, as if we add another runtime function,
                 // we'll need to change this comparison
-                let mut opcodes = if *callee <= PRINT_STRING_INDEX.try_into().unwrap() {
-                    Vec::new()
+                let mut opcodes = if let Some(cf) = self.current_function {
+                    if *callee <= PRINT_STRING_INDEX.try_into().unwrap() {
+                        Vec::new()
+                    } else if cf == *callee
+                    // Basically if we're in a recursive function situation
+                    {
+                        vec![OpCode::GetLocal(0)]
+                    } else if let Some(ci) = *captures_index {
+                        vec![OpCode::GetLocal((ci).try_into().unwrap())]
+                    } else {
+                        vec![OpCode::I32Const(0)]
+                    }
                 } else {
-                    vec![OpCode::GetLocal((*captures_index).try_into().unwrap())]
+                    Vec::new()
                 };
                 opcodes.append(&mut self.generate_func_args(args)?);
                 opcodes.push(OpCode::Call((*callee).try_into().unwrap()));
@@ -861,6 +877,7 @@ impl CodeGenerator {
             (Op::Div, Type::Int, Type::Int) => Ok(OpCode::I32Div),
             (Op::Times, Type::Float, Type::Float) => Ok(OpCode::F32Mul),
             (Op::Div, Type::Float, Type::Float) => Ok(OpCode::F32Div),
+            (Op::Less, Type::Int, Type::Bool) => Ok(OpCode::I32LessSigned),
             (Op::Greater, Type::Int, Type::Bool) => Ok(OpCode::I32GreaterSigned),
             (Op::EqualEqual, Type::Int, Type::Bool) => Ok(OpCode::I32Eq),
             (Op::EqualEqual, Type::String, Type::Bool) => Ok(OpCode::Call(STREQ_INDEX)),

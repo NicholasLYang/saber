@@ -1,8 +1,6 @@
-let foo = \() => {
-  let bar = (a, b) => {
-    return a + b;
-  }
-  printInt(bar(10, 5));
+let main = () => {
+  printString("foo");
+  main();
 }
 
-export foo;
+export main;

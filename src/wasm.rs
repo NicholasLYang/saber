@@ -19,6 +19,7 @@ pub enum OpCode {
     I32Div,
     I32Xor,
     I32Eq,
+    I32LessSigned,
     I32GreaterSigned,
     //    I32GreaterUnsigned,
     F32Add,

@@ -843,9 +843,14 @@ impl TypeChecker {
                             func_scope: _,
                             params_type,
                             return_type,
+                            is_top_level,
                         }) = entry.function_info
                         {
-                            let captures_index = entry.var_index;
+                            let captures_index = if is_top_level {
+                                Some(entry.var_index)
+                            } else {
+                                None
+                            };
                             self.unify_or_err(params_type, typed_args.inner.get_type(), location)?;
                             return Ok(Loc {
                                 location,
@@ -1017,11 +1022,11 @@ impl TypeChecker {
                 }
             }
             Op::GreaterEqual | Op::Greater | Op::Less | Op::LessEqual => {
-                // If we can unify lhs and rhs, and lhs with Int or Float then
-                // by transitivity we can unify everything with float
-                let is_num = self.is_unifiable(lhs_type, FLOAT_INDEX)
-                    || self.is_unifiable(lhs_type, INT_INDEX);
-                if self.is_unifiable(lhs_type, rhs_type) && is_num {
+                if (self.is_unifiable(lhs_type, INT_INDEX)
+                    && self.is_unifiable(rhs_type, INT_INDEX))
+                    || (self.is_unifiable(lhs_type, FLOAT_INDEX)
+                        && self.is_unifiable(rhs_type, FLOAT_INDEX))
+                {
                     Some(BOOL_INDEX)
                 } else {
                     None

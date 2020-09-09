@@ -46,6 +46,7 @@ pub struct FunctionInfo {
     pub func_scope: ScopeId,
     pub params_type: TypeId,
     pub return_type: TypeId,
+    pub is_top_level: bool,
 }
 
 pub enum VarIndex {
@@ -285,6 +286,7 @@ impl SymbolTable {
                     func_scope,
                     params_type,
                     return_type,
+                    is_top_level: self.function_index == 0,
                 }),
             },
         );
