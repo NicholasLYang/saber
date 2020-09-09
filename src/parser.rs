@@ -30,6 +30,7 @@ pub enum ParseError {
     LexicalError {
         err: LexicalError,
     },
+    AmbiguousArrowFunc,
     NotReachable,
 }
 
@@ -48,6 +49,7 @@ impl fmt::Display for ParseError {
             ParseError::DestructureFunction => write!(f, "Cannot destructure a function"),
             ParseError::FuncBindingTypeSig => write!(f, "Cannot have a type signature on a let function binding (use type signatures in the function!)"),
             ParseError::LexicalError { err } => write!(f, "{}", err),
+            ParseError::AmbiguousArrowFunc => write!(f, "You could be writing either a tuple or an arrow function. This implies that you're writing an arrow function, but something later on contradicts that"),
             ParseError::NotReachable => write!(f, "Not reachable"),
         }
     }
@@ -429,6 +431,55 @@ impl<'input> Parser<'input> {
         })
     }
 
+    // So you tried to parse an arrow function but it turned out
+    // to be a tuple. Sucks, but now you gotta fix this damn thing
+    fn bail_on_arrow_func(
+        &mut self,
+        params: Vec<Pat>,
+        location: LocationRange,
+    ) -> Result<Vec<Loc<Expr>>, Loc<ParseError>> {
+        let mut fields = Vec::new();
+        for param in params {
+            let field = match param {
+                Pat::Id(name, None, location) => Loc {
+                    location,
+                    inner: Expr::Var { name },
+                },
+                Pat::Id(_, Some(_), location) => {
+                    return Err(loc!(ParseError::AmbiguousArrowFunc, location))
+                }
+                Pat::Record(_, _, location) => {
+                    return Err(loc!(ParseError::AmbiguousArrowFunc, location))
+                }
+                Pat::Empty(loc) => loc!(Expr::Tuple(Vec::new()), loc),
+                Pat::Tuple(pats, loc) => {
+                    loc!(Expr::Tuple(self.bail_on_arrow_func(pats, location)?), loc)
+                }
+            };
+            fields.push(field);
+        }
+        Ok(fields)
+    }
+
+    fn finish_arrow_params(
+        &mut self,
+        params: Pat,
+        left: LocationRange,
+    ) -> Result<Loc<Expr>, Loc<ParseError>> {
+        self.expect(TokenDiscriminants::FatArrow)?;
+        let body = self.function_body()?;
+        let location = LocationRange(left.0, body.location.1);
+        let return_type = self.type_sig()?.map(|(type_sig, _)| type_sig);
+        Ok(loc!(
+            Expr::Function {
+                params,
+                return_type,
+                body: Box::new(body)
+            },
+            location
+        ))
+    }
+
     fn expr(&mut self) -> Result<Loc<Expr>, Loc<ParseError>> {
         if let Some(Loc {
             inner: token,
@@ -470,7 +521,54 @@ impl<'input> Parser<'input> {
                         }
                     }
                 }
-                Token::LParen
+                Token::LParen => {
+                    let mut params = Vec::new();
+                    loop {
+                        if let Some(right_span) = self.match_one(TokenDiscriminants::RParen)? {
+                            return self.finish_arrow_params(
+                                Pat::Tuple(params, LocationRange(left.0, right_span.location.1)),
+                                left,
+                            );
+                        }
+                        let span = self.bump_or_err(vec![TokenDiscriminants::RParen])?;
+                        match span.inner {
+                            Token::Ident(id) => {
+                                let type_sig = self.type_sig()?;
+                                let right = type_sig
+                                    .as_ref()
+                                    .map(|(_, loc)| loc.1)
+                                    .unwrap_or(span.location.1);
+                                params.push(Pat::Id(
+                                    id,
+                                    type_sig.map(|(sig, _)| sig),
+                                    LocationRange(span.location.0, right),
+                                ))
+                            }
+                            token => {
+                                let mut fields = self.bail_on_arrow_func(
+                                    params,
+                                    LocationRange(left.0, span.location.1),
+                                )?;
+                                self.pushback(loc!(token, span.location));
+                                let (mut rest, right) =
+                                    self.comma::<Loc<Expr>>(&Self::expr, Token::RParen)?;
+                                fields.append(&mut rest);
+                                return Ok(loc!(
+                                    Expr::Tuple(fields),
+                                    LocationRange(left.0, right.1)
+                                ));
+                            }
+                        }
+                        if let Some(right_span) = self.match_one(TokenDiscriminants::RParen)? {
+                            return self.finish_arrow_params(
+                                Pat::Tuple(params, LocationRange(left.0, right_span.location.1)),
+                                left,
+                            );
+                        } else {
+                            self.expect(TokenDiscriminants::Comma)?;
+                        }
+                    }
+                }
                 token => {
                     self.pushback(loc!(token, left));
                     self.equality()

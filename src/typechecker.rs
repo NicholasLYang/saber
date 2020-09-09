@@ -849,15 +849,6 @@ impl TypeChecker {
                         }) = entry.function_info
                         {
                             let captures_index = entry.var_index;
-                            println!(
-                                "PARAMS TYPE {} RETURN TYPE {}",
-                                type_to_string(&self.name_table, &self.type_table, params_type),
-                                type_to_string(
-                                    &self.name_table,
-                                    &self.type_table,
-                                    typed_args.inner.get_type()
-                                )
-                            );
                             self.unify_or_err(params_type, typed_args.inner.get_type(), location)?;
                             return Ok(Loc {
                                 location,
