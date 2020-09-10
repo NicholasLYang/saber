@@ -5,6 +5,7 @@
       "dom",
       "esnext"
     ],
+    "outDir": "../build",
     "allowJs": true,
     "skipLibCheck": true,
     "esModuleInterop": true,

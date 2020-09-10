@@ -32,10 +32,13 @@ pub enum ParseError {
         err: LexicalError,
     },
     AmbiguousArrowFunc,
-    NotReachable,
     InvalidIndex {
-        index: i32,
+        index: String,
     },
+    InvalidFloat {
+        float: String,
+    },
+    NotReachable,
 }
 
 impl fmt::Display for ParseError {
@@ -55,6 +58,7 @@ impl fmt::Display for ParseError {
             ParseError::LexicalError { err } => write!(f, "{}", err),
             ParseError::AmbiguousArrowFunc => write!(f, "You could be writing either a tuple or an arrow function. This implies that you're writing an arrow function, but something later on contradicts that"),
             ParseError::InvalidIndex { index } => write!(f, "{} is not a valid index", index),
+            ParseError::InvalidFloat { float } => write!(f, "{} is not a valid float", float),
             ParseError::NotReachable => write!(f, "Not reachable"),
         }
     }
@@ -828,10 +832,26 @@ impl<'input> Parser<'input> {
                             Expr::TupleField(
                                 Box::new(expr),
                                 index.try_into().map_err(|_| loc!(
-                                    ParseError::InvalidIndex { index },
+                                    ParseError::InvalidIndex {
+                                        index: format!("{}", index)
+                                    },
                                     span.location
                                 ))?
                             ),
+                            LocationRange(left, span.location.1)
+                        );
+                    }
+                    Token::Float(f_str) => {
+                        let left = expr.location.0;
+                        let fields: Vec<&str> = f_str.split(".").collect();
+                        let first_index: u32 = fields[0].parse().expect("Invalid u32");
+                        let second_index: u32 = fields[1].parse().expect("Invalid u32");
+                        expr = loc!(
+                            Expr::TupleField(Box::new(expr), first_index),
+                            LocationRange(left, span.location.1)
+                        );
+                        expr = loc!(
+                            Expr::TupleField(Box::new(expr), second_index),
                             LocationRange(left, span.location.1)
                         );
                     }
@@ -916,7 +936,11 @@ impl<'input> Parser<'input> {
             Token::Float(float) => Ok(Loc {
                 location,
                 inner: Expr::Primary {
-                    value: Value::Float(float),
+                    value: Value::Float(
+                        float
+                            .parse()
+                            .map_err(|_| loc!(ParseError::InvalidFloat { float }, location))?,
+                    ),
                 },
             }),
             Token::String(s) => Ok(Loc {

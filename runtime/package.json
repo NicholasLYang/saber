@@ -5,7 +5,8 @@
   "main": "load.ts",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "tsc && node load.js"
+    "start": "tsc && node load.js",
+    "build": "tsc"
   },
   "author": "Nicholas Yang <nick@nicholasyang.com> (nicholasyang.com)",
   "license": "ISC",

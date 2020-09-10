@@ -2,12 +2,10 @@
 **/*.rs.bk
 \#*\#
 
-/build/node_modules
+/build
 *.wasm
 *.wat
 \.#*
 test.sbr
 .idea
 .cdmkn
-/build/code.ts
-/build/*.js

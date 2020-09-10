@@ -19,7 +19,7 @@ pub enum Token {
     Let,
     While,
     Ident(usize),
-    Float(f32),
+    Float(String), // Why are floats strings? Well we also use them to parse indices for tuples
     Integer(i32),
     LBrace,
     RBrace,

@@ -24,7 +24,9 @@ use codespan_reporting::term;
 use codespan_reporting::term::termcolor::{ColorChoice, StandardStream};
 use std::env;
 use std::fs::{self, File};
+use std::io;
 use std::io::Write;
+use std::process::Command;
 use utils::STR_INDEX;
 
 mod ast;
@@ -103,7 +105,12 @@ fn read_file(file_name: &str) -> Result<()> {
     let mut emitter = Emitter::new();
     emitter.emit_program(program)?;
     let js_str = format!("export const code =\"{}\"", emitter.output_base64());
-    let mut js_file = File::create("build/code.ts")?;
+    let mut js_file = File::create("runtime/code.ts")?;
     js_file.write_all(js_str.as_bytes())?;
+    let output = Command::new("npm")
+        .args(&["--prefix", "runtime", "run", "build"])
+        .output()
+        .expect("Failed to build code");
+    io::stderr().write_all(&output.stderr).unwrap();
     Ok(())
 }
