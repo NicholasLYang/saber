@@ -810,65 +810,85 @@ impl<'input> Parser<'input> {
     fn call(&mut self) -> Result<Loc<Expr>, Loc<ParseError>> {
         let mut expr = self.primary()?;
         loop {
-            if let Some(Loc {
-                inner: _,
-                location: left,
-            }) = self.match_one(TokenDiscriminants::LParen)?
-            {
-                expr = self.finish_call(expr, left)?;
-            } else if self.match_one(TokenDiscriminants::Dot)?.is_some() {
-                let span =
-                    self.bump_or_err(vec![TokenDiscriminants::Ident, TokenDiscriminants::Integer])?;
-                match span.inner {
-                    Token::Ident(name) => {
-                        expr = Loc {
-                            location: LocationRange(expr.location.0, span.location.1),
-                            inner: Expr::Field(Box::new(expr), name),
-                        };
-                    }
-                    Token::Integer(index) => {
-                        let left = expr.location.0;
-                        expr = loc!(
-                            Expr::TupleField(
-                                Box::new(expr),
-                                index.try_into().map_err(|_| loc!(
-                                    ParseError::InvalidIndex {
-                                        index: format!("{}", index)
-                                    },
-                                    span.location
-                                ))?
-                            ),
-                            LocationRange(left, span.location.1)
-                        );
-                    }
-                    Token::Float(f_str) => {
-                        let left = expr.location.0;
-                        let fields: Vec<&str> = f_str.split(".").collect();
-                        let first_index: u32 = fields[0].parse().expect("Invalid u32");
-                        let second_index: u32 = fields[1].parse().expect("Invalid u32");
-                        expr = loc!(
-                            Expr::TupleField(Box::new(expr), first_index),
-                            LocationRange(left, span.location.1)
-                        );
-                        expr = loc!(
-                            Expr::TupleField(Box::new(expr), second_index),
-                            LocationRange(left, span.location.1)
-                        );
-                    }
-                    token => {
-                        return Err(loc!(
-                            ParseError::UnexpectedToken {
-                                token: token_to_string(&self.lexer.name_table, &token),
-                                token_type: token.into(),
-
-                                expected_tokens: format!("{}", TokenDiscriminants::Ident),
-                            },
-                            span.location
-                        ))
-                    }
-                };
+            let span = if let Some(span) = self.bump()? {
+                span
             } else {
                 break;
+            };
+            match span.inner {
+                Token::LParen => {
+                    expr = self.finish_call(expr, span.location)?;
+                }
+                Token::LBracket => {
+                    let index = self.expr()?;
+                    let location = LocationRange(span.location.0, index.location.1);
+                    self.expect(TokenDiscriminants::RBracket)?;
+                    expr = loc!(
+                        Expr::Index {
+                            lhs: Box::new(expr),
+                            index: Box::new(index)
+                        },
+                        location
+                    )
+                }
+                Token::Dot => {
+                    let span = self.bump_or_err(vec![
+                        TokenDiscriminants::Ident,
+                        TokenDiscriminants::Integer,
+                    ])?;
+                    match span.inner {
+                        Token::Ident(name) => {
+                            expr = Loc {
+                                location: LocationRange(expr.location.0, span.location.1),
+                                inner: Expr::Field(Box::new(expr), name),
+                            };
+                        }
+                        Token::Integer(index) => {
+                            let left = expr.location.0;
+                            expr = loc!(
+                                Expr::TupleField(
+                                    Box::new(expr),
+                                    index.try_into().map_err(|_| loc!(
+                                        ParseError::InvalidIndex {
+                                            index: format!("{}", index)
+                                        },
+                                        span.location
+                                    ))?
+                                ),
+                                LocationRange(left, span.location.1)
+                            );
+                        }
+                        Token::Float(f_str) => {
+                            let left = expr.location.0;
+                            let fields: Vec<&str> = f_str.split(".").collect();
+                            let first_index: u32 = fields[0].parse().expect("Invalid u32");
+                            let second_index: u32 = fields[1].parse().expect("Invalid u32");
+                            expr = loc!(
+                                Expr::TupleField(Box::new(expr), first_index),
+                                LocationRange(left, span.location.1)
+                            );
+                            expr = loc!(
+                                Expr::TupleField(Box::new(expr), second_index),
+                                LocationRange(left, span.location.1)
+                            );
+                        }
+                        token => {
+                            return Err(loc!(
+                                ParseError::UnexpectedToken {
+                                    token: token_to_string(&self.lexer.name_table, &token),
+                                    token_type: token.into(),
+
+                                    expected_tokens: format!("{}", TokenDiscriminants::Ident),
+                                },
+                                span.location
+                            ))
+                        }
+                    };
+                }
+                token => {
+                    self.pushback(loc!(token, span.location));
+                    break;
+                }
             }
         }
         Ok(expr)

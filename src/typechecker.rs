@@ -140,6 +140,13 @@ impl TypeChecker {
             UNIT_INDEX,
             type_table.insert(Type::Arrow(STR_INDEX, UNIT_INDEX)),
         );
+        let print_char_id = name_table.insert("printChar".into());
+        symbol_table.insert_function(
+            print_char_id,
+            CHAR_INDEX,
+            UNIT_INDEX,
+            type_table.insert(Type::Arrow(CHAR_INDEX, UNIT_INDEX)),
+        );
 
         TypeChecker {
             symbol_table,
@@ -979,6 +986,30 @@ impl TypeChecker {
                         type_,
                     },
                 })
+            }
+            Expr::Index { lhs, index } => {
+                let lhs_t = self.expr(*lhs)?;
+                let index_t = self.expr(*index)?;
+                if self.is_unifiable(lhs_t.inner.get_type(), STR_INDEX) {
+                    Ok(loc!(
+                        ExprT::Index {
+                            lhs: Box::new(lhs_t),
+                            index: Box::new(index_t),
+                            type_: CHAR_INDEX,
+                        },
+                        location
+                    ))
+                } else {
+                    Err(TypeError::UnificationFailure {
+                        location,
+                        type1: "string".to_string(),
+                        type2: type_to_string(
+                            &self.name_table,
+                            &self.type_table,
+                            lhs_t.inner.get_type(),
+                        ),
+                    })
+                }
             }
             Expr::TupleField(lhs, index) => {
                 let lhs_t = self.expr(*lhs)?;

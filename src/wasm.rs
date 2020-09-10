@@ -34,6 +34,7 @@ pub enum OpCode {
     GetLocal(u32),
     SetGlobal(u32),
     GetGlobal(u32),
+    I32Load8U(u32, u32),
     // First is align, second is offset
     I32Load(u32, u32),
     F32Load(u32, u32),

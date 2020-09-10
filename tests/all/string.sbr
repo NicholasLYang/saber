@@ -1,0 +1,7 @@
+let main = () => {
+  let str = "hello";
+  printChar(str[0]);
+  printChar(str[4]);
+}
+
+export main;

@@ -2,8 +2,8 @@ use crate::ast::{ExprT, Function, Loc, Name, Op, ProgramT, StmtT, Type, TypeId, 
 use crate::lexer::LocationRange;
 use crate::printer::type_to_string;
 use crate::symbol_table::{
-    FunctionInfo, SymbolTable, VarIndex, ALLOC_INDEX, DEALLOC_INDEX, PRINT_STRING_INDEX,
-    STREQ_INDEX,
+    FunctionInfo, SymbolTable, VarIndex, ALLOC_INDEX, DEALLOC_INDEX, PRINT_CHAR_INDEX,
+    PRINT_STRING_INDEX, STREQ_INDEX,
 };
 use crate::typechecker::{is_ref_type, TypeChecker};
 use crate::utils::{NameTable, TypeTable, FLOAT_INDEX, STR_INDEX};
@@ -149,6 +149,13 @@ impl CodeGenerator {
         self.program_data.import_section.push(ImportEntry {
             module_str: "std".into(),
             field_str: "printString".into(),
+            kind: ImportKind::Function {
+                type_: print_int_index,
+            },
+        });
+        self.program_data.import_section.push(ImportEntry {
+            module_str: "std".into(),
+            field_str: "printChar".into(),
             kind: ImportKind::Function {
                 type_: print_int_index,
             },
@@ -521,7 +528,7 @@ impl CodeGenerator {
                 // NOTE: This is super brittle again, as if we add another runtime function,
                 // we'll need to change this comparison
                 let mut opcodes = if let Some(cf) = self.current_function {
-                    if *callee <= PRINT_STRING_INDEX.try_into().unwrap() {
+                    if *callee <= PRINT_CHAR_INDEX.try_into().unwrap() {
                         Vec::new()
                     } else if cf == *callee
                     // Basically if we're in a recursive function situation
@@ -604,6 +611,19 @@ impl CodeGenerator {
                 self.program_data.elements_section.elems[*table_index] = Some(func_index);
                 let captures = captures.as_ref().unwrap();
                 self.generate_expr(captures)
+            }
+            ExprT::Index {
+                lhs,
+                index,
+                type_: _,
+            } => {
+                let mut opcodes = self.generate_expr(lhs)?;
+                opcodes.append(&mut self.generate_expr(index)?);
+                opcodes.push(OpCode::I32Const(4));
+                opcodes.push(OpCode::I32Mul);
+                opcodes.push(OpCode::I32Add);
+                opcodes.push(OpCode::I32Load8U(0, 8));
+                Ok(opcodes)
             }
             ExprT::Tuple(elems, type_id) => {
                 if elems.len() == 0 {
@@ -816,12 +836,13 @@ impl CodeGenerator {
                 ];
                 opcodes.push(OpCode::SetGlobal(0));
 
+                let mut offset = 0;
                 // Set type_id
                 // Get ptr to record
                 opcodes.push(OpCode::GetGlobal(0));
                 opcodes.push(OpCode::I32Const(STR_INDEX.try_into().unwrap()));
                 // *ptr = type_id
-                opcodes.push(OpCode::I32Store(2, 0));
+                opcodes.push(OpCode::I32Store(2, offset));
 
                 // Pop on global 0 as return value (ptr to type id)
                 // This may seem weird, as intuitively we'd want the
@@ -829,27 +850,20 @@ impl CodeGenerator {
                 // but for GC reasons we want it to point to type id
                 opcodes.push(OpCode::GetGlobal(0));
 
-                opcodes.push(OpCode::GetGlobal(0));
-                opcodes.push(OpCode::I32Const(4));
-                opcodes.push(OpCode::I32Add);
-                opcodes.push(OpCode::SetGlobal(0));
+                offset += 4;
 
                 opcodes.push(OpCode::GetGlobal(0));
                 opcodes.push(OpCode::I32Const(raw_str_length));
-                opcodes.push(OpCode::I32Store(2, 0));
+                opcodes.push(OpCode::I32Store(2, offset));
                 for b in bytes.chunks_exact(4) {
-                    // Increment global 1 by 4 bytes
-                    opcodes.push(OpCode::GetGlobal(0));
-                    opcodes.push(OpCode::I32Const(4));
-                    opcodes.push(OpCode::I32Add);
-                    opcodes.push(OpCode::SetGlobal(0));
+                    offset += 4;
                     let packed_bytes = ((b[0] as u32) << 0)
                         + ((b[1] as u32) << 8)
                         + ((b[2] as u32) << 16)
                         + ((b[3] as u32) << 24);
                     opcodes.push(OpCode::GetGlobal(0));
                     opcodes.push(OpCode::I32Const(packed_bytes as i32));
-                    opcodes.push(OpCode::I32Store(2, 0))
+                    opcodes.push(OpCode::I32Store(2, offset))
                 }
                 Ok(opcodes)
             }

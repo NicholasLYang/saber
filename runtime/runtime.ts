@@ -25,6 +25,12 @@ export const printString = (memory: WebAssembly.Memory) => (bytePtr: number) => 
     console.log(decoder.decode(out));
 };
 
+export const printChar = (memory: WebAssembly.Memory) => (c: number) => {
+    printHeap(memory);
+    console.log(c);
+    console.log(String.fromCharCode(c));
+};
+
 // Prints value
 // @param {number} ptr - An index into 32 bit array. Should point to type id
 export function printValue(memory: WebAssembly.Memory, ptr: number) {

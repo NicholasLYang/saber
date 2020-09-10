@@ -63,7 +63,9 @@ pub static STREQ_INDEX: u32 = 3;
 pub static PRINT_INT_INDEX: u32 = 4;
 #[allow(dead_code)]
 pub static PRINT_FLOAT_INDEX: u32 = 5;
+#[allow(dead_code)]
 pub static PRINT_STRING_INDEX: u32 = 6;
+pub static PRINT_CHAR_INDEX: u32 = 7;
 
 impl SymbolTable {
     pub fn new() -> Self {

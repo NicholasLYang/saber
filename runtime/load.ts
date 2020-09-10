@@ -1,5 +1,5 @@
 import { code } from "./code";
-import {alloc, clone, dealloc, debugAlloc, printHeap, printString, streq} from "./runtime";
+import {alloc, clone, dealloc, debugAlloc, printChar, printHeap, printString, streq} from "./runtime";
 
 function atob(a: string) {
     return new Buffer(a, 'base64').toString('binary');
@@ -27,7 +27,9 @@ async function instantiate() {
             streq: streq(memory),
             printInt: console.log,
             printFloat: console.log,
-            printString: printString(memory) },
+            printString: printString(memory),
+            printChar: printChar(memory)
+        },
         mem: { heap: memory }};
     const instance = await WebAssembly.instantiate(module, importObject);
     let wasm: any = instance.exports;

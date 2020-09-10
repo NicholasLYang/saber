@@ -103,6 +103,10 @@ pub enum Expr {
     },
     Field(Box<Loc<Expr>>, Name),
     TupleField(Box<Loc<Expr>>, u32),
+    Index {
+        lhs: Box<Loc<Expr>>,
+        index: Box<Loc<Expr>>,
+    },
     Record {
         name: Name,
         fields: Vec<(Name, Loc<Expr>)>,
@@ -154,6 +158,11 @@ pub enum ExprT {
     Record {
         name: Name,
         fields: Vec<(Name, Loc<ExprT>)>,
+        type_: TypeId,
+    },
+    Index {
+        lhs: Box<Loc<ExprT>>,
+        index: Box<Loc<ExprT>>,
         type_: TypeId,
     },
     TupleField(Box<Loc<ExprT>>, u32, TypeId),
@@ -343,6 +352,11 @@ impl ExprT {
                 function: _,
                 name: _,
                 table_index: _,
+                type_,
+            } => *type_,
+            ExprT::Index {
+                lhs: _,
+                index: _,
                 type_,
             } => *type_,
             ExprT::TupleField(_, _, type_) => *type_,
