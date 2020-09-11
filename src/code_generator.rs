@@ -3,7 +3,7 @@ use crate::lexer::LocationRange;
 use crate::printer::type_to_string;
 use crate::symbol_table::{
     FunctionInfo, SymbolTable, VarIndex, ALLOC_INDEX, DEALLOC_INDEX, PRINT_CHAR_INDEX,
-    PRINT_STRING_INDEX, STREQ_INDEX,
+    PRINT_INT_INDEX, PRINT_STRING_INDEX, STREQ_INDEX,
 };
 use crate::typechecker::{is_ref_type, TypeChecker};
 use crate::utils::{NameTable, TypeTable, FLOAT_INDEX, STR_INDEX};
@@ -617,11 +617,34 @@ impl CodeGenerator {
                 index,
                 type_: _,
             } => {
-                let mut opcodes = self.generate_expr(lhs)?;
+                // Push global 1 on stack to save it
+                let mut opcodes = vec![OpCode::GetGlobal(1)];
+                opcodes.append(&mut self.generate_expr(lhs)?);
+                opcodes.push(OpCode::SetGlobal(1));
                 opcodes.append(&mut self.generate_expr(index)?);
-                opcodes.push(OpCode::I32Const(4));
-                opcodes.push(OpCode::I32Mul);
+                // Save index in global 0
+                opcodes.push(OpCode::SetGlobal(0));
+                // Get index
+                opcodes.push(OpCode::GetGlobal(0));
+                // Get lhs
+                opcodes.push(OpCode::GetGlobal(1));
+                // Load size
+                opcodes.push(OpCode::I32Load(0, 4));
+                // Check if index < size
+                opcodes.push(OpCode::I32LessUnsigned);
+                opcodes.push(OpCode::If);
+                opcodes.push(OpCode::Type(WasmType::Empty));
+                // Push on index
+                opcodes.push(OpCode::GetGlobal(0));
+                // Push on lhs
+                opcodes.push(OpCode::GetGlobal(1));
                 opcodes.push(OpCode::I32Add);
+                opcodes.push(OpCode::SetGlobal(0));
+                opcodes.push(OpCode::Else);
+                opcodes.push(OpCode::Unreachable);
+                opcodes.push(OpCode::End);
+                opcodes.push(OpCode::SetGlobal(1));
+                opcodes.push(OpCode::GetGlobal(0));
                 opcodes.push(OpCode::I32Load8U(0, 8));
                 Ok(opcodes)
             }

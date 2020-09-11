@@ -26,8 +26,8 @@ export const printString = (memory: WebAssembly.Memory) => (bytePtr: number) => 
 };
 
 export const printChar = (memory: WebAssembly.Memory) => (c: number) => {
+    console.log(`CHAR CODE ${c}`);
     printHeap(memory);
-    console.log(c);
     console.log(String.fromCharCode(c));
 };
 

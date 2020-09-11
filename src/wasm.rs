@@ -19,6 +19,7 @@ pub enum OpCode {
     I32Div,
     I32Xor,
     I32Eq,
+    I32LessUnsigned,
     I32LessSigned,
     I32GreaterSigned,
     //    I32GreaterUnsigned,
@@ -47,8 +48,6 @@ pub enum OpCode {
     CallIndirect(u32),
     Unreachable,
     Drop,
-    //    GrowMemory,
-    //    CurrentMemory,
 }
 
 #[derive(Debug, Clone, PartialEq)]
