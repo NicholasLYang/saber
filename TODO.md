@@ -4,6 +4,7 @@
   - ~~Probably add a ref count for types (really no need to copy them
     since they're relatively immutable)~~
   - Convert typechecking and code gen errors to codespan
+  - Add arrays
 - Parsing
   - ~~Convert to expression based syntax~~
   - Trailing comma?

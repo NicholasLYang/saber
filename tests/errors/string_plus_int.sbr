@@ -1,0 +1,6 @@
+let main = () => {
+  let str = "hello" + 5;
+  printString(str);
+}
+
+export main;

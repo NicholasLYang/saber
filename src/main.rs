@@ -87,14 +87,15 @@ fn read_file(file_name: &str) -> Result<()> {
     let program_t = typechecker.check_program(program);
     let runtime_type_info = typechecker.generate_runtime_type_info(&program_t.named_types);
     for error in &program_t.errors {
-        println!("{}", error);
+        let diagnostic: Diagnostic<()> = error.into();
+        term::emit(&mut writer.lock(), &config, &file, &diagnostic).unwrap();
     }
     let type_info_str = runtime_type_info
         .iter()
         .map(|(name, type_info)| format!("{}:{}", name, format_bool_vec(&type_info)))
         .collect::<Vec<String>>()
         .join(",");
-    let mut type_info_file = File::create("build/type_info.ts")?;
+    let mut type_info_file = File::create("runtime/type_info.ts")?;
     write!(
         type_info_file,
         "export const typeInfo: {{ [n: number]: boolean[] }} = {{{}}};export const STR_INDEX = {};",

@@ -72,7 +72,21 @@ impl TypeTable {
         self.table[id] = type_
     }
 
+    // Follows the solved chain to final inferred type
+    pub fn get_final_type(&self, id: TypeId) -> TypeId {
+        let mut id = id;
+        while let Type::Solved(solved_id) = &self.table[id] {
+            id = *solved_id;
+        }
+        id
+    }
+
     pub fn get_type(&self, id: TypeId) -> &Type {
-        &self.table[id]
+        let type_ = &self.table[id];
+        if let Type::Solved(id) = type_ {
+            self.get_type(*id)
+        } else {
+            type_
+        }
     }
 }

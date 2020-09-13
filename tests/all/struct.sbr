@@ -1,0 +1,16 @@
+struct Person {
+  name: string,
+  age: int
+}
+
+let main = () => {
+  let p = Person {
+    name: "Nicholas",
+    age: 21
+  };
+  let { name, age } = p;
+  printString(name);
+  printInt(age);
+}
+
+export main;

@@ -652,7 +652,7 @@ impl CodeGenerator {
                 if elems.len() == 0 {
                     Ok(Vec::new())
                 } else {
-                    self.generate_record_literal(elems.iter(), elems.len(), *type_id, expr.location)
+                    self.generate_tuple(elems.iter(), elems.len(), *type_id, expr.location)
                 }
             }
             ExprT::Block {
@@ -758,7 +758,7 @@ impl CodeGenerator {
                 name: _,
                 fields,
                 type_,
-            } => self.generate_record_literal(
+            } => self.generate_tuple(
                 fields.iter().map(|(_, expr)| expr),
                 fields.len(),
                 *type_,
@@ -767,7 +767,7 @@ impl CodeGenerator {
         }
     }
 
-    fn generate_record_literal<'a, I>(
+    fn generate_tuple<'a, I>(
         &mut self,
         fields: I,
         length: usize,
@@ -795,7 +795,8 @@ impl CodeGenerator {
         // Get ptr to record
         opcodes.push(OpCode::GetGlobal(0));
         // TODO: Add proper error handling for too many types.
-        opcodes.push(OpCode::I32Const(type_id.try_into().unwrap()));
+        let final_type_id = self.type_table.get_final_type(type_id);
+        opcodes.push(OpCode::I32Const(final_type_id.try_into().unwrap()));
         // *ptr = type_id
         opcodes.push(OpCode::I32Store(2, offset));
         offset += 4;

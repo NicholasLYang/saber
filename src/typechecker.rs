@@ -9,61 +9,86 @@ use crate::symbol_table::{FunctionInfo, SymbolTable};
 use crate::utils::{
     NameTable, TypeTable, BOOL_INDEX, CHAR_INDEX, FLOAT_INDEX, INT_INDEX, STR_INDEX, UNIT_INDEX,
 };
-use im::hashmap::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::convert::TryInto;
+use std::fmt;
 use std::sync::Arc;
 
-#[derive(Debug, Fail, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum TypeError {
-    #[fail(display = "{}: Variable not defined: '{}'", location, name)]
     VarNotDefined {
-        location: LocationRange,
         name: String,
     },
-    #[fail(
-        display = "{}: Could not find operation {} with arguments of type {} and {}",
-        location, op, lhs_type, rhs_type
-    )]
     OpFailure {
-        location: LocationRange,
         op: Op,
         lhs_type: Type,
         rhs_type: Type,
     },
-    #[fail(display = "{}: Could not unify {} with {}", location, type1, type2)]
     UnificationFailure {
-        location: LocationRange,
         type1: String,
         type2: String,
     },
-    #[fail(display = "{}: Type {} does not exist", location, type_name)]
     TypeDoesNotExist {
-        location: LocationRange,
         type_name: String,
     },
-    #[fail(display = "Field {} does not exist in record", name)]
-    FieldDoesNotExist { name: String },
-    #[fail(display = "Type {} is not a record", type_)]
-    NotARecord { type_: String },
-    #[fail(display = "Type {} is not a tuple", type_)]
-    NotATuple { type_: String },
-    #[fail(display = "{} Cannot apply unary operator to {:?}", location, expr)]
-    InvalidUnaryExpr {
-        location: LocationRange,
-        expr: ExprT,
+    FieldDoesNotExist {
+        name: String,
+        record: String,
     },
-    #[fail(display = "Callee is not a function")]
+    NotARecord {
+        type_: String,
+    },
+    NotATuple {
+        type_: String,
+    },
+    InvalidUnaryExpr,
     CalleeNotFunction,
-    #[fail(display = "{}: Cannot return at top level", location)]
-    TopLevelReturn { location: LocationRange },
-    #[fail(
-        display = "{}: Function appears to be shadowed by var of same name",
-        location
-    )]
-    ShadowingFunction { location: LocationRange },
-    #[fail(display = "Index {} is out of bounds of tuple {}", index, tuple_type)]
-    TupleIndexOutOfBounds { index: u32, tuple_type: String },
+    TopLevelReturn,
+    ShadowingFunction,
+    TupleIndexOutOfBounds {
+        index: u32,
+        tuple_type: String,
+    },
+}
+
+impl fmt::Display for TypeError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            TypeError::VarNotDefined { name } => write!(f, "Variable not defined: '{}'", name),
+            TypeError::OpFailure {
+                op,
+                lhs_type,
+                rhs_type,
+            } => write!(
+                f,
+                "Could not find operation {} with arguments of type {} and {}",
+                op, lhs_type, rhs_type
+            ),
+            TypeError::UnificationFailure { type1, type2 } => {
+                write!(f, "Could not unify {} with {}", type1, type2)
+            }
+            TypeError::TypeDoesNotExist { type_name } => {
+                write!(f, "Type {} does not exist", type_name)
+            }
+            TypeError::FieldDoesNotExist { name, record } => {
+                write!(f, "Field {} does not exist on record {}", name, record)
+            }
+            TypeError::NotARecord { type_ } => write!(f, "Type {} is not a record", type_),
+            TypeError::NotATuple { type_ } => write!(f, "Type {} is not a tuple", type_),
+            TypeError::InvalidUnaryExpr => write!(f, "Cannot apply unary operator"),
+            TypeError::CalleeNotFunction => write!(f, "Callee is not a function"),
+            TypeError::TopLevelReturn => write!(f, "Cannot return at top level"),
+            TypeError::ShadowingFunction => {
+                write!(f, "Function appears to be shadowed by var of same name")
+            }
+            TypeError::TupleIndexOutOfBounds { index, tuple_type } => write!(
+                f,
+                "Index {} is out of bounds of tuple {}",
+                index, tuple_type
+            ),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -210,7 +235,8 @@ impl TypeChecker {
     ) -> Vec<(Name, Vec<bool>)> {
         let mut type_info = Vec::new();
         for (_, type_id) in named_types {
-            self.generate_type_info(*type_id)
+            let final_type_id = self.type_table.get_final_type(*type_id);
+            self.generate_type_info(final_type_id)
                 .map(|info| type_info.push(info));
         }
         type_info
@@ -253,7 +279,7 @@ impl TypeChecker {
     }
 
     // Reads functions defined in this block
-    fn read_functions(&mut self, stmts: &Vec<Loc<Stmt>>) -> Result<(), TypeError> {
+    fn read_functions(&mut self, stmts: &Vec<Loc<Stmt>>) -> Result<(), Loc<TypeError>> {
         for stmt in stmts {
             if let Stmt::Function(func_name, params, return_type_sig, _) = &stmt.inner {
                 let params_type = self.pat(&params)?;
@@ -272,7 +298,7 @@ impl TypeChecker {
         Ok(())
     }
 
-    fn type_def(&mut self, type_def: Loc<TypeDef>) -> Result<(Name, TypeId), TypeError> {
+    fn type_def(&mut self, type_def: Loc<TypeDef>) -> Result<(Name, TypeId), Loc<TypeError>> {
         match type_def.inner {
             TypeDef::Struct(name, fields) => {
                 let mut typed_fields = Vec::new();
@@ -287,7 +313,7 @@ impl TypeChecker {
         }
     }
 
-    pub fn stmt(&mut self, stmt: Loc<Stmt>) -> Result<Vec<Loc<StmtT>>, TypeError> {
+    pub fn stmt(&mut self, stmt: Loc<Stmt>) -> Result<Vec<Loc<StmtT>>, Loc<TypeError>> {
         let location = stmt.location;
         match stmt.inner {
             Stmt::Expr(expr) => {
@@ -301,15 +327,17 @@ impl TypeChecker {
                 let sym_entry = if let Some(entry) = self.symbol_table.lookup_name(func_name) {
                     entry
                 } else {
-                    return Err(TypeError::VarNotDefined {
-                        name: self.name_table.get_str(&func_name).to_string(),
-                        location,
-                    });
+                    return Err(loc!(
+                        TypeError::VarNotDefined {
+                            name: self.name_table.get_str(&func_name).to_string(),
+                        },
+                        location
+                    ));
                 };
                 let (params_type, return_type) = if let Some(func_info) = &sym_entry.function_info {
                     (func_info.params_type, func_info.return_type)
                 } else {
-                    return Err(TypeError::ShadowingFunction { location });
+                    return Err(loc!(TypeError::ShadowingFunction, location));
                 };
                 let (function, _) = self.function(func_name, params, *body)?;
                 Ok(vec![Loc {
@@ -327,29 +355,15 @@ impl TypeChecker {
                 let typed_expr = self.expr(expr)?;
                 match self.return_type {
                     Some(return_type) => {
-                        if self.is_unifiable(typed_expr.inner.get_type(), return_type) {
-                            Ok(vec![Loc {
-                                location,
-                                inner: StmtT::Return(typed_expr),
-                            }])
-                        } else {
-                            let type1 = type_to_string(
-                                &self.name_table,
-                                &self.type_table,
-                                typed_expr.inner.get_type(),
-                            );
-                            let type2 =
-                                type_to_string(&self.name_table, &self.type_table, return_type);
-                            Err(TypeError::UnificationFailure {
-                                location,
-                                type1,
-                                type2,
-                            })
-                        }
+                        let type_ =
+                            self.unify_or_err(typed_expr.inner.get_type(), return_type, location)?;
+                        self.return_type = Some(type_);
+                        Ok(vec![Loc {
+                            location,
+                            inner: StmtT::Return(typed_expr),
+                        }])
                     }
-                    None => Err(TypeError::TopLevelReturn {
-                        location: stmt.location,
-                    }),
+                    None => Err(loc!(TypeError::TopLevelReturn, stmt.location)),
                 }
             }
             Stmt::Block(stmts) => {
@@ -364,12 +378,12 @@ impl TypeChecker {
                 }])
             }
             Stmt::Export(name) => {
-                self.symbol_table
-                    .lookup_name(name)
-                    .ok_or(TypeError::VarNotDefined {
-                        location,
+                self.symbol_table.lookup_name(name).ok_or(loc!(
+                    TypeError::VarNotDefined {
                         name: self.name_table.get_str(&name).to_string(),
-                    })?;
+                    },
+                    location
+                ))?;
                 Ok(vec![Loc {
                     location,
                     inner: StmtT::Export(name),
@@ -399,7 +413,7 @@ impl TypeChecker {
         }
     }
 
-    fn lookup_type_sig(&mut self, sig: &Loc<TypeSig>) -> Result<TypeId, TypeError> {
+    fn lookup_type_sig(&mut self, sig: &Loc<TypeSig>) -> Result<TypeId, Loc<TypeError>> {
         match &sig.inner {
             TypeSig::Array(sig) => {
                 let type_ = self.lookup_type_sig(sig)?;
@@ -408,10 +422,12 @@ impl TypeChecker {
             TypeSig::Name(name) => self
                 .type_names
                 .get(name)
-                .ok_or(TypeError::TypeDoesNotExist {
-                    location: sig.location,
-                    type_name: self.name_table.get_str(name).to_string(),
-                })
+                .ok_or(loc!(
+                    TypeError::TypeDoesNotExist {
+                        type_name: self.name_table.get_str(name).to_string(),
+                    },
+                    sig.location
+                ))
                 .map(|t| *t),
             TypeSig::Empty => Ok(UNIT_INDEX),
             TypeSig::Arrow(param_sigs, return_sig) => {
@@ -433,7 +449,7 @@ impl TypeChecker {
         }
     }
 
-    fn pat(&mut self, pat: &Pat) -> Result<TypeId, TypeError> {
+    fn pat(&mut self, pat: &Pat) -> Result<TypeId, Loc<TypeError>> {
         match pat {
             Pat::Id(_, Some(type_sig), _) => {
                 let type_ = self.lookup_type_sig(&type_sig)?;
@@ -465,7 +481,7 @@ impl TypeChecker {
 
     /// Gets the function parameters as a list of names with
     /// types. Useful for WebAssembly code generation.
-    fn get_func_params(&mut self, pat: &Pat) -> Result<Vec<(Name, TypeId)>, TypeError> {
+    fn get_func_params(&mut self, pat: &Pat) -> Result<Vec<(Name, TypeId)>, Loc<TypeError>> {
         match pat {
             Pat::Id(name, Some(type_sig), _) => {
                 let type_ = self.lookup_type_sig(&type_sig)?;
@@ -483,7 +499,7 @@ impl TypeChecker {
                 }
                 Ok(types)
             }
-            Pat::Record(names, type_sig, _) => {
+            Pat::Record(names, type_sig, location) => {
                 let type_ = if let Some(type_sig) = type_sig {
                     Some(self.lookup_type_sig(&type_sig)?)
                 } else {
@@ -492,7 +508,7 @@ impl TypeChecker {
                 let mut params = Vec::new();
                 for name in names {
                     let field_type = if let Some(t) = &type_ {
-                        self.get_field_type(*t, *name)?.1
+                        self.get_field_type(*t, *name, *location)?.1
                     } else {
                         self.get_fresh_type_var()
                     };
@@ -508,20 +524,28 @@ impl TypeChecker {
         &mut self,
         record_type: TypeId,
         field_name: usize,
-    ) -> Result<(u32, TypeId), TypeError> {
+        location: LocationRange,
+    ) -> Result<(u32, TypeId), Loc<TypeError>> {
         if let Type::Record(fields) = self.type_table.get_type(record_type) {
             if let Some(pos) = fields.iter().position(|(name, _)| *name == field_name) {
                 let (_, type_) = fields[pos];
                 Ok((pos.try_into().unwrap(), type_))
             } else {
-                Err(TypeError::FieldDoesNotExist {
-                    name: self.name_table.get_str(&field_name).to_string(),
-                })
+                Err(loc!(
+                    TypeError::FieldDoesNotExist {
+                        record: type_to_string(&self.name_table, &self.type_table, record_type),
+                        name: self.name_table.get_str(&field_name).to_string(),
+                    },
+                    location
+                ))
             }
         } else {
-            Err(TypeError::NotARecord {
-                type_: type_to_string(&self.name_table, &self.type_table, record_type),
-            })
+            Err(loc!(
+                TypeError::NotARecord {
+                    type_: type_to_string(&self.name_table, &self.type_table, record_type),
+                },
+                location
+            ))
         }
     }
 
@@ -535,13 +559,13 @@ impl TypeChecker {
         owner_name: Name,
         rhs_type: TypeId,
         location: LocationRange,
-    ) -> Result<Vec<Loc<StmtT>>, TypeError> {
+    ) -> Result<Vec<Loc<StmtT>>, Loc<TypeError>> {
         let mut bindings = Vec::new();
         match pat {
             Pat::Id(_, _, _) | Pat::Empty(_) => Ok(Vec::new()),
             Pat::Record(names, _, _) => {
                 for name in names {
-                    let (index, type_) = self.get_field_type(rhs_type, *name)?;
+                    let (index, type_) = self.get_field_type(rhs_type, *name, location)?;
                     self.symbol_table.insert_var(*name, type_.clone());
                     bindings.push(Loc {
                         location,
@@ -605,7 +629,7 @@ impl TypeChecker {
         pat: Pat,
         rhs: Loc<Expr>,
         location: LocationRange,
-    ) -> Result<Vec<Loc<StmtT>>, TypeError> {
+    ) -> Result<Vec<Loc<StmtT>>, Loc<TypeError>> {
         let pat_type = self.pat(&pat)?;
         let typed_rhs = self.expr(rhs)?;
         let type_ = self.unify_or_err(pat_type, typed_rhs.inner.get_type(), location)?;
@@ -653,7 +677,7 @@ impl TypeChecker {
         name: Name,
         params: Pat,
         body: Loc<Expr>,
-    ) -> Result<(Function, TypeId), TypeError> {
+    ) -> Result<(Function, TypeId), Loc<TypeError>> {
         let entry = self.symbol_table.lookup_name(name);
         let entry = entry.as_ref().unwrap();
         let func_info = entry.function_info.as_ref().unwrap();
@@ -704,7 +728,7 @@ impl TypeChecker {
         ))
     }
 
-    fn expr(&mut self, expr: Loc<Expr>) -> Result<Loc<ExprT>, TypeError> {
+    fn expr(&mut self, expr: Loc<Expr>) -> Result<Loc<ExprT>, Loc<TypeError>> {
         let location = expr.location;
         match expr.inner {
             Expr::Primary { value } => Ok(Loc {
@@ -712,13 +736,12 @@ impl TypeChecker {
                 inner: self.value(value),
             }),
             Expr::Var { name } => {
-                let entry =
-                    self.symbol_table
-                        .lookup_name(name)
-                        .ok_or(TypeError::VarNotDefined {
-                            location,
-                            name: self.name_table.get_str(&name).to_string(),
-                        })?;
+                let entry = self.symbol_table.lookup_name(name).ok_or(loc!(
+                    TypeError::VarNotDefined {
+                        name: self.name_table.get_str(&name).to_string(),
+                    },
+                    location
+                ))?;
                 Ok(Loc {
                     location,
                     inner: ExprT::Var {
@@ -745,12 +768,14 @@ impl TypeChecker {
                     None => {
                         let lhs_type = self.type_table.get_type(typed_lhs.inner.get_type()).clone();
                         let rhs_type = self.type_table.get_type(typed_rhs.inner.get_type()).clone();
-                        Err(TypeError::OpFailure {
-                            location,
-                            op: op.clone(),
-                            lhs_type,
-                            rhs_type,
-                        })
+                        Err(loc!(
+                            TypeError::OpFailure {
+                                op: op.clone(),
+                                lhs_type,
+                                rhs_type,
+                            },
+                            location
+                        ))
                     }
                 }
             }
@@ -842,10 +867,7 @@ impl TypeChecker {
                         },
                     })
                 } else {
-                    Err(TypeError::InvalidUnaryExpr {
-                        location: typed_rhs.location,
-                        expr: typed_rhs.inner,
-                    })
+                    Err(loc!(TypeError::InvalidUnaryExpr, location))
                 }
             }
             Expr::Call { callee, args } => {
@@ -891,7 +913,7 @@ impl TypeChecker {
                         self.type_table.update(callee_type, Type::Solved(new_id));
                         (params_type, return_type)
                     }
-                    _ => return Err(TypeError::CalleeNotFunction),
+                    _ => return Err(loc!(TypeError::CalleeNotFunction, location)),
                 };
                 let args_type = typed_args.inner.get_type();
                 self.unify_or_err(params_type, args_type, typed_args.location)?;
@@ -963,10 +985,12 @@ impl TypeChecker {
                     *id
                 } else {
                     let name_str = self.name_table.get_str(&name);
-                    return Err(TypeError::TypeDoesNotExist {
-                        location,
-                        type_name: name_str.to_string(),
-                    });
+                    return Err(loc!(
+                        TypeError::TypeDoesNotExist {
+                            type_name: name_str.to_string(),
+                        },
+                        location
+                    ));
                 };
 
                 let mut field_types = Vec::new();
@@ -978,6 +1002,7 @@ impl TypeChecker {
                 }
                 let expr_type = self.type_table.insert(Type::Record(field_types));
                 let type_ = self.unify_or_err(type_id, expr_type, location)?;
+                self.type_names.insert(name, type_);
                 Ok(Loc {
                     location,
                     inner: ExprT::Record {
@@ -990,26 +1015,15 @@ impl TypeChecker {
             Expr::Index { lhs, index } => {
                 let lhs_t = self.expr(*lhs)?;
                 let index_t = self.expr(*index)?;
-                if self.is_unifiable(lhs_t.inner.get_type(), STR_INDEX) {
-                    Ok(loc!(
-                        ExprT::Index {
-                            lhs: Box::new(lhs_t),
-                            index: Box::new(index_t),
-                            type_: CHAR_INDEX,
-                        },
-                        location
-                    ))
-                } else {
-                    Err(TypeError::UnificationFailure {
-                        location,
-                        type1: "string".to_string(),
-                        type2: type_to_string(
-                            &self.name_table,
-                            &self.type_table,
-                            lhs_t.inner.get_type(),
-                        ),
-                    })
-                }
+                self.unify_or_err(lhs_t.inner.get_type(), STR_INDEX, location)?;
+                Ok(loc!(
+                    ExprT::Index {
+                        lhs: Box::new(lhs_t),
+                        index: Box::new(index_t),
+                        type_: CHAR_INDEX,
+                    },
+                    location
+                ))
             }
             Expr::TupleField(lhs, index) => {
                 let lhs_t = self.expr(*lhs)?;
@@ -1023,23 +1037,29 @@ impl TypeChecker {
                             location
                         ))
                     } else {
-                        Err(TypeError::TupleIndexOutOfBounds {
-                            index,
-                            tuple_type: type_to_string(
+                        Err(loc!(
+                            TypeError::TupleIndexOutOfBounds {
+                                index,
+                                tuple_type: type_to_string(
+                                    &self.name_table,
+                                    &self.type_table,
+                                    lhs_t.inner.get_type(),
+                                ),
+                            },
+                            location
+                        ))
+                    }
+                } else {
+                    Err(loc!(
+                        TypeError::NotATuple {
+                            type_: type_to_string(
                                 &self.name_table,
                                 &self.type_table,
                                 lhs_t.inner.get_type(),
                             ),
-                        })
-                    }
-                } else {
-                    Err(TypeError::NotATuple {
-                        type_: type_to_string(
-                            &self.name_table,
-                            &self.type_table,
-                            lhs_t.inner.get_type(),
-                        ),
-                    })
+                        },
+                        location
+                    ))
                 }
             }
             Expr::Field(lhs, name) => {
@@ -1061,18 +1081,29 @@ impl TypeChecker {
                         })
                     } else {
                         let name_str = self.name_table.get_str(&name);
-                        Err(TypeError::FieldDoesNotExist {
-                            name: name_str.to_string(),
-                        })
+                        Err(loc!(
+                            TypeError::FieldDoesNotExist {
+                                name: name_str.to_string(),
+                                record: type_to_string(
+                                    &self.name_table,
+                                    &self.type_table,
+                                    lhs_t.inner.get_type()
+                                )
+                            },
+                            location
+                        ))
                     }
                 } else {
-                    Err(TypeError::NotARecord {
-                        type_: type_to_string(
-                            &self.name_table,
-                            &self.type_table,
-                            lhs_t.inner.get_type(),
-                        ),
-                    })
+                    Err(loc!(
+                        TypeError::NotARecord {
+                            type_: type_to_string(
+                                &self.name_table,
+                                &self.type_table,
+                                lhs_t.inner.get_type(),
+                            ),
+                        },
+                        location
+                    ))
                 }
             }
         }
@@ -1213,12 +1244,15 @@ impl TypeChecker {
         type1: TypeId,
         type2: TypeId,
         location: LocationRange,
-    ) -> Result<TypeId, TypeError> {
-        self.unify(type1, type2)
-            .ok_or_else(|| TypeError::UnificationFailure {
-                type1: type_to_string(&self.name_table, &self.type_table, type1),
-                type2: type_to_string(&self.name_table, &self.type_table, type2),
-                location,
-            })
+    ) -> Result<TypeId, Loc<TypeError>> {
+        self.unify(type1, type2).ok_or_else(|| {
+            loc!(
+                TypeError::UnificationFailure {
+                    type1: type_to_string(&self.name_table, &self.type_table, type1),
+                    type2: type_to_string(&self.name_table, &self.type_table, type2),
+                },
+                location
+            )
+        })
     }
 }

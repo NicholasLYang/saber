@@ -4,7 +4,6 @@ use crate::lexer::{Lexer, LexicalError, LocationRange, Token, TokenDiscriminants
 use crate::loc;
 use crate::printer::token_to_string;
 use crate::utils::NameTable;
-use codespan_reporting::diagnostic::{Diagnostic, Label};
 use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
 use std::fmt::{self, Debug};
@@ -64,23 +63,12 @@ impl fmt::Display for ParseError {
     }
 }
 
-impl Into<Diagnostic<()>> for &Loc<ParseError> {
-    fn into(self) -> Diagnostic<()> {
-        let range: std::ops::Range<usize> = self.location.into();
-        Diagnostic::error()
-            .with_message("Parse Error")
-            .with_labels(vec![
-                Label::primary((), range).with_message(self.inner.to_string())
-            ])
-    }
-}
-
 impl From<Loc<LexicalError>> for Loc<ParseError> {
-    fn from(err: Loc<LexicalError>) -> Self {
-        Loc {
-            location: err.location,
-            inner: ParseError::LexicalError { err: err.inner },
-        }
+    fn from(error: Loc<LexicalError>) -> Self {
+        loc!(
+            ParseError::LexicalError { err: error.inner },
+            error.location
+        )
     }
 }
 

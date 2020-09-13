@@ -1,6 +1,9 @@
-use crate::ast::{Type, TypeId};
+use crate::ast::{Loc, Type, TypeId};
 use crate::lexer::Token;
+use crate::parser::ParseError;
+use crate::typechecker::TypeError;
 use crate::utils::{NameTable, TypeTable};
+use codespan_reporting::diagnostic::{Diagnostic, Label};
 use itertools::Itertools;
 
 pub fn type_to_string(name_table: &NameTable, type_table: &TypeTable, type_id: TypeId) -> String {
@@ -92,5 +95,27 @@ pub fn token_to_string(name_table: &NameTable, token: &Token) -> String {
         Token::Arrow => "->".to_string(),
         Token::Slash => "\\".to_string(),
         Token::String(s) => format!("\"{}\"", s),
+    }
+}
+
+impl Into<Diagnostic<()>> for &Loc<TypeError> {
+    fn into(self) -> Diagnostic<()> {
+        let range: std::ops::Range<usize> = self.location.into();
+        Diagnostic::error()
+            .with_message("Type Error")
+            .with_labels(vec![
+                Label::primary((), range).with_message(self.inner.to_string())
+            ])
+    }
+}
+
+impl Into<Diagnostic<()>> for &Loc<ParseError> {
+    fn into(self) -> Diagnostic<()> {
+        let range: std::ops::Range<usize> = self.location.into();
+        Diagnostic::error()
+            .with_message("Parse Error")
+            .with_labels(vec![
+                Label::primary((), range).with_message(self.inner.to_string())
+            ])
     }
 }

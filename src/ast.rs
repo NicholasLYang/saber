@@ -45,7 +45,7 @@ pub struct Program {
 pub struct ProgramT {
     pub stmts: Vec<Loc<StmtT>>,
     pub named_types: Vec<(Name, TypeId)>,
-    pub errors: Vec<TypeError>,
+    pub errors: Vec<Loc<TypeError>>,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
