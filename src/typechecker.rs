@@ -487,11 +487,12 @@ impl TypeChecker {
         match pat {
             Pat::Id(name, Some(type_sig), _) => {
                 let type_ = self.lookup_type_sig(&type_sig)?;
+                self.symbol_table.insert_var(*name, type_);
                 Ok(vec![(*name, type_)])
             }
             Pat::Id(name, None, _) => {
                 let type_ = self.get_fresh_type_var();
-                self.symbol_table.insert_var(*name, type_.clone());
+                self.symbol_table.insert_var(*name, type_);
                 Ok(vec![(*name, type_)])
             }
             Pat::Tuple(pats, _) => {
@@ -703,7 +704,6 @@ impl TypeChecker {
         self.return_type = Some(return_type);
 
         let body_location = body.location;
-
         // Check body
         let body = self.expr(body)?;
 
@@ -1122,8 +1122,9 @@ impl TypeChecker {
     fn op(&mut self, op: &Op, lhs_type: TypeId, rhs_type: TypeId) -> Option<TypeId> {
         match op {
             Op::Plus | Op::Minus | Op::Times | Op::Div => {
-                if self.is_unifiable(lhs_type, INT_INDEX) && self.is_unifiable(rhs_type, INT_INDEX)
-                {
+                let lhs_is_unifiable = self.is_unifiable(lhs_type, INT_INDEX);
+                let rhs_is_unifiable = self.is_unifiable(rhs_type, INT_INDEX);
+                if lhs_is_unifiable && rhs_is_unifiable {
                     Some(INT_INDEX)
                 } else if lhs_type == FLOAT_INDEX && rhs_type == INT_INDEX {
                     Some(FLOAT_INDEX)
@@ -1229,6 +1230,7 @@ impl TypeChecker {
                     _ => None,
                 }
             }
+            (Type::Int, Type::Int) => Some(INT_INDEX),
             (Type::Int, Type::Bool) => Some(type_id1),
             (Type::Bool, Type::Int) => Some(type_id2),
             (Type::Var(_), _) => {

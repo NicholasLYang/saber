@@ -1,0 +1,7 @@
+let foo = (a: int) => {
+  printInt(a);
+}
+
+let main = () => {
+  foo("bar");
+}
