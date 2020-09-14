@@ -1,0 +1,8 @@
+struct Person {
+  name: string
+}
+
+let main = () => {
+  let p = Person { name: "Nicholas" };
+  printInt(p.age);
+}

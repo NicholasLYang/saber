@@ -220,7 +220,7 @@ impl TypeChecker {
 
     fn generate_type_info(&self, type_id: TypeId) -> Option<(usize, Vec<bool>)> {
         match self.type_table.get_type(type_id) {
-            Type::Record(fields) => {
+            Type::Record(_, fields) => {
                 let field_info =
                     self.generate_field_info(fields.iter().map(|(_, type_id)| type_id));
                 Some((type_id, field_info))
@@ -308,7 +308,7 @@ impl TypeChecker {
                     let field_type = self.lookup_type_sig(&type_sig)?;
                     typed_fields.push((name, field_type));
                 }
-                let type_id = self.type_table.insert(Type::Record(typed_fields));
+                let type_id = self.type_table.insert(Type::Record(name, typed_fields));
                 self.type_names.insert(name, type_id);
                 Ok((name, type_id))
             }
@@ -472,7 +472,9 @@ impl TypeChecker {
                         .iter()
                         .map(|name| Ok((*name, self.get_fresh_type_var())))
                         .collect();
-                    Ok(self.type_table.insert(Type::Record(types?)))
+                    Ok(self
+                        .type_table
+                        .insert(Type::Record(self.name_table.get_fresh_name(), types?)))
                 }
             }
             Pat::Empty(_) => Ok(UNIT_INDEX),
@@ -526,7 +528,7 @@ impl TypeChecker {
         field_name: usize,
         location: LocationRange,
     ) -> Result<(u32, TypeId), Loc<TypeError>> {
-        if let Type::Record(fields) = self.type_table.get_type(record_type) {
+        if let Type::Record(_, fields) = self.type_table.get_type(record_type) {
             if let Some(pos) = fields.iter().position(|(name, _)| *name == field_name) {
                 let (_, type_) = fields[pos];
                 Ok((pos.try_into().unwrap(), type_))
@@ -1008,7 +1010,7 @@ impl TypeChecker {
                     field_types.push((name, expr_t.inner.get_type()));
                     fields_t.push((name, expr_t));
                 }
-                let expr_type = self.type_table.insert(Type::Record(field_types));
+                let expr_type = self.type_table.insert(Type::Record(name, field_types));
                 let type_ = self.unify_or_err(type_id, expr_type, location)?;
                 self.type_names.insert(name, type_);
                 Ok(Loc {
@@ -1073,7 +1075,7 @@ impl TypeChecker {
             Expr::Field(lhs, name) => {
                 let lhs_t = self.expr(*lhs)?;
                 let type_ = self.type_table.get_type(lhs_t.inner.get_type());
-                if let Type::Record(fields) = type_ {
+                if let Type::Record(_, fields) = type_ {
                     let position = fields
                         .iter()
                         .position(|(field_name, _)| *field_name == name);
@@ -1180,8 +1182,8 @@ impl TypeChecker {
         let type1 = self.type_table.get_type(type_id1).clone();
         let type2 = self.type_table.get_type(type_id2).clone();
         match (type1, type2) {
-            (Type::Record(fields), Type::Record(other_fields)) => {
-                if fields.len() != other_fields.len() {
+            (Type::Record(name, fields), Type::Record(other_name, other_fields)) => {
+                if fields.len() != other_fields.len() || name != other_name {
                     return None;
                 }
                 let mut unified_fields = Vec::new();
@@ -1195,7 +1197,7 @@ impl TypeChecker {
                         return None;
                     }
                 }
-                let id = self.type_table.insert(Type::Record(unified_fields));
+                let id = self.type_table.insert(Type::Record(name, unified_fields));
                 self.type_table.update(type_id1, Type::Solved(id));
                 self.type_table.update(type_id2, Type::Solved(id));
                 Some(id)

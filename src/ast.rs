@@ -264,7 +264,7 @@ pub enum Type {
     String,
     Var(Name),
     Array(TypeId),
-    Record(Vec<(Name, TypeId)>),
+    Record(Name, Vec<(Name, TypeId)>),
     Tuple(Vec<TypeId>),
     Arrow(TypeId, TypeId),
     // Points to a type that is solved further
@@ -286,13 +286,13 @@ impl fmt::Display for Type {
                 Type::String => "string".into(),
                 Type::Var(name) => format!("var({})", name),
                 Type::Array(t) => format!("[{}]", t),
-                Type::Record(fields) => {
+                Type::Record(name, fields) => {
                     let elems = fields
                         .iter()
                         .map(|(n, t)| format!("{}: {}", n, t))
                         .collect::<Vec<String>>()
                         .join(", ");
-                    format!("({})", elems)
+                    format!("{} {{ {} }}", name, elems)
                 }
                 Type::Tuple(ts) => {
                     let elems = ts

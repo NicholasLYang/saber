@@ -355,7 +355,7 @@ impl CodeGenerator {
             Type::String
             | Type::Array(_)
             | Type::Arrow(_, _)
-            | Type::Record(_)
+            | Type::Record(_, _)
             | Type::Tuple(_) => Ok(Some(WasmType::i32)),
             Type::Solved(type_id) => self.generate_wasm_type(*type_id, location),
             Type::Var(id) => Err(GenerationError::CouldNotInfer {

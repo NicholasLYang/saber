@@ -16,7 +16,8 @@ pub fn type_to_string(name_table: &NameTable, type_table: &TypeTable, type_id: T
         Type::String => "string".to_string(),
         Type::Var(id) => format!("var({})", id),
         Type::Array(type_id) => format!("[{}]", type_to_string(name_table, type_table, *type_id)),
-        Type::Record(fields) => {
+        Type::Record(name, fields) => {
+            let name_str = name_table.get_str(name);
             let fields_str = fields
                 .iter()
                 .map(|(name, type_id)| {
@@ -25,7 +26,7 @@ pub fn type_to_string(name_table: &NameTable, type_table: &TypeTable, type_id: T
                     format!("{}: {}", name_str, type_str)
                 })
                 .join(", ");
-            format!("{{ {} }}", fields_str)
+            format!("{} {{ {} }}", name_str, fields_str)
         }
         Type::Tuple(types) => {
             let elem_str = types
