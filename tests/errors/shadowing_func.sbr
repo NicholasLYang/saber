@@ -1,0 +1,8 @@
+let main = () => {
+  let foo = () => {
+    printString("foo");
+  }
+  let foo = 20;
+}
+
+export main;

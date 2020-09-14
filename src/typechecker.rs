@@ -79,9 +79,11 @@ impl fmt::Display for TypeError {
             TypeError::InvalidUnaryExpr => write!(f, "Cannot apply unary operator"),
             TypeError::CalleeNotFunction => write!(f, "Callee is not a function"),
             TypeError::TopLevelReturn => write!(f, "Cannot return at top level"),
-            TypeError::ShadowingFunction => {
-                write!(f, "Function appears to be shadowed by var of same name")
-            }
+            TypeError::ShadowingFunction => write!(
+                f,
+                "This declaration is the same name as a function in this block.
+                 We can't allow this since functions must be in scope for the whole block"
+            ),
             TypeError::TupleIndexOutOfBounds { index, tuple_type } => write!(
                 f,
                 "Index {} is out of bounds of tuple {}",
@@ -334,11 +336,9 @@ impl TypeChecker {
                         location
                     ));
                 };
-                let (params_type, return_type) = if let Some(func_info) = &sym_entry.function_info {
-                    (func_info.params_type, func_info.return_type)
-                } else {
-                    return Err(loc!(TypeError::ShadowingFunction, location));
-                };
+                let func_info = sym_entry.function_info.as_ref().unwrap();
+                let params_type = func_info.params_type;
+                let return_type = func_info.return_type;
                 let (function, _) = self.function(func_name, params, *body)?;
                 Ok(vec![Loc {
                     location,
@@ -638,6 +638,14 @@ impl TypeChecker {
         } else {
             self.name_table.get_fresh_name()
         };
+        if self
+            .symbol_table
+            .lookup_name(name)
+            .map(|entry| entry.function_info.as_ref())
+            .is_some()
+        {
+            return Err(loc!(TypeError::ShadowingFunction, location));
+        }
         self.symbol_table.insert_var(name, type_);
         let mut pat_bindings =
             self.generate_pattern_bindings(&pat, name, typed_rhs.inner.get_type(), location)?;
