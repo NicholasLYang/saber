@@ -1,6 +1,7 @@
 extern crate base64;
 extern crate bimap;
 extern crate byteorder;
+extern crate clap;
 extern crate failure;
 #[macro_use]
 extern crate failure_derive;
@@ -17,12 +18,12 @@ use crate::emitter::Emitter;
 use crate::parser::Parser;
 use crate::typechecker::TypeChecker;
 use crate::types::Result;
+use clap::{App, AppSettings, Arg};
 use code_generator::CodeGenerator;
 use codespan_reporting::diagnostic::Diagnostic;
 use codespan_reporting::files::SimpleFile;
 use codespan_reporting::term;
 use codespan_reporting::term::termcolor::{ColorChoice, StandardStream};
-use std::env;
 use std::fs::{self, File};
 use std::io;
 use std::io::Write;
@@ -41,20 +42,41 @@ mod types;
 mod utils;
 mod wasm;
 
-fn main() {
-    let args: Vec<String> = env::args().collect();
+fn main() -> Result<()> {
+    let matches = App::new("saber")
+        .version("0.1.0")
+        .author("Nicholas Yang")
+        .about("Saber Programming Language")
+        .subcommand(
+            App::new("build")
+                .about("Build file")
+                .arg(Arg::with_name("file")),
+        )
+        .subcommand(
+            App::new("run")
+                .about("Run file")
+                .arg(Arg::with_name("file")),
+        )
+        .setting(AppSettings::ArgRequiredElseHelp)
+        .setting(AppSettings::ColoredHelp)
+        .get_matches();
 
-    if args.len() < 2 {
-        println!("Usage: saber <file>");
+    if let Some(build_matches) = matches.subcommand_matches("build") {
+        let file = build_matches.value_of("file").unwrap();
+        read_file(file)
+    } else if let Some(run_matches) = matches.subcommand_matches("run") {
+        let file = run_matches.value_of("file").unwrap();
+        read_file(file)?;
+        let output = Command::new("node")
+            .args(&["build/load.js"])
+            .output()
+            .expect("Failed to run code");
+        io::stderr().write_all(&output.stderr).unwrap();
+        io::stdout().write_all(&output.stdout).unwrap();
+        Ok(())
     } else {
-        let res = read_file(&args[1]);
-        match res {
-            Ok(_) => (),
-            Err(err) => {
-                println!("{}", err);
-            }
-        }
-    };
+        Ok(())
+    }
 }
 
 fn format_bool_vec(vec: &Vec<bool>) -> String {

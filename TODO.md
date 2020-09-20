@@ -37,7 +37,8 @@
   - ~~Add better error messages using name and type tables~~
   - Get automated testing
 - Build System
-  - Automate TypeScript compilation for runtime
+  - ~~Automate TypeScript compilation for runtime~~
+  - Create CLI    
 - Tooling
   - Get emacs plugin
   - Start figuring out LSP

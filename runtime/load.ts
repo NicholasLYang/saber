@@ -2,7 +2,7 @@ import { code } from "./code";
 import {alloc, clone, dealloc, debugAlloc, printChar, printHeap, printString, streq} from "./runtime";
 
 function atob(a: string) {
-    return new Buffer(a, 'base64').toString('binary');
+    return Buffer.from(a, 'base64').toString('binary');
 };
 
 function base64ToArray(base64: string) {
@@ -40,9 +40,6 @@ async function instantiate() {
 
 
 instantiate()
-    .then(res => {
-	console.log(res);
-    })
     .catch(error => {
 	console.log(error);
     });
