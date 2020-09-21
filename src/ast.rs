@@ -112,6 +112,7 @@ pub enum Expr {
         fields: Vec<(Name, Loc<Expr>)>,
     },
     Tuple(Vec<Loc<Expr>>),
+    Array(Vec<Loc<Expr>>),
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -178,6 +179,11 @@ pub enum ExprT {
         type_: TypeId,
     },
     Tuple(Vec<Loc<ExprT>>, TypeId),
+    Array {
+        entries: Vec<Loc<ExprT>>,
+        entry_type: TypeId,
+        type_: TypeId,
+    },
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -337,6 +343,11 @@ impl ExprT {
             ExprT::Primary { value: _, type_ } => *type_,
             ExprT::Var { name: _, type_ } => *type_,
             ExprT::Tuple(_elems, type_) => *type_,
+            ExprT::Array {
+                entries: _,
+                entry_type: _,
+                type_,
+            } => *type_,
             ExprT::BinOp {
                 op: _,
                 lhs: _,

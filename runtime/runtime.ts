@@ -1,4 +1,4 @@
-import { typeInfo, STR_INDEX } from "./type_info";
+import {typeInfo, STR_INDEX, ARRAY_ID, BOX_ARRAY_ID} from "./type_info";
 
 export const printHeap = (memory: WebAssembly.Memory) => {
     const memArray = new Uint8Array(memory.buffer);
@@ -94,7 +94,7 @@ export const debugAlloc = (memory: WebAssembly.Memory) => (size: number) => {
 }
 
 export const dealloc = (memory: WebAssembly.Memory) => (bytePtr: number) => {
-    let memArray = new Uint32Array(memory.buffer);
+    let memArray = new Int32Array(memory.buffer);
     const ptr = (bytePtr - 8)/4;
     memArray[ptr + 1] -= 1;
     if (memArray[ptr + 1] === 0) {
@@ -102,6 +102,16 @@ export const dealloc = (memory: WebAssembly.Memory) => (bytePtr: number) => {
         memArray[ptr] = memArray[ptr] ^ 1;
         const typeId = memArray[ptr + 2];
         if (typeId === STR_INDEX) {
+            return;
+        }
+        if (typeId === ARRAY_ID) {
+            return;
+        }
+        if (typeId === BOX_ARRAY_ID) {
+            const len = memArray[ptr + 3];
+            for (let i = 0; i < len; i ++) {
+                dealloc(memory)((ptr + 3 + i) * 4);
+            }
             return;
         }
         if (!(typeId in typeInfo)) {

@@ -211,7 +211,6 @@ impl SymbolTable {
     // Looks up name for code gen and returns index and whether the var is captured
     // or just local.
     // Only goes up to the next function barrier
-    // NOTE: This API sucks (unmarked bools are confusing) so don't keep it
     pub fn codegen_lookup(&self, name: usize) -> Option<VarIndex> {
         let mut index = Some(self.current_scope);
         while let Some(i) = index {

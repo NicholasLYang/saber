@@ -38,7 +38,7 @@
   - Get automated testing
 - Build System
   - ~~Automate TypeScript compilation for runtime~~
-  - Create CLI    
+  - Create CLI     
 - Tooling
   - Get emacs plugin
   - Start figuring out LSP

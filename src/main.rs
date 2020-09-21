@@ -19,7 +19,7 @@ use crate::parser::Parser;
 use crate::typechecker::TypeChecker;
 use crate::types::Result;
 use clap::{App, AppSettings, Arg};
-use code_generator::CodeGenerator;
+use code_generator::{CodeGenerator, ARRAY_ID, BOX_ARRAY_ID};
 use codespan_reporting::diagnostic::Diagnostic;
 use codespan_reporting::files::SimpleFile;
 use codespan_reporting::term;
@@ -112,6 +112,7 @@ fn read_file(file_name: &str) -> Result<()> {
         let diagnostic: Diagnostic<()> = error.into();
         term::emit(&mut writer.lock(), &config, &file, &diagnostic).unwrap();
     }
+
     let type_info_str = runtime_type_info
         .iter()
         .map(|(name, type_info)| format!("{}:{}", name, format_bool_vec(&type_info)))
@@ -120,8 +121,9 @@ fn read_file(file_name: &str) -> Result<()> {
     let mut type_info_file = File::create("runtime/type_info.ts")?;
     write!(
         type_info_file,
-        "export const typeInfo: {{ [n: number]: boolean[] }} = {{{}}};export const STR_INDEX = {};",
-        type_info_str, STR_INDEX
+        "export const typeInfo: {{ [n: number]: boolean[] }} = {{{}}};export const STR_INDEX = {};\
+        export const ARRAY_ID = {}; export const BOX_ARRAY_ID ={}",
+        type_info_str, STR_INDEX, ARRAY_ID, BOX_ARRAY_ID
     )?;
     let code_generator = CodeGenerator::new(typechecker);
     let program = code_generator.generate_program(program_t)?;

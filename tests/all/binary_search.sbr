@@ -1,0 +1,21 @@
+let search = (arr: int[], n: int, start: int, end: int) => {
+  if start > end {
+    return -1;
+  };
+  let mid = (start + end)/2;
+  if (arr[mid] == n) {
+    return mid;
+  }
+  if (arr[mid] > n) {
+    search(arr, n, start, mid)
+  } else {
+    search(arr, n, mid, end)
+  }
+}
+
+let main = () => {
+  let res = search([1, 4, 5, 10], 10, 0, 4);
+  printInt(res);
+}
+
+export main;

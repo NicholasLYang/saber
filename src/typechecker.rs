@@ -200,7 +200,7 @@ impl TypeChecker {
         &self.name_table
     }
 
-    fn get_fresh_type_var(&mut self) -> TypeId {
+    pub fn get_fresh_type_var(&mut self) -> TypeId {
         let type_var = Type::Var(self.type_var_index);
         self.type_var_index += 1;
         self.type_table.insert(type_var)
@@ -805,7 +805,28 @@ impl TypeChecker {
                     inner: ExprT::Tuple(typed_elems, type_id),
                 })
             }
-
+            Expr::Array(entries) => {
+                let mut typed_entries = Vec::new();
+                let mut entry_type = self.get_fresh_type_var();
+                for entry in entries {
+                    let typed_entry = self.expr(entry)?;
+                    entry_type = self.unify_or_err(
+                        entry_type,
+                        typed_entry.inner.get_type(),
+                        typed_entry.location,
+                    )?;
+                    typed_entries.push(typed_entry);
+                }
+                let array_type = self.type_table.insert(Type::Array(entry_type));
+                Ok(loc!(
+                    ExprT::Array {
+                        entries: typed_entries,
+                        entry_type,
+                        type_: array_type
+                    },
+                    location
+                ))
+            }
             Expr::Function {
                 params,
                 body,
@@ -1025,12 +1046,19 @@ impl TypeChecker {
             Expr::Index { lhs, index } => {
                 let lhs_t = self.expr(*lhs)?;
                 let index_t = self.expr(*index)?;
-                self.unify_or_err(lhs_t.inner.get_type(), STR_INDEX, location)?;
+                let lhs_type = lhs_t.inner.get_type();
+                self.unify_or_err(index_t.inner.get_type(), INT_INDEX, index_t.location)?;
+                let type_ = if let Type::Array(entry_type) = self.type_table.get_type(lhs_type) {
+                    *entry_type
+                } else {
+                    self.unify_or_err(lhs_t.inner.get_type(), STR_INDEX, lhs_t.location)?;
+                    CHAR_INDEX
+                };
                 Ok(loc!(
                     ExprT::Index {
                         lhs: Box::new(lhs_t),
                         index: Box::new(index_t),
-                        type_: CHAR_INDEX,
+                        type_,
                     },
                     location
                 ))

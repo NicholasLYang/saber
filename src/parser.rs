@@ -550,19 +550,20 @@ impl<'input> Parser<'input> {
                                 let (mut rest, right) =
                                     self.comma::<Loc<Expr>>(&Self::expr, Token::RParen)?;
                                 fields.append(&mut rest);
-                                return Ok(loc!(
-                                    Expr::Tuple(fields),
-                                    LocationRange(left.0, right.1)
-                                ));
+                                return if fields.len() == 1 {
+                                    Ok(fields.pop().unwrap())
+                                } else {
+                                    Ok(loc!(Expr::Tuple(fields), LocationRange(left.0, right.1)))
+                                };
                             }
                         }
+
                         if let Some(right_span) = self.match_one(TokenDiscriminants::RParen)? {
                             return self.finish_arrow_params(
                                 Pat::Tuple(params, LocationRange(left.0, right_span.location.1)),
                                 left,
                             );
                         } else {
-                            self.expect(TokenDiscriminants::Comma)?;
                         }
                     }
                 }
@@ -977,6 +978,13 @@ impl<'input> Parser<'input> {
                 location,
                 inner: Expr::Var { name },
             }),
+            Token::LBracket => {
+                let (entries, right) = self.comma(&Self::expr, Token::RBracket)?;
+                Ok(loc!(
+                    Expr::Array(entries),
+                    LocationRange(location.0, right.1)
+                ))
+            }
             token => {
                 let expected_tokens = format!(
                     "{}, {}, {}, {}, {}, {}",
@@ -1143,10 +1151,17 @@ impl<'input> Parser<'input> {
         let location = token.location;
         match token.inner {
             Token::Ident(name) => {
-                let sig = Loc {
+                let mut sig = Loc {
                     location,
                     inner: TypeSig::Name(name),
                 };
+                while self.match_one(TokenDiscriminants::LBracket)?.is_some() {
+                    let (_, right) = self.expect(TokenDiscriminants::RBracket)?;
+                    sig = loc!(
+                        TypeSig::Array(Box::new(sig)),
+                        LocationRange(location.0, right.1)
+                    );
+                }
                 if self.match_one(TokenDiscriminants::Arrow)?.is_some() {
                     let return_type = self.type_()?;
                     Ok(Loc {
@@ -1156,14 +1171,6 @@ impl<'input> Parser<'input> {
                 } else {
                     Ok(sig)
                 }
-            }
-            Token::LBracket => {
-                let array_type = self.type_()?;
-                let (_, right) = self.expect(TokenDiscriminants::RBracket)?;
-                Ok(Loc {
-                    location: LocationRange(location.0, right.1),
-                    inner: TypeSig::Array(Box::new(array_type)),
-                })
             }
             Token::LParen => {
                 let (param_types, _) = self.comma(&Self::type_, Token::RParen)?;

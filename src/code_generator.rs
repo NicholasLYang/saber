@@ -13,6 +13,11 @@ use crate::wasm::{
 };
 use std::convert::TryInto;
 
+// Indicates value is an array of primitives
+pub static ARRAY_ID: i32 = -1;
+// Indicates value is an array of boxed values
+pub static BOX_ARRAY_ID: i32 = -2;
+
 #[derive(Debug, Fail, PartialEq)]
 pub enum GenerationError {
     #[fail(display = "Operator '{}' for type {} does not exist", op, input_type)]
@@ -648,6 +653,11 @@ impl CodeGenerator {
                 opcodes.push(OpCode::I32Load8U(0, 8));
                 Ok(opcodes)
             }
+            ExprT::Array {
+                entries,
+                entry_type,
+                type_: _,
+            } => self.generate_array(entries, *entry_type, expr.location),
             ExprT::Tuple(elems, type_id) => {
                 if elems.len() == 0 {
                     Ok(Vec::new())
@@ -767,6 +777,73 @@ impl CodeGenerator {
         }
     }
 
+    fn generate_array(
+        &mut self,
+        entries: &Vec<Loc<ExprT>>,
+        entry_type: TypeId,
+        location: LocationRange,
+    ) -> Result<Vec<OpCode>> {
+        // We add 2 fields for type id and length
+        let length = entries.len() + 2;
+        // Since all types are either pointers or 32 bit ints/floats,
+        // we can do one field == 4 bytes
+        if length >= 64 {
+            return Err(GenerationError::RecordTooLarge { location });
+        }
+        let mut offset = 0;
+        let record_size: i32 = (4 * length).try_into().unwrap();
+        let mut opcodes = vec![OpCode::I32Const(record_size), OpCode::Call(ALLOC_INDEX)];
+        // Save pointer to block at global 0
+        opcodes.push(OpCode::SetGlobal(0));
+        // Set type_id
+        // Get ptr to record
+        opcodes.push(OpCode::GetGlobal(0));
+        if is_ref_type(self.type_table.get_final_type(entry_type)) {
+            opcodes.push(OpCode::I32Const(BOX_ARRAY_ID));
+        } else {
+            opcodes.push(OpCode::I32Const(ARRAY_ID));
+        }
+        opcodes.push(OpCode::I32Store(2, offset));
+        offset += 4;
+        opcodes.push(OpCode::GetGlobal(0));
+        opcodes.push(OpCode::I32Const(entries.len().try_into().unwrap()));
+        opcodes.push(OpCode::I32Store(2, offset));
+        offset += 4;
+        for entry in entries {
+            opcodes.append(&mut self.generate_allocated_expr(entry, offset)?);
+            offset += 4;
+        }
+        opcodes.push(OpCode::GetGlobal(0));
+        Ok(opcodes)
+    }
+
+    // Generate allocated expression for array or tuple
+    fn generate_allocated_expr(&mut self, expr: &Loc<ExprT>, offset: u32) -> Result<Vec<OpCode>> {
+        // No, you're not seeing double. We push
+        // the value of Global 0 to "save" it
+        // in case it gets mutated when we generate
+        // the struct.
+        // We push it again as an address for store
+        let mut opcodes = vec![OpCode::GetGlobal(0), OpCode::GetGlobal(0)];
+        opcodes.append(&mut self.generate_expr(expr)?);
+        let wasm_type = self
+            .generate_wasm_type(expr.inner.get_type(), expr.location)?
+            .unwrap_or(WasmType::Empty);
+        let store_code = match wasm_type {
+            // Alignment of 2, offset of 0
+            WasmType::i32 => OpCode::I32Store(2, offset),
+            WasmType::f32 => OpCode::F32Store(2, offset),
+            _ => {
+                return Err(GenerationError::NotImplemented {
+                    reason: "Cannot generate code to store types other than i32 and f32",
+                })
+            }
+        };
+        opcodes.push(store_code);
+        opcodes.push(OpCode::SetGlobal(0));
+        Ok(opcodes)
+    }
+
     fn generate_tuple<'a, I>(
         &mut self,
         fields: I,
@@ -804,29 +881,7 @@ impl CodeGenerator {
         // looping through entries, generating the opcodes and
         // storing them in the heap
         for expr in fields {
-            // No, you're not seeing double. We push
-            // the value of Global 0 to "save" it
-            // in case it gets mutated when we generate
-            // the struct.
-            opcodes.push(OpCode::GetGlobal(0));
-            // We push it again as an address for store
-            opcodes.push(OpCode::GetGlobal(0));
-            opcodes.append(&mut self.generate_expr(expr)?);
-            let wasm_type = self
-                .generate_wasm_type(expr.inner.get_type(), expr.location)?
-                .unwrap_or(WasmType::Empty);
-            let store_code = match wasm_type {
-                // Alignment of 2, offset of 0
-                WasmType::i32 => OpCode::I32Store(2, offset),
-                WasmType::f32 => OpCode::F32Store(2, offset),
-                _ => {
-                    return Err(GenerationError::NotImplemented {
-                        reason: "Cannot generate code to store types other than i32 and f32",
-                    })
-                }
-            };
-            opcodes.push(store_code);
-            opcodes.push(OpCode::SetGlobal(0));
+            opcodes.append(&mut self.generate_allocated_expr(expr, offset)?);
             offset += 4;
         }
         // return heap_ptr - sizeof(record)
