@@ -28,7 +28,8 @@ async function instantiate() {
             printInt: console.log,
             printFloat: console.log,
             printString: printString(memory),
-            printChar: printChar(memory)
+            printChar: printChar(memory),
+            printHeap: () => printHeap(memory)
         },
         mem: { heap: memory }};
     const instance = await WebAssembly.instantiate(module, importObject);

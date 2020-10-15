@@ -59,13 +59,15 @@ pub static DEALLOC_INDEX: u32 = 1;
 #[allow(dead_code)]
 pub static CLONE_INDEX: u32 = 2;
 pub static STREQ_INDEX: u32 = 3;
+pub static PRINT_HEAP_INDEX: u32 = 4;
 #[allow(dead_code)]
-pub static PRINT_INT_INDEX: u32 = 4;
+pub static PRINT_INT_INDEX: u32 = 5;
 #[allow(dead_code)]
-pub static PRINT_FLOAT_INDEX: u32 = 5;
+pub static PRINT_FLOAT_INDEX: u32 = 6;
 #[allow(dead_code)]
-pub static PRINT_STRING_INDEX: u32 = 6;
-pub static PRINT_CHAR_INDEX: u32 = 7;
+pub static PRINT_STRING_INDEX: u32 = 7;
+pub static PRINT_CHAR_INDEX: u32 = 8;
+
 
 impl SymbolTable {
     pub fn new() -> Self {
@@ -76,7 +78,7 @@ impl SymbolTable {
                 parent: None,
                 parent_func_scope: None,
             }],
-            function_index: 4,
+            function_index: 5,
             var_types: Vec::new(),
             current_scope: 0,
         }

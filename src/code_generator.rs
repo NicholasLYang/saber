@@ -1,10 +1,7 @@
 use crate::ast::{ExprT, Function, Loc, Name, Op, ProgramT, StmtT, Type, TypeId, UnaryOp, Value};
 use crate::lexer::LocationRange;
 use crate::printer::type_to_string;
-use crate::symbol_table::{
-    FunctionInfo, SymbolTable, VarIndex, ALLOC_INDEX, DEALLOC_INDEX, PRINT_CHAR_INDEX,
-    PRINT_INT_INDEX, PRINT_STRING_INDEX, STREQ_INDEX,
-};
+use crate::symbol_table::{FunctionInfo, SymbolTable, VarIndex, ALLOC_INDEX, DEALLOC_INDEX, PRINT_CHAR_INDEX, PRINT_INT_INDEX, PRINT_STRING_INDEX, STREQ_INDEX, PRINT_HEAP_INDEX};
 use crate::typechecker::{is_ref_type, TypeChecker};
 use crate::utils::{NameTable, TypeTable, FLOAT_INDEX, STR_INDEX};
 use crate::wasm::{
@@ -125,6 +122,18 @@ impl CodeGenerator {
             field_str: "streq".into(),
             kind: ImportKind::Function {
                 type_: streq_type_index,
+            },
+        });
+        let print_heap_type = FunctionType {
+            param_types: Vec::new(),
+            return_type: None
+        };
+        let print_heap_index = self.program_data.insert_type(print_heap_type);
+        self.program_data.import_section.push(ImportEntry {
+            module_str: "std".into(),
+            field_str: "printHeap".into(),
+            kind: ImportKind::Function {
+                type_: print_heap_index,
             },
         });
         let print_int_type = FunctionType {
@@ -641,6 +650,10 @@ impl CodeGenerator {
                 opcodes.push(OpCode::Type(WasmType::Empty));
                 // Push on index
                 opcodes.push(OpCode::GetGlobal(0));
+                if lhs.inner.get_type() != STR_INDEX {
+                    opcodes.push(OpCode::I32Const(4));
+                    opcodes.push(OpCode::I32Mul);
+                }
                 // Push on lhs
                 opcodes.push(OpCode::GetGlobal(1));
                 opcodes.push(OpCode::I32Add);
@@ -650,7 +663,12 @@ impl CodeGenerator {
                 opcodes.push(OpCode::End);
                 opcodes.push(OpCode::SetGlobal(1));
                 opcodes.push(OpCode::GetGlobal(0));
-                opcodes.push(OpCode::I32Load8U(0, 8));
+                if lhs.inner.get_type() == STR_INDEX {
+                    opcodes.push(OpCode::I32Load8U(0, 8));
+                } else {
+                    opcodes.push(OpCode::I32Load(0, 8));
+                }
+                opcodes.push(OpCode::Call(PRINT_HEAP_INDEX.try_into().unwrap()));
                 Ok(opcodes)
             }
             ExprT::Array {
@@ -804,6 +822,7 @@ impl CodeGenerator {
             opcodes.push(OpCode::I32Const(ARRAY_ID));
         }
         opcodes.push(OpCode::I32Store(2, offset));
+        opcodes.push(OpCode::GetGlobal(0));
         offset += 4;
         opcodes.push(OpCode::GetGlobal(0));
         opcodes.push(OpCode::I32Const(entries.len().try_into().unwrap()));
@@ -813,7 +832,6 @@ impl CodeGenerator {
             opcodes.append(&mut self.generate_allocated_expr(entry, offset)?);
             offset += 4;
         }
-        opcodes.push(OpCode::GetGlobal(0));
         Ok(opcodes)
     }
 
@@ -908,6 +926,8 @@ impl CodeGenerator {
                     bytes.push(0);
                 }
                 let buffer_length: i32 = bytes.len().try_into().expect("String is too long");
+
+                let mut offset = 0;
                 // We tack on 8 more bytes for the length and type_id
                 let mut opcodes = vec![
                     OpCode::I32Const(buffer_length + 8),
@@ -915,7 +935,6 @@ impl CodeGenerator {
                 ];
                 opcodes.push(OpCode::SetGlobal(0));
 
-                let mut offset = 0;
                 // Set type_id
                 // Get ptr to record
                 opcodes.push(OpCode::GetGlobal(0));
