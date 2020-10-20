@@ -428,53 +428,24 @@ impl<'input> Parser<'input> {
         })
     }
 
-    // So you tried to parse an arrow function but it turned out
-    // to be a tuple. Sucks, but now you gotta fix this damn thing
-    fn bail_on_arrow_func(
+    fn convert_params(
         &mut self,
-        params: Vec<Pat>,
-        location: LocationRange,
-    ) -> Result<Vec<Loc<Expr>>, Loc<ParseError>> {
-        let mut fields = Vec::new();
-        for param in params {
-            let field = match param {
-                Pat::Id(name, None, location) => Loc {
-                    location,
-                    inner: Expr::Var { name },
+        exprs: Vec<(Loc<Expr>, Option<Loc<TypeSig>>)>,
+        left: LocationRange
+    ) -> Result<Pat, Loc<ParseError>> {
+        let mut params = Vec::new();
+        let mut params_location = left;
+        for (expr, sig) in exprs {
+            match &expr.inner {
+                Expr::Var { name } => {
+                    let loc = LocationRange(expr.location.0, sig.as_ref().map(|s| s.location.1).unwrap_or(expr.location.1));
+                    params_location = LocationRange(params_location.0, loc.1);
+                    params.push(Pat::Id(*name, sig, loc))
                 },
-                Pat::Id(_, Some(_), location) => {
-                    return Err(loc!(ParseError::AmbiguousArrowFunc, location))
-                }
-                Pat::Record(_, _, location) => {
-                    return Err(loc!(ParseError::AmbiguousArrowFunc, location))
-                }
-                Pat::Empty(loc) => loc!(Expr::Tuple(Vec::new()), loc),
-                Pat::Tuple(pats, loc) => {
-                    loc!(Expr::Tuple(self.bail_on_arrow_func(pats, location)?), loc)
-                }
-            };
-            fields.push(field);
+                _ => return Err(loc!(ParseError::NotReachable, expr.location))
+            }
         }
-        Ok(fields)
-    }
-
-    fn finish_arrow_params(
-        &mut self,
-        params: Pat,
-        left: LocationRange,
-    ) -> Result<Loc<Expr>, Loc<ParseError>> {
-        self.expect(TokenDiscriminants::FatArrow)?;
-        let body = self.function_body()?;
-        let location = LocationRange(left.0, body.location.1);
-        let return_type = self.type_sig()?.map(|(type_sig, _)| type_sig);
-        Ok(loc!(
-            Expr::Function {
-                params,
-                return_type,
-                body: Box::new(body)
-            },
-            location
-        ))
+        Ok(Pat::Tuple(params, params_location))
     }
 
     fn expr(&mut self) -> Result<Loc<Expr>, Loc<ParseError>> {
@@ -519,52 +490,37 @@ impl<'input> Parser<'input> {
                     }
                 }
                 Token::LParen => {
-                    let mut params = Vec::new();
+                    let mut exprs = Vec::new();
+                    let mut right = left.1;
+                    let mut is_params = true;
                     loop {
-                        if let Some(right_span) = self.match_one(TokenDiscriminants::RParen)? {
-                            return self.finish_arrow_params(
-                                Pat::Tuple(params, LocationRange(left.0, right_span.location.1)),
-                                left,
-                            );
-                        }
-                        let span = self.bump_or_err(vec![TokenDiscriminants::RParen])?;
-                        match span.inner {
-                            Token::Ident(id) => {
-                                let type_sig = self.type_sig()?;
-                                let right = type_sig
-                                    .as_ref()
-                                    .map(|(_, loc)| loc.1)
-                                    .unwrap_or(span.location.1);
-                                params.push(Pat::Id(
-                                    id,
-                                    type_sig.map(|(sig, _)| sig),
-                                    LocationRange(span.location.0, right),
-                                ))
-                            }
-                            token => {
-                                let mut fields = self.bail_on_arrow_func(
-                                    params,
-                                    LocationRange(left.0, span.location.1),
-                                )?;
-                                self.pushback(loc!(token, span.location));
-                                let (mut rest, right) =
-                                    self.comma::<Loc<Expr>>(&Self::expr, Token::RParen)?;
-                                fields.append(&mut rest);
-                                return if fields.len() == 1 {
-                                    Ok(fields.pop().unwrap())
-                                } else {
-                                    Ok(loc!(Expr::Tuple(fields), LocationRange(left.0, right.1)))
-                                };
+                        let expr = self.expr()?;
+                        match &expr.inner {
+                            Expr::Var { name: _ } => {},
+                            _ => {
+                                is_params = false;
                             }
                         }
-
-                        if let Some(right_span) = self.match_one(TokenDiscriminants::RParen)? {
-                            return self.finish_arrow_params(
-                                Pat::Tuple(params, LocationRange(left.0, right_span.location.1)),
-                                left,
-                            );
-                        } else {
+                        right = expr.location.1;
+                        exprs.push((expr, self.type_sig()?));
+                        if self.match_one(TokenDiscriminants::RParen)?.is_some() {
+                            break;
                         }
+                        self.expect(TokenDiscriminants::Comma)?;
+                    }
+                    if is_params && self.match_one(TokenDiscriminants::FatArrow)?.is_some() {
+                        let return_type = self.type_sig()?;
+                        let body = self.function_body()?;
+                        let location = LocationRange(left.0, body.location.1);
+                        let params = self.convert_params(exprs, left)?;
+                        Ok(loc!(Expr::Function {
+                          params,
+                          return_type,
+                          body: Box::new(body)
+                        }, location))
+                    } else {
+                        let entries: Vec<Loc<Expr>> = exprs.into_iter().map(|(e, _)| e).collect();
+                        Ok(loc!(Expr::Tuple(entries), LocationRange(left.0, right)))
                     }
                 }
                 token => {
@@ -691,7 +647,7 @@ impl<'input> Parser<'input> {
             location: LocationRange(left.0, body.location.1),
             inner: Expr::Function {
                 params,
-                return_type: return_type.map(|(return_type, _)| return_type),
+                return_type,
                 body: Box::new(body),
             },
         })
@@ -958,21 +914,11 @@ impl<'input> Parser<'input> {
                     value: Value::String(s),
                 },
             }),
-            // Parsing tuple or grouping
+            // Parsing grouping
             Token::LParen => {
                 let expr = self.expr()?;
-                if self.match_one(TokenDiscriminants::Comma)?.is_some() {
-                    let mut elems = vec![expr];
-                    let (mut rest, right) = self.comma::<Loc<Expr>>(&Self::expr, Token::RParen)?;
-                    elems.append(&mut rest);
-                    Ok(Loc {
-                        location: LocationRange(location.0, right.1),
-                        inner: Expr::Tuple(elems),
-                    })
-                } else {
-                    self.expect(TokenDiscriminants::RParen)?;
-                    Ok(expr)
-                }
+                self.expect(TokenDiscriminants::RParen)?;
+                Ok(expr)
             }
             Token::Ident(name) => Ok(Loc {
                 location,
@@ -1068,7 +1014,7 @@ impl<'input> Parser<'input> {
             }
             Token::LBrace => {
                 let (fields, right) = self.comma::<Name>(&Self::record_pattern, Token::RBrace)?;
-                if let Some((type_sig, right)) = self.type_sig()? {
+                if let Some(type_sig) = self.type_sig()? {
                     Ok(Pat::Record(
                         fields,
                         Some(type_sig),
@@ -1079,11 +1025,12 @@ impl<'input> Parser<'input> {
                 }
             }
             Token::Ident(name) => {
-                if let Some((type_sig, right)) = self.type_sig()? {
+                if let Some(type_sig) = self.type_sig()? {
+                    let loc = LocationRange(left.0, type_sig.location.1);
                     Ok(Pat::Id(
                         name,
                         Some(type_sig),
-                        LocationRange(left.0, right.1),
+                        loc
                     ))
                 } else {
                     Ok(Pat::Id(name, None, left))
@@ -1127,15 +1074,11 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn type_sig(&mut self) -> Result<Option<(Loc<TypeSig>, LocationRange)>, Loc<ParseError>> {
-        if let Some(Loc {
-            inner: _,
-            location: left,
-        }) = self.match_one(TokenDiscriminants::Colon)?
+    fn type_sig(&mut self) -> Result<Option<Loc<TypeSig>>, Loc<ParseError>> {
+        if self.match_one(TokenDiscriminants::Colon)?.is_some()
         {
             let type_sig = self.type_()?;
-            let right = type_sig.location;
-            Ok(Some((type_sig, LocationRange(left.0, right.1))))
+            Ok(Some(type_sig))
         } else {
             Ok(None)
         }
