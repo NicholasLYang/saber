@@ -668,7 +668,6 @@ impl CodeGenerator {
                 } else {
                     opcodes.push(OpCode::I32Load(0, 8));
                 }
-                opcodes.push(OpCode::Call(PRINT_HEAP_INDEX.try_into().unwrap()));
                 Ok(opcodes)
             }
             ExprT::Array {
@@ -742,11 +741,12 @@ impl CodeGenerator {
                     expr.location,
                 )?;
                 lhs_ops.append(&mut rhs_ops);
-                lhs_ops.push(self.generate_operator(
+                let opcode = self.generate_operator(
                     &op,
                     self.type_table.get_type(*type_),
                     promoted_type,
-                )?);
+                )?;
+                lhs_ops.push(opcode);
                 Ok(lhs_ops)
             }
             ExprT::UnaryOp { op, rhs, type_: _ } => match op {

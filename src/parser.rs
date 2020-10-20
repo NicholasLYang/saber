@@ -38,6 +38,7 @@ pub enum ParseError {
         float: String,
     },
     NotReachable,
+    TupleTypeSig
 }
 
 impl fmt::Display for ParseError {
@@ -59,6 +60,7 @@ impl fmt::Display for ParseError {
             ParseError::InvalidIndex { index } => write!(f, "{} is not a valid index", index),
             ParseError::InvalidFloat { float } => write!(f, "{} is not a valid float", float),
             ParseError::NotReachable => write!(f, "Not reachable"),
+            ParseError::TupleTypeSig => write!(f, "It appears that you've added a type signature to a tuple. Did you mean to type a function")
         }
     }
 }
@@ -180,9 +182,11 @@ impl<'input> Parser<'input> {
     #[allow(dead_code)]
     fn peek(&mut self) -> Result<(), Loc<ParseError>> {
         let tok = self.bump()?;
-        println!("TOK: {:?}", tok);
         if let Some(tok) = tok {
+            println!("TOKEN: {}", token_to_string(&self.lexer.name_table, &tok.inner));
             self.pushback(tok);
+        } else {
+            println!("NO TOKEN");
         }
         Ok(())
     }
@@ -261,6 +265,7 @@ impl<'input> Parser<'input> {
         }
     }
 
+
     fn id(&mut self) -> Result<(Name, LocationRange), Loc<ParseError>> {
         match self.bump_or_err(vec![TokenDiscriminants::Ident])? {
             Loc {
@@ -277,7 +282,7 @@ impl<'input> Parser<'input> {
                     expected_tokens: format!("{}", TokenDiscriminants::Ident),
                 },
                 location
-            )),
+            ))
         }
     }
 
@@ -455,72 +460,14 @@ impl<'input> Parser<'input> {
         }) = self.bump()?
         {
             match token {
-                Token::Slash => self.function(left),
                 Token::LBrace => self.expr_block(left),
                 Token::If => self.if_expr(left),
                 Token::Ident(id) => {
-                    let span = self.bump_or_err(vec![
-                        TokenDiscriminants::LBrace,
-                        TokenDiscriminants::LParen,
-                        TokenDiscriminants::True,
-                        TokenDiscriminants::False,
-                        TokenDiscriminants::Integer,
-                        TokenDiscriminants::Float,
-                        TokenDiscriminants::String,
-                    ])?;
-                    match span.inner {
-                        Token::LBrace => self.record_literal(id, left),
-                        Token::FatArrow => {
-                            let body = self.function_body()?;
-                            let location = LocationRange(left.0, body.location.1);
-                            Ok(loc!(
-                                Expr::Function {
-                                    params: Pat::Id(id, None, left),
-                                    return_type: None,
-                                    body: Box::new(body)
-                                },
-                                location
-                            ))
-                        }
-                        token => {
-                            self.pushback(loc!(token, span.location));
-                            self.pushback(loc!(Token::Ident(id), left));
-                            self.equality()
-                        }
-                    }
-                }
-                Token::LParen => {
-                    let mut exprs = Vec::new();
-                    let mut right = left.1;
-                    let mut is_params = true;
-                    loop {
-                        let expr = self.expr()?;
-                        match &expr.inner {
-                            Expr::Var { name: _ } => {},
-                            _ => {
-                                is_params = false;
-                            }
-                        }
-                        right = expr.location.1;
-                        exprs.push((expr, self.type_sig()?));
-                        if self.match_one(TokenDiscriminants::RParen)?.is_some() {
-                            break;
-                        }
-                        self.expect(TokenDiscriminants::Comma)?;
-                    }
-                    if is_params && self.match_one(TokenDiscriminants::FatArrow)?.is_some() {
-                        let return_type = self.type_sig()?;
-                        let body = self.function_body()?;
-                        let location = LocationRange(left.0, body.location.1);
-                        let params = self.convert_params(exprs, left)?;
-                        Ok(loc!(Expr::Function {
-                          params,
-                          return_type,
-                          body: Box::new(body)
-                        }, location))
+                    if self.match_one(TokenDiscriminants::LBrace)?.is_some() {
+                        self.record_literal(id, left)
                     } else {
-                        let entries: Vec<Loc<Expr>> = exprs.into_iter().map(|(e, _)| e).collect();
-                        Ok(loc!(Expr::Tuple(entries), LocationRange(left.0, right)))
+                        self.pushback(loc!(Token::Ident(id), left));
+                        self.equality()
                     }
                 }
                 token => {
@@ -535,9 +482,11 @@ impl<'input> Parser<'input> {
 
     fn if_expr(&mut self, left: LocationRange) -> Result<Loc<Expr>, Loc<ParseError>> {
         // Yeah...I'm not allowing functions or blocks in the cond spot
-        let cond = self.equality()?;
+        let cond = self.equality();
+        let cond = cond?;
         let (_, block_left) = self.expect(TokenDiscriminants::LBrace)?;
-        let then_block = self.expr_block(block_left)?;
+        let then_block = self.expr_block(block_left);
+        let then_block = then_block?;
         let else_block = if let Some(Loc {
             inner: _,
             location: else_left,
@@ -592,10 +541,9 @@ impl<'input> Parser<'input> {
                         location: LocationRange(expr.location.0, right.1),
                         inner: Stmt::Expr(expr),
                     });
-                } else {
-                    let (_, right) = self.expect(TokenDiscriminants::RBrace)?;
+                } else if let Some(span) = self.match_one(TokenDiscriminants::RBrace)? {
                     return Ok(Loc {
-                        location: LocationRange(left.0, right.1),
+                        location: LocationRange(left.0, span.location.1),
                         inner: Expr::Block(stmts, Some(Box::new(expr))),
                     });
                 }
@@ -914,16 +862,80 @@ impl<'input> Parser<'input> {
                     value: Value::String(s),
                 },
             }),
-            // Parsing grouping
-            Token::LParen => {
-                let expr = self.expr()?;
-                self.expect(TokenDiscriminants::RParen)?;
-                Ok(expr)
+            Token::Ident(id) => {
+                let span = self.bump_or_err(vec![
+                    TokenDiscriminants::LBrace,
+                    TokenDiscriminants::LParen,
+                    TokenDiscriminants::True,
+                    TokenDiscriminants::False,
+                    TokenDiscriminants::Integer,
+                    TokenDiscriminants::Float,
+                    TokenDiscriminants::String,
+                ])?;
+                match span.inner {
+                    Token::FatArrow => {
+                        let body = self.function_body()?;
+                        let location = LocationRange(location.0, body.location.1);
+                        Ok(loc!(
+                                Expr::Function {
+                                    params: Pat::Id(id, None, location),
+                                    return_type: None,
+                                    body: Box::new(body)
+                                },
+                                location
+                            ))
+                    }
+                    token => {
+                        self.pushback(loc!(token, span.location));
+                        Ok(loc!(Expr::Var { name: id }, location))
+                    }
+                }
             }
-            Token::Ident(name) => Ok(Loc {
-                location,
-                inner: Expr::Var { name },
-            }),
+            Token::LParen => {
+                let mut exprs = Vec::new();
+                let mut right = location.1;
+                let mut is_params = true;
+                loop {
+                    if self.match_one(TokenDiscriminants::RParen)?.is_some() {
+                        break;
+                    }
+                    let expr = self.expr()?;
+                    match &expr.inner {
+                        Expr::Var { name: _ } => {},
+                        _ => {
+                            is_params = false;
+                        }
+                    }
+                    right = expr.location.1;
+                    exprs.push((expr, self.type_sig()?));
+                    if self.match_one(TokenDiscriminants::RParen)?.is_some() {
+                        break;
+                    }
+                    self.expect(TokenDiscriminants::Comma)?;
+                }
+                if is_params {
+                    let return_type = self.type_sig()?;
+                    if self.match_one(TokenDiscriminants::FatArrow)?.is_some() {
+                        let body = self.function_body()?;
+                        let location = LocationRange(location.0, body.location.1);
+                        let params = self.convert_params(exprs, location)?;
+                        return Ok(loc!(Expr::Function {
+                          params,
+                          return_type,
+                          body: Box::new(body)
+                        }, location))
+                    }
+                    if let Some(return_type) = return_type {
+                        return Err(loc!(ParseError::TupleTypeSig, return_type.location))
+                    }
+                }
+                let mut entries: Vec<Loc<Expr>> = exprs.into_iter().map(|(e, _)| e).collect();
+                if entries.len() == 1 {
+                    Ok(entries.pop().unwrap())
+                } else {
+                    Ok(loc!(Expr::Tuple(entries), LocationRange(location.0, right)))
+                }
+            }
             Token::LBracket => {
                 let (entries, right) = self.comma(&Self::expr, Token::RBracket)?;
                 Ok(loc!(

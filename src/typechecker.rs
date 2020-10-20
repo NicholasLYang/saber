@@ -1271,6 +1271,16 @@ impl TypeChecker {
             }
             (Type::Solved(t1), _) => self.unify(t1, type_id2),
             (_, Type::Solved(t2)) => self.unify(type_id1, t2),
+            (Type::Array(t1), Type::Array(t2)) => {
+                if let Some(t) = self.unify(t1, t2) {
+                    let new_type = self.type_table.insert(Type::Array(t));
+                    self.type_table.update(type_id1, Type::Solved(new_type));
+                    self.type_table.update(type_id2, Type::Solved(new_type));
+                    Some(new_type)
+                } else {
+                    None
+                }
+            },
             _ => None,
         }
     }
