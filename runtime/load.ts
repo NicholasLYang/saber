@@ -17,7 +17,14 @@ function base64ToArray(base64: string) {
 
 async function instantiate() {
     const buffer = base64ToArray(code);
-    const module = await WebAssembly.compile(buffer);
+    let module;
+    try {
+        module = await WebAssembly.compile(buffer);
+    } catch (e) {
+        console.log(e);
+        console.log(e.columnNumber);
+        return;
+    }
     const memory = new WebAssembly.Memory({ initial: 1 });
     const importObject = {
         std: {

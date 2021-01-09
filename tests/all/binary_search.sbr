@@ -1,5 +1,5 @@
 let search = (arr: int[], n: int, start: int, end: int): int => {
-  if start > end {
+  if start >= end {
     return -1;
   }
   let mid = (start + end)/2;
@@ -7,14 +7,14 @@ let search = (arr: int[], n: int, start: int, end: int): int => {
     return mid;
   }
   if arr[mid] > n {
-    search(arr, n, start, mid)
+    search(arr, n, start, mid - 1)
   } else {
-    search(arr, n, mid, end)
+    search(arr, n, mid + 1, end)
   }
 }
 
 let main = () => {
-  let res = search([1, 4, 5, 10], 10, 0, 4);
+  let res = search([1, 4, 5, 10], 10, 0, 3);
   printInt(res);
 }
 

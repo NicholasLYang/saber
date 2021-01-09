@@ -47,6 +47,8 @@ fn main() -> Result<()> {
         .version("0.1.0")
         .author("Nicholas Yang")
         .about("Saber Programming Language")
+        .arg(Arg::with_name("debug").long("debug").short('d').about("Debugging the compiler"))
+        .arg(Arg::with_name("out-file").long("out-file"))
         .subcommand(
             App::new("build")
                 .about("Build file")
@@ -63,10 +65,12 @@ fn main() -> Result<()> {
 
     if let Some(build_matches) = matches.subcommand_matches("build") {
         let file = build_matches.value_of("file").unwrap();
-        read_file(file)
+        let is_debug = matches.is_present("debug");
+        read_file(file, is_debug)
     } else if let Some(run_matches) = matches.subcommand_matches("run") {
         let file = run_matches.value_of("file").unwrap();
-        read_file(file)?;
+        let is_debug = matches.is_present("debug");
+        read_file(file, is_debug)?;
         let output = Command::new("node")
             .args(&["build/load.js"])
             .output()
@@ -93,7 +97,8 @@ fn format_bool_vec(vec: &Vec<bool>) -> String {
     )
 }
 
-fn read_file(file_name: &str) -> Result<()> {
+// TODO: Add some more general format for flags/build config
+fn read_file(file_name: &str, is_debug: bool) -> Result<()> {
     let contents = fs::read_to_string(file_name)?;
     let writer = StandardStream::stderr(ColorChoice::Always);
     let config = codespan_reporting::term::Config::default();
@@ -127,7 +132,7 @@ fn read_file(file_name: &str) -> Result<()> {
     )?;
     let code_generator = CodeGenerator::new(typechecker);
     let program = code_generator.generate_program(program_t)?;
-    let mut emitter = Emitter::new();
+    let mut emitter = Emitter::new(is_debug);
     emitter.emit_program(program)?;
     let js_str = format!("export const code =\"{}\"", emitter.output_base64());
     let mut js_file = File::create("runtime/code.ts")?;

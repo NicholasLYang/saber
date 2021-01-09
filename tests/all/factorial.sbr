@@ -1,13 +1,13 @@
 let fact = n => {
-  if n < 2 {
-    1
+  if n < 1 {
+    return 1;
   } else {
-    n * fact(n - 1)
+    return n * fact(n - 1);
   }
 }
 
 let main = () => {
-  printInt(fact(10));
+  printInt(fact(1));
 }
 
 export main;

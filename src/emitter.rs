@@ -8,6 +8,7 @@ use std::convert::TryInto;
 use std::io::prelude::*;
 
 pub struct Emitter {
+    is_debug: bool,
     output: Vec<u8>,
     buffer: Vec<u8>,
 }
@@ -23,7 +24,10 @@ pub enum EmitError {
 static MAGIC_NUM: u32 = 0x6d73_6100;
 static VERSION: u32 = 0x1;
 
-pub fn emit_code<T: Write>(mut dest: T, op_code: OpCode) -> Result<()> {
+pub fn emit_code<T: Write>(mut dest: T, op_code: OpCode, is_debug: bool) -> Result<()> {
+    if is_debug {
+        println!("{:?}", op_code);
+    }
     match op_code {
         OpCode::MagicNumber => dest.write_u32::<LittleEndian>(MAGIC_NUM),
         OpCode::Version => dest.write_u32::<LittleEndian>(VERSION),
@@ -137,12 +141,22 @@ pub fn emit_code<T: Write>(mut dest: T, op_code: OpCode) -> Result<()> {
     Ok(())
 }
 
+
 impl Emitter {
-    pub fn new() -> Emitter {
+    pub fn new(is_debug: bool) -> Emitter {
         Emitter {
             output: Vec::new(),
             buffer: Vec::new(),
+            is_debug,
         }
+    }
+
+    pub fn emit_code_to_buffer(&mut self, op_code: OpCode) -> Result<()> {
+        emit_code(&mut self.buffer, op_code, self.is_debug)
+    }
+
+    pub fn emit_code<T: Write>(&self, mut dest: T,  op_code: OpCode) -> Result<()> {
+        emit_code(&mut dest, op_code, self.is_debug)
     }
 
     pub fn emit_program(&mut self, program: ProgramData) -> Result<()> {
@@ -156,10 +170,6 @@ impl Emitter {
         self.emit_elements_section(program.elements_section)?;
         self.emit_code_section(program.code_section.into_iter().filter_map(|t| t).collect())?;
         Ok(())
-    }
-
-    pub fn emit_code(&mut self, op_code: OpCode) -> Result<()> {
-        emit_code(&mut self.buffer, op_code)
     }
 
     pub fn output_base64(&mut self) -> String {
@@ -176,19 +186,19 @@ impl Emitter {
     pub fn write_section(&mut self, opcodes: Vec<OpCode>) -> Result<()> {
         self.flush_buffer()?;
         for opcode in opcodes {
-            self.emit_code(opcode)?;
+            self.emit_code_to_buffer( opcode)?;
         }
         leb128::write::unsigned(&mut self.output, usize_to_u64(self.buffer.len())?)?;
         self.flush_buffer()
     }
 
     pub fn emit_prelude(&mut self) -> Result<()> {
-        self.emit_code(OpCode::MagicNumber)?;
-        self.emit_code(OpCode::Version)
+        self.emit_code_to_buffer(OpCode::MagicNumber)?;
+        self.emit_code_to_buffer(OpCode::Version)
     }
 
     pub fn emit_types_section(&mut self, types: Vec<FunctionType>) -> Result<()> {
-        self.emit_code(OpCode::SectionId(1))?;
+        self.emit_code_to_buffer(OpCode::SectionId(1))?;
         // Start with a count for number of type definitions
         let mut opcodes = vec![OpCode::Count(types.len().try_into().unwrap())];
         for type_ in types {
@@ -211,7 +221,7 @@ impl Emitter {
     }
 
     fn emit_imports_section(&mut self, imports: Vec<ImportEntry>) -> Result<()> {
-        self.emit_code(OpCode::SectionId(2))?;
+        self.emit_code_to_buffer(OpCode::SectionId(2))?;
         let mut opcodes = vec![OpCode::Count(imports.len().try_into().unwrap())];
         for import in imports {
             opcodes.push(OpCode::Count(usize_to_u32(import.module_str.len())?));
@@ -245,7 +255,7 @@ impl Emitter {
             .iter()
             .filter_map(|t| t.as_ref())
             .collect();
-        self.emit_code(OpCode::SectionId(3))?;
+        self.emit_code_to_buffer(OpCode::SectionId(3))?;
         let mut opcodes = vec![OpCode::Count(usize_to_u32(function_type_indices.len())?)];
         for index in function_type_indices {
             opcodes.push(OpCode::Index(usize_to_u32(*index)?));
@@ -254,7 +264,7 @@ impl Emitter {
     }
 
     fn emit_table_section(&mut self, initial_length: usize) -> Result<()> {
-        self.emit_code(OpCode::SectionId(4))?;
+        self.emit_code_to_buffer(OpCode::SectionId(4))?;
         let opcodes = vec![
             OpCode::Count(1),
             OpCode::Type(WasmType::AnyFunction),
@@ -265,7 +275,7 @@ impl Emitter {
     }
 
     fn emit_global_section(&mut self, globals: Vec<(GlobalType, Vec<OpCode>)>) -> Result<()> {
-        self.emit_code(OpCode::SectionId(6))?;
+        self.emit_code_to_buffer(OpCode::SectionId(6))?;
         let mut opcodes = vec![OpCode::Count(usize_to_u32(globals.len())?)];
         for (global_type, mut global_opcodes) in globals {
             opcodes.push(OpCode::Type(global_type.content_type));
@@ -277,7 +287,7 @@ impl Emitter {
     }
 
     pub fn emit_exports_section(&mut self, exports: Vec<ExportEntry>) -> Result<()> {
-        self.emit_code(OpCode::SectionId(7))?;
+        self.emit_code_to_buffer(OpCode::SectionId(7))?;
         let mut opcodes = vec![OpCode::Count(usize_to_u32(exports.len())?)];
         for entry in exports {
             opcodes.push(OpCode::Count(entry.field_str.len().try_into().unwrap()));
@@ -289,7 +299,7 @@ impl Emitter {
     }
 
     fn emit_elements_section(&mut self, mut segment: ElemSegment) -> Result<()> {
-        self.emit_code(OpCode::SectionId(9))?;
+        self.emit_code_to_buffer(OpCode::SectionId(9))?;
         let mut opcodes = vec![OpCode::Count(1)]; // Only have one element in section
         opcodes.push(OpCode::Index(0));
         opcodes.append(&mut segment.offset);
@@ -301,23 +311,23 @@ impl Emitter {
     }
 
     pub fn emit_code_section(&mut self, bodies: Vec<FunctionBody>) -> Result<()> {
-        self.emit_code(OpCode::SectionId(10))?;
+        self.emit_code_to_buffer(OpCode::SectionId(10))?;
         self.flush_buffer()?;
         let mut opcodes = vec![OpCode::Count(usize_to_u32(bodies.len())?)];
         for body in bodies {
             let mut code_body = Vec::new();
-            emit_code(
+            self.emit_code(
                 &mut code_body,
                 OpCode::Count(usize_to_u32(body.locals.len())?),
             )?;
             for local in body.locals {
-                emit_code(&mut code_body, OpCode::Count(local.count))?;
-                emit_code(&mut code_body, OpCode::Type(local.type_))?;
+                self.emit_code(&mut code_body, OpCode::Count(local.count))?;
+                self.emit_code(&mut code_body, OpCode::Type(local.type_))?;
             }
             for opcode in body.code {
-                emit_code(&mut code_body, opcode)?;
+                self.emit_code(&mut code_body, opcode)?;
             }
-            emit_code(&mut code_body, OpCode::End)?;
+            self.emit_code(&mut code_body, OpCode::End)?;
             opcodes.push(OpCode::Count(code_body.len().try_into().unwrap()));
             opcodes.push(OpCode::Code(code_body));
         }

@@ -30,7 +30,9 @@
   - ~~Add strings~~
   - ~~Garbage collection!~~
   - Hook up garbage collection to code gen
-  - Figure out an SSR IR
+  - Convert to walrus
+- IR
+  - Design IR 
 - Tests/Debugging
   - ~~Write some tests~~
   - ~~Add locations in errors with row/col~~
