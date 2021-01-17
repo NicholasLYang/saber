@@ -315,15 +315,42 @@ impl TypeChecker {
         }
     }
 
+    // If you have an if expression that's an expression statement, i.e.
+    //   if is_greeting {
+    //     print("hello");
+    //   } else {
+    //     print("goodbye");
+    //   }
+    // Then we convert it into a StmtT::If
+    // This helps for codegen
+    fn if_expr_stmt(&mut self, location: LocationRange, cond: Box<Loc<Expr>>, then_block: Box<Loc<Expr>>, else_block: Option<Box<Loc<Expr>>>) -> Result<Loc<StmtT>, Loc<TypeError>> {
+        let cond_t = self.expr(*cond)?;
+        self.unify_or_err(cond_t.inner.get_type(), BOOL_INDEX, cond_t.location)?;
+        let then_t = self.expr(*then_block)?;
+        let else_t = if let Some(else_block) = else_block {
+            let else_t = self.expr(*else_block)?;
+            self.unify_or_err(else_t.inner.get_type(), UNIT_INDEX, else_t.location)?;
+            Some(else_t)
+        } else {
+            None
+        };
+        self.unify_or_err(then_t.inner.get_type(), UNIT_INDEX, then_t.location)?;
+        Ok(loc!(StmtT::If { cond: cond_t, then_block: then_t, else_block: else_t }, location))
+    }
+
     pub fn stmt(&mut self, stmt: Loc<Stmt>) -> Result<Vec<Loc<StmtT>>, Loc<TypeError>> {
         let location = stmt.location;
         match stmt.inner {
             Stmt::Expr(expr) => {
-                let typed_expr = self.expr(expr)?;
-                Ok(vec![Loc {
-                    location,
-                    inner: StmtT::Expr(typed_expr),
-                }])
+                if let Expr::If(cond, then_block, else_block) = expr.inner {
+                    Ok(vec![self.if_expr_stmt(location, cond, then_block, else_block)?])
+                } else {
+                    let typed_expr = self.expr(expr)?;
+                    Ok(vec![Loc {
+                        location,
+                        inner: StmtT::Expr(typed_expr),
+                    }])
+                }
             }
             Stmt::Function(func_name, params, _, body) => {
                 let sym_entry = if let Some(entry) = self.symbol_table.lookup_name(func_name) {
@@ -1242,6 +1269,20 @@ impl TypeChecker {
                 if let Some(types) = self.unify_type_vectors(&t1, &t2) {
                     let id = self.type_table.insert(Type::Tuple(types));
                     Some(id)
+                } else {
+                    None
+                }
+            }
+            (Type::Tuple(t1), _) => {
+                if t1.len() == 1 {
+                    self.unify(t1[0], type_id2)
+                } else {
+                    None
+                }
+            }
+            (_, Type::Tuple(t2)) => {
+                if t2.len() == 1 {
+                    self.unify(type_id1, t2[0])
                 } else {
                     None
                 }

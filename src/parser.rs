@@ -586,21 +586,6 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn function(&mut self, left: LocationRange) -> Result<Loc<Expr>, Loc<ParseError>> {
-        let params = self.pattern()?;
-        let return_type = self.type_sig()?;
-        self.expect(TokenDiscriminants::FatArrow)?;
-        let body = self.function_body()?;
-        Ok(Loc {
-            location: LocationRange(left.0, body.location.1),
-            inner: Expr::Function {
-                params,
-                return_type,
-                body: Box::new(body),
-            },
-        })
-    }
-
     fn equality(&mut self) -> Result<Loc<Expr>, Loc<ParseError>> {
         let lhs = self.comparison()?;
         if let Some(span) = self.match_multiple(vec![Token::EqualEqual, Token::BangEqual])? {

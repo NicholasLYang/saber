@@ -460,7 +460,21 @@ impl CodeGenerator {
                 }
                 Ok(opcodes)
             }
-            _ => Ok(Vec::new()),
+            StmtT::If { cond, then_block, else_block } => {
+                let mut opcodes = self.generate_expr(cond)?;
+                opcodes.push(OpCode::If);
+                opcodes.push(OpCode::Type(
+                    WasmType::Empty
+                ));
+                opcodes.append(&mut self.generate_expr(then_block)?);
+                if let Some(else_block) = else_block {
+                    opcodes.push(OpCode::Else);
+                    opcodes.append(&mut self.generate_expr(else_block)?);
+                }
+                opcodes.push(OpCode::End);
+                Ok(opcodes)
+            }
+            _ => todo!()
         }
     }
 

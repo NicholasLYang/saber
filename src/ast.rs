@@ -70,6 +70,11 @@ pub enum StmtT {
         return_type: TypeId,
         function: Function,
     },
+    If {
+        cond: Loc<ExprT>,
+        then_block: Loc<ExprT>,
+        else_block: Option<Loc<ExprT>>
+    },
     Export(Name),
 }
 
