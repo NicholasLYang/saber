@@ -17,6 +17,7 @@ use crate::wasm::{
 use id_arena::Arena;
 use std::convert::TryInto;
 use thiserror::Error;
+use walrus::{FunctionId, Module, ModuleConfig, ValType};
 
 // Indicates value is an array of primitives
 pub static ARRAY_ID: i32 = -1;
@@ -56,10 +57,24 @@ pub struct CodeGenerator {
     name_table: NameTable,
     builtin_types: BuiltInTypes,
     type_arena: Arena<Type>,
+    module: Module,
     // All the generated code
     program_data: ProgramData,
     return_type: Option<WasmType>,
     current_function: Option<usize>,
+    default_functions: DefaultFunctions,
+}
+
+pub struct DefaultFunctions {
+    alloc: FunctionId,
+    dealloc: FunctionId,
+    clone: FunctionId,
+    streq: FunctionId,
+    print_heap: FunctionId,
+    print_int: FunctionId,
+    print_float: FunctionId,
+    print_string: FunctionId,
+    print_char: FunctionId,
 }
 
 type Result<T> = std::result::Result<T, GenerationError>;
@@ -69,117 +84,64 @@ impl CodeGenerator {
         let expr_func_count = typechecker.get_expr_func_index();
         let (symbol_table, name_table, type_table, builtin_types) = typechecker.get_tables();
         let func_count = symbol_table.get_function_index();
+        let config = ModuleConfig::new();
+        let mut module = Module::with_config(config);
+        let default_functions = Self::create_default_functions(&mut module);
+
         CodeGenerator {
             symbol_table,
             name_table,
             builtin_types,
             type_arena: type_table,
+            module,
+            default_functions,
             program_data: ProgramData::new(func_count, expr_func_count),
             return_type: None,
             current_function: None,
         }
     }
 
-    fn generate_default_imports(&mut self) -> Result<()> {
-        let alloc_type = FunctionType {
-            param_types: vec![WasmType::i32],
-            return_type: Some(WasmType::i32),
-        };
-        let alloc_type_index = self.program_data.insert_type(alloc_type);
-        self.program_data.import_section.push(ImportEntry {
-            module_str: "std".into(),
-            field_str: "alloc".into(),
-            kind: ImportKind::Function {
-                type_: alloc_type_index,
-            },
-        });
-        let dealloc_type = FunctionType {
-            param_types: vec![WasmType::i32],
-            return_type: None,
-        };
-        let dealloc_type_index = self.program_data.insert_type(dealloc_type);
-        self.program_data.import_section.push(ImportEntry {
-            module_str: "std".into(),
-            field_str: "dealloc".into(),
-            kind: ImportKind::Function {
-                type_: dealloc_type_index,
-            },
-        });
-        let clone_type = FunctionType {
-            param_types: vec![WasmType::i32],
-            return_type: None,
-        };
-        let clone_type_index = self.program_data.insert_type(clone_type);
-        self.program_data.import_section.push(ImportEntry {
-            module_str: "std".into(),
-            field_str: "clone".into(),
-            kind: ImportKind::Function {
-                type_: clone_type_index,
-            },
-        });
-        let streq_type = FunctionType {
-            param_types: vec![WasmType::i32, WasmType::i32],
-            return_type: Some(WasmType::i32),
-        };
-        let streq_type_index = self.program_data.insert_type(streq_type);
-        self.program_data.import_section.push(ImportEntry {
-            module_str: "std".into(),
-            field_str: "streq".into(),
-            kind: ImportKind::Function {
-                type_: streq_type_index,
-            },
-        });
-        let print_heap_type = FunctionType {
-            param_types: Vec::new(),
-            return_type: None,
-        };
-        let print_heap_index = self.program_data.insert_type(print_heap_type);
-        self.program_data.import_section.push(ImportEntry {
-            module_str: "std".into(),
-            field_str: "printHeap".into(),
-            kind: ImportKind::Function {
-                type_: print_heap_index,
-            },
-        });
-        let print_int_type = FunctionType {
-            param_types: vec![WasmType::i32],
-            return_type: None,
-        };
-        let print_int_index = self.program_data.insert_type(print_int_type);
-        self.program_data.import_section.push(ImportEntry {
-            module_str: "std".into(),
-            field_str: "printInt".into(),
-            kind: ImportKind::Function {
-                type_: print_int_index,
-            },
-        });
-        let print_float_type = FunctionType {
-            param_types: vec![WasmType::f32],
-            return_type: None,
-        };
-        let print_float_index = self.program_data.insert_type(print_float_type);
-        self.program_data.import_section.push(ImportEntry {
-            module_str: "std".into(),
-            field_str: "printFloat".into(),
-            kind: ImportKind::Function {
-                type_: print_float_index,
-            },
-        });
-        self.program_data.import_section.push(ImportEntry {
-            module_str: "std".into(),
-            field_str: "printString".into(),
-            kind: ImportKind::Function {
-                type_: print_int_index,
-            },
-        });
-        self.program_data.import_section.push(ImportEntry {
-            module_str: "std".into(),
-            field_str: "printChar".into(),
-            kind: ImportKind::Function {
-                type_: print_int_index,
-            },
-        });
-        Ok(())
+    fn create_default_functions(module: &mut Module) -> DefaultFunctions {
+        let alloc_type = module.types.add(&[ValType::I32], &[ValType::I32]);
+        let (alloc, _) = module.add_import_func("std", "alloc", alloc_type);
+
+        let dealloc_type = module.types.add(&[ValType::I32], &[]);
+        let (dealloc, _) = module.add_import_func("std", "dealloc", dealloc_type);
+
+        let clone_type = module.types.add(&[ValType::I32], &[]);
+        let (clone, _) = module.add_import_func("std", "clone", clone_type);
+
+        let streq_type = module
+            .types
+            .add(&[ValType::I32, ValType::I32], &[ValType::I32]);
+        let (streq, _) = module.add_import_func("std", "streq", streq_type);
+
+        let print_heap_type = module.types.add(&[], &[]);
+        let (print_heap, _) = module.add_import_func("std", "printHeap", print_heap_type);
+
+        let print_int_type = module.types.add(&[ValType::I32], &[]);
+        let (print_int, _) = module.add_import_func("std", "printInt", print_int_type);
+
+        let print_float_type = module.types.add(&[ValType::F32], &[]);
+        let (print_float, _) = module.add_import_func("std", "printFloat", print_float_type);
+
+        let print_string_type = module.types.add(&[ValType::I32], &[]);
+        let (print_string, _) = module.add_import_func("std", "printString", print_string_type);
+
+        let print_char_type = module.types.add(&[ValType::I32], &[]);
+        let (print_char, _) = module.add_import_func("std", "printChar", print_char_type);
+
+        DefaultFunctions {
+            alloc,
+            dealloc,
+            clone,
+            streq,
+            print_heap,
+            print_int,
+            print_float,
+            print_string,
+            print_char,
+        }
     }
 
     pub fn generate_program(mut self, mut program: ProgramT) -> Result<ProgramData> {
@@ -192,9 +154,7 @@ impl CodeGenerator {
         for stmt in program.stmts {
             self.generate_top_level_stmt(&stmt)?;
         }
-
         self.generate_default_imports()?;
-
         Ok(self.program_data)
     }
 
