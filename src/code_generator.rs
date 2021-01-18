@@ -17,7 +17,7 @@ use crate::wasm::{
 use id_arena::Arena;
 use std::convert::TryInto;
 use thiserror::Error;
-use walrus::{FunctionId, Module, ModuleConfig, ValType};
+use walrus::{FunctionId, LocalFunction, Module, ModuleConfig, ValType};
 
 // Indicates value is an array of primitives
 pub static ARRAY_ID: i32 = -1;
@@ -58,10 +58,11 @@ pub struct CodeGenerator {
     builtin_types: BuiltInTypes,
     type_arena: Arena<Type>,
     module: Module,
+    current_function: Option<LocalFunction>,
     // All the generated code
     program_data: ProgramData,
     return_type: Option<WasmType>,
-    current_function: Option<usize>,
+    current_function_id: Option<usize>,
     default_functions: DefaultFunctions,
 }
 
@@ -95,9 +96,10 @@ impl CodeGenerator {
             type_arena: type_table,
             module,
             default_functions,
+            current_function: None,
             program_data: ProgramData::new(func_count, expr_func_count),
             return_type: None,
-            current_function: None,
+            current_function_id: None,
         }
     }
 
@@ -486,7 +488,7 @@ impl CodeGenerator {
             } => {
                 // NOTE: This is super brittle again, as if we add another runtime function,
                 // we'll need to change this comparison
-                let mut opcodes = if let Some(cf) = self.current_function {
+                let mut opcodes = if let Some(cf) = self.current_function_id {
                     if *callee <= PRINT_CHAR_INDEX.try_into().unwrap() {
                         Vec::new()
                     } else if cf == *callee
