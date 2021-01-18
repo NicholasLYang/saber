@@ -456,11 +456,12 @@ impl CodeGenerator {
                 opcodes.push(OpCode::SetLocal(var_index.try_into().unwrap()));
                 Ok(opcodes)
             }
-            StmtT::Block(stmts) => {
-                let mut opcodes = Vec::new();
-                for (i, stmt) in stmts.iter().enumerate() {
-                    opcodes.append(&mut self.generate_stmt(stmt, is_last && i == stmts.len() - 1)?);
-                }
+            StmtT::Loop(block) => {
+                let mut opcodes = vec![OpCode::Loop, OpCode::Type(WasmType::Empty)];
+                opcodes.append(&mut self.generate_expr(block)?);
+                // Break to loop
+                opcodes.push(OpCode::Br(0));
+                opcodes.push(OpCode::End);
                 Ok(opcodes)
             }
             StmtT::If {

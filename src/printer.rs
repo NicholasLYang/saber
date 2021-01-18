@@ -55,6 +55,7 @@ pub fn token_to_string(name_table: &NameTable, token: &Token) -> String {
         Token::Export => "export".to_string(),
         Token::For => "for".to_string(),
         Token::If => "if".to_string(),
+        Token::Loop => "loop".to_string(),
         Token::Return => "return".to_string(),
         Token::Struct => "struct".to_string(),
         Token::Let => "let".to_string(),

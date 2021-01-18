@@ -52,8 +52,8 @@ pub struct ProgramT {
 pub enum Stmt {
     Asgn(Pat, Loc<Expr>),
     Expr(Loc<Expr>),
+    Loop(Loc<Expr>),
     Return(Loc<Expr>),
-    Block(Vec<Loc<Stmt>>),
     Function(Name, Pat, Option<Loc<TypeSig>>, Box<Loc<Expr>>),
     Export(Name),
 }
@@ -63,7 +63,7 @@ pub enum StmtT {
     Asgn(Name, Loc<ExprT>),
     Expr(Loc<ExprT>),
     Return(Loc<ExprT>),
-    Block(Vec<Loc<StmtT>>),
+    Loop(Loc<ExprT>),
     Function {
         name: Name,
         params_type: TypeId,

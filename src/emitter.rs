@@ -120,8 +120,15 @@ pub fn emit_code<T: Write>(mut dest: T, op_code: OpCode) -> Result<()> {
             leb128::write::unsigned(&mut dest, offset.into())?;
             Ok(())
         }
+        OpCode::Block => dest.write_u8(0x02),
+        OpCode::Loop => dest.write_u8(0x03),
         OpCode::If => dest.write_u8(0x04),
         OpCode::Else => dest.write_u8(0x05),
+        OpCode::Br(depth) => {
+            dest.write_u8(0x0c)?;
+            leb128::write::unsigned(&mut dest, depth.into())?;
+            Ok(())
+        }
         OpCode::Return => dest.write_u8(0x0f),
         OpCode::Call(i) => {
             dest.write_u8(0x10)?;

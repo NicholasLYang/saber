@@ -313,6 +313,7 @@ impl<'input> Parser<'input> {
             TokenDiscriminants::Let,
             TokenDiscriminants::Return,
             TokenDiscriminants::Export,
+            TokenDiscriminants::Loop,
         ])?;
         let location = span.location;
         let res = match span.inner {
@@ -323,6 +324,12 @@ impl<'input> Parser<'input> {
                 let if_expr = self.if_expr(location)?;
                 let location = if_expr.location;
                 Ok(loc!(Stmt::Expr(if_expr), location))
+            }
+            Token::Loop => {
+                let (_, left) = self.expect(TokenDiscriminants::LBrace)?;
+                let block = self.expr_block(left)?;
+                let location = LocationRange(left.0, block.location.1);
+                Ok(loc!(Stmt::Loop(block), location))
             }
             token => {
                 self.pushback(loc!(token, location));
@@ -534,7 +541,7 @@ impl<'input> Parser<'input> {
             // If we're undeniably starting a statement then
             // parse it and push onto the vec
             if let Some(span) =
-                self.match_multiple(vec![Token::Let, Token::Return, Token::Export])?
+                self.match_multiple(vec![Token::Let, Token::Return, Token::Export, Token::Loop])?
             {
                 self.pushback(span);
                 self.stmt()?.map(|stmt| stmts.push(stmt));

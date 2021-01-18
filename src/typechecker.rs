@@ -393,6 +393,11 @@ impl TypeChecker {
                 }])
             }
             Stmt::Asgn(pat, rhs) => Ok(self.asgn(pat, rhs, location)?),
+            Stmt::Loop(block) => {
+                let block_t = self.expr(block)?;
+                self.unify_or_err(block_t.inner.get_type(), UNIT_INDEX, location)?;
+                Ok(vec![loc!(StmtT::Loop(block_t), location)])
+            }
             Stmt::Return(expr) => {
                 let typed_expr = self.expr(expr)?;
                 match self.return_type {
@@ -407,17 +412,6 @@ impl TypeChecker {
                     }
                     None => Err(loc!(TypeError::TopLevelReturn, stmt.location)),
                 }
-            }
-            Stmt::Block(stmts) => {
-                self.read_functions(&stmts)?;
-                let mut typed_stmts = Vec::new();
-                for stmt in stmts {
-                    typed_stmts.push(self.stmt(stmt)?);
-                }
-                Ok(vec![Loc {
-                    location,
-                    inner: StmtT::Block(typed_stmts.into_iter().flatten().collect()),
-                }])
             }
             Stmt::Export(name) => {
                 self.symbol_table.lookup_name(name).ok_or(loc!(

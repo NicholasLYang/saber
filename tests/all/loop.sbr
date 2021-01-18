@@ -1,0 +1,7 @@
+let main = () => {
+  loop {
+    printString("looping");
+  }
+}
+
+export main;
