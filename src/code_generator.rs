@@ -9,7 +9,7 @@ use crate::wasm::{
     OpCode, ProgramData, WasmType,
 };
 use std::convert::TryInto;
-use walrus::{ModuleConfig, Module, ValType, FunctionId};
+use walrus::{ModuleConfig, Module, ValType, FunctionId, LocalFunction};
 
 // Indicates value is an array of primitives
 pub static ARRAY_ID: i32 = -1;
@@ -54,10 +54,11 @@ pub struct CodeGenerator {
     name_table: NameTable,
     type_table: TypeTable,
     module: Module,
+    current_function: Option<LocalFunction>,
     // All the generated code
     program_data: ProgramData,
     return_type: Option<WasmType>,
-    current_function: Option<usize>,
+    current_function_id: Option<usize>,
     default_functions: DefaultFunctions
 }
 
@@ -89,9 +90,10 @@ impl CodeGenerator {
             type_table,
             module,
             default_functions,
+            current_function: None,
             program_data: ProgramData::new(func_count, expr_func_count),
             return_type: None,
-            current_function: None,
+            current_function_id: None,
         }
     }
 
@@ -227,8 +229,8 @@ impl CodeGenerator {
             .as_ref()
             .ok_or(GenerationError::NotReachable)?
             .func_index;
-        let old_func = self.current_function;
-        self.current_function = Some(index);
+        let old_func = self.current_function_id;
+        self.current_function_id = Some(index);
         let old_scope = self.symbol_table.swap_scope(scope);
         let (type_, body) =
             self.generate_function(return_type, params, local_variables, body, location)?;
@@ -236,7 +238,7 @@ impl CodeGenerator {
         self.program_data.code_section[index] = Some(body);
         self.program_data.function_section[index] = Some(type_index);
         self.symbol_table.swap_scope(old_scope);
-        self.current_function = old_func;
+        self.current_function_id = old_func;
         Ok(index)
     }
 
@@ -521,7 +523,7 @@ impl CodeGenerator {
             } => {
                 // NOTE: This is super brittle again, as if we add another runtime function,
                 // we'll need to change this comparison
-                let mut opcodes = if let Some(cf) = self.current_function {
+                let mut opcodes = if let Some(cf) = self.current_function_id {
                     if *callee <= PRINT_CHAR_INDEX.try_into().unwrap() {
                         Vec::new()
                     } else if cf == *callee

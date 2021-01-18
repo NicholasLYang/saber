@@ -1,4 +1,8 @@
 let search = (arr: int[], n: int, start: int, end: int): int => {
+  printString("START");
+  printInt(start);
+  printString("END");
+  printInt(end);
   if start >= end {
     return -1;
   }
