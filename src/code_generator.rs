@@ -1,7 +1,10 @@
 use crate::ast::{ExprT, Function, Loc, Name, Op, ProgramT, StmtT, Type, TypeId, UnaryOp, Value};
 use crate::lexer::LocationRange;
 use crate::printer::type_to_string;
-use crate::symbol_table::{FunctionInfo, SymbolTable, VarIndex, ALLOC_INDEX, DEALLOC_INDEX, PRINT_CHAR_INDEX, PRINT_INT_INDEX, PRINT_STRING_INDEX, STREQ_INDEX, PRINT_HEAP_INDEX};
+use crate::symbol_table::{
+    FunctionInfo, SymbolTable, VarIndex, ALLOC_INDEX, DEALLOC_INDEX, PRINT_CHAR_INDEX,
+    PRINT_HEAP_INDEX, PRINT_INT_INDEX, PRINT_STRING_INDEX, STREQ_INDEX,
+};
 use crate::typechecker::{is_ref_type, TypeChecker};
 use crate::utils::{NameTable, TypeTable, FLOAT_INDEX, STR_INDEX};
 use crate::wasm::{
@@ -126,7 +129,7 @@ impl CodeGenerator {
         });
         let print_heap_type = FunctionType {
             param_types: Vec::new(),
-            return_type: None
+            return_type: None,
         };
         let print_heap_index = self.program_data.insert_type(print_heap_type);
         self.program_data.import_section.push(ImportEntry {
@@ -460,12 +463,14 @@ impl CodeGenerator {
                 }
                 Ok(opcodes)
             }
-            StmtT::If { cond, then_block, else_block } => {
+            StmtT::If {
+                cond,
+                then_block,
+                else_block,
+            } => {
                 let mut opcodes = self.generate_expr(cond)?;
                 opcodes.push(OpCode::If);
-                opcodes.push(OpCode::Type(
-                    WasmType::Empty
-                ));
+                opcodes.push(OpCode::Type(WasmType::Empty));
                 opcodes.append(&mut self.generate_expr(then_block)?);
                 if let Some(else_block) = else_block {
                     opcodes.push(OpCode::Else);
@@ -474,7 +479,7 @@ impl CodeGenerator {
                 opcodes.push(OpCode::End);
                 Ok(opcodes)
             }
-            _ => todo!()
+            _ => todo!(),
         }
     }
 
@@ -755,11 +760,8 @@ impl CodeGenerator {
                     expr.location,
                 )?;
                 lhs_ops.append(&mut rhs_ops);
-                let opcode = self.generate_operator(
-                    &op,
-                    self.type_table.get_type(*type_),
-                    promoted_type,
-                )?;
+                let opcode =
+                    self.generate_operator(&op, self.type_table.get_type(*type_), promoted_type)?;
                 lhs_ops.push(opcode);
                 Ok(lhs_ops)
             }
@@ -994,6 +996,7 @@ impl CodeGenerator {
             (Op::Div, Type::Float, Type::Float) => Ok(OpCode::F32Div),
             (Op::Less, Type::Int, Type::Bool) => Ok(OpCode::I32LessSigned),
             (Op::Greater, Type::Int, Type::Bool) => Ok(OpCode::I32GreaterSigned),
+            (Op::GreaterEqual, Type::Int, Type::Bool) => Ok(OpCode::I32GreaterEqSigned),
             (Op::EqualEqual, Type::Int, Type::Bool) => Ok(OpCode::I32Eq),
             (Op::EqualEqual, Type::String, Type::Bool) => Ok(OpCode::Call(STREQ_INDEX)),
             (op, _, _) => Err(GenerationError::InvalidOperator {

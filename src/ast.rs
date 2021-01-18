@@ -73,7 +73,7 @@ pub enum StmtT {
     If {
         cond: Loc<ExprT>,
         then_block: Loc<ExprT>,
-        else_block: Option<Loc<ExprT>>
+        else_block: Option<Loc<ExprT>>,
     },
     Export(Name),
 }
@@ -242,6 +242,8 @@ pub enum Op {
     GreaterEqual,
     Less,
     LessEqual,
+    LogicalAnd,
+    LogicalOr,
 }
 
 impl fmt::Display for Op {
@@ -260,6 +262,8 @@ impl fmt::Display for Op {
                 Op::GreaterEqual => ">=",
                 Op::Less => "<",
                 Op::LessEqual => "<=",
+                Op::LogicalAnd => "&&",
+                Op::LogicalOr => "||",
             }
         )
     }

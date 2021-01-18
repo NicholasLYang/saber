@@ -47,7 +47,13 @@ fn main() -> Result<()> {
         .version("0.1.0")
         .author("Nicholas Yang")
         .about("Saber Programming Language")
-        .arg(Arg::with_name("debug").long("debug").short('d').about("Debugging the compiler"))
+        .arg(
+            Arg::with_name("debug")
+                .long("debug")
+                .short('d')
+                .about("Debugging the compiler")
+                .value_name("DEBUG_FILE"),
+        )
         .arg(Arg::with_name("out-file").long("out-file"))
         .subcommand(
             App::new("build")
@@ -62,15 +68,17 @@ fn main() -> Result<()> {
         .setting(AppSettings::ArgRequiredElseHelp)
         .setting(AppSettings::ColoredHelp)
         .get_matches();
-
+    let debug_file = if let Some(debug_file_path) = matches.value_of("debug") {
+        Some(File::create(debug_file_path)?)
+    } else {
+        None
+    };
     if let Some(build_matches) = matches.subcommand_matches("build") {
         let file = build_matches.value_of("file").unwrap();
-        let is_debug = matches.is_present("debug");
-        read_file(file, is_debug)
+        compile_saber_file(file, debug_file)
     } else if let Some(run_matches) = matches.subcommand_matches("run") {
         let file = run_matches.value_of("file").unwrap();
-        let is_debug = matches.is_present("debug");
-        read_file(file, is_debug)?;
+        compile_saber_file(file, debug_file)?;
         let output = Command::new("node")
             .args(&["build/load.js"])
             .output()
@@ -98,7 +106,7 @@ fn format_bool_vec(vec: &Vec<bool>) -> String {
 }
 
 // TODO: Add some more general format for flags/build config
-fn read_file(file_name: &str, is_debug: bool) -> Result<()> {
+fn compile_saber_file<T: Write>(file_name: &str, debug_output: Option<T>) -> Result<()> {
     let contents = fs::read_to_string(file_name)?;
     let writer = StandardStream::stderr(ColorChoice::Always);
     let config = codespan_reporting::term::Config::default();
@@ -132,8 +140,11 @@ fn read_file(file_name: &str, is_debug: bool) -> Result<()> {
     )?;
     let code_generator = CodeGenerator::new(typechecker);
     let program = code_generator.generate_program(program_t)?;
-    let mut emitter = Emitter::new(is_debug);
+    let mut emitter = Emitter::new();
     emitter.emit_program(program)?;
+    if let Some(debug_output) = debug_output {
+        emitter.output(debug_output)?;
+    }
     let js_str = format!("export const code =\"{}\"", emitter.output_base64());
     let mut js_file = File::create("runtime/code.ts")?;
     js_file.write_all(js_str.as_bytes())?;

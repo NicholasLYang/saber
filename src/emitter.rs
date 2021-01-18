@@ -8,7 +8,6 @@ use std::convert::TryInto;
 use std::io::prelude::*;
 
 pub struct Emitter {
-    is_debug: bool,
     output: Vec<u8>,
     buffer: Vec<u8>,
 }
@@ -19,15 +18,14 @@ pub enum EmitError {
         display = "INTERNAL: Index is larger than 32 bit integer. Should have been caught earlier"
     )]
     IndexTooLarge,
+    #[fail(display = "Failed to emit code")]
+    EmitFailure,
 }
 
 static MAGIC_NUM: u32 = 0x6d73_6100;
 static VERSION: u32 = 0x1;
 
-pub fn emit_code<T: Write>(mut dest: T, op_code: OpCode, is_debug: bool) -> Result<()> {
-    if is_debug {
-        println!("{:?}", op_code);
-    }
+pub fn emit_code<T: Write>(mut dest: T, op_code: OpCode) -> Result<()> {
     match op_code {
         OpCode::MagicNumber => dest.write_u32::<LittleEndian>(MAGIC_NUM),
         OpCode::Version => dest.write_u32::<LittleEndian>(VERSION),
@@ -65,6 +63,7 @@ pub fn emit_code<T: Write>(mut dest: T, op_code: OpCode, is_debug: bool) -> Resu
         OpCode::I32LessUnsigned => dest.write_u8(0x49),
         OpCode::I32LessSigned => dest.write_u8(0x48),
         OpCode::I32GreaterSigned => dest.write_u8(0x4a),
+        OpCode::I32GreaterEqSigned => dest.write_u8(0x4e),
         //OpCode::I32GreaterUnsigned => dest.write_u8(0x4b),
         OpCode::F32Add => dest.write_u8(0x92),
         OpCode::F32Sub => dest.write_u8(0x93),
@@ -141,22 +140,20 @@ pub fn emit_code<T: Write>(mut dest: T, op_code: OpCode, is_debug: bool) -> Resu
     Ok(())
 }
 
-
 impl Emitter {
-    pub fn new(is_debug: bool) -> Emitter {
+    pub fn new() -> Emitter {
         Emitter {
             output: Vec::new(),
             buffer: Vec::new(),
-            is_debug,
         }
     }
 
     pub fn emit_code_to_buffer(&mut self, op_code: OpCode) -> Result<()> {
-        emit_code(&mut self.buffer, op_code, self.is_debug)
+        emit_code(&mut self.buffer, op_code)
     }
 
-    pub fn emit_code<T: Write>(&self, mut dest: T,  op_code: OpCode) -> Result<()> {
-        emit_code(&mut dest, op_code, self.is_debug)
+    pub fn emit_code<T: Write>(&self, mut dest: T, op_code: OpCode) -> Result<()> {
+        emit_code(&mut dest, op_code)
     }
 
     pub fn emit_program(&mut self, program: ProgramData) -> Result<()> {
@@ -176,6 +173,13 @@ impl Emitter {
         base64::encode(&self.output)
     }
 
+    pub fn output<T: Write>(&mut self, mut dest: T) -> Result<()> {
+        match dest.write(&self.output) {
+            Ok(_) => Ok(()),
+            Err(_) => Err(EmitError::EmitFailure.into()),
+        }
+    }
+
     pub fn flush_buffer(&mut self) -> Result<()> {
         // Flush buffer
         self.output.write_all(&self.buffer)?;
@@ -186,7 +190,7 @@ impl Emitter {
     pub fn write_section(&mut self, opcodes: Vec<OpCode>) -> Result<()> {
         self.flush_buffer()?;
         for opcode in opcodes {
-            self.emit_code_to_buffer( opcode)?;
+            self.emit_code_to_buffer(opcode)?;
         }
         leb128::write::unsigned(&mut self.output, usize_to_u64(self.buffer.len())?)?;
         self.flush_buffer()

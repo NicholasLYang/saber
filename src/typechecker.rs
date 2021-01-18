@@ -323,7 +323,13 @@ impl TypeChecker {
     //   }
     // Then we convert it into a StmtT::If
     // This helps for codegen
-    fn if_expr_stmt(&mut self, location: LocationRange, cond: Box<Loc<Expr>>, then_block: Box<Loc<Expr>>, else_block: Option<Box<Loc<Expr>>>) -> Result<Loc<StmtT>, Loc<TypeError>> {
+    fn if_expr_stmt(
+        &mut self,
+        location: LocationRange,
+        cond: Box<Loc<Expr>>,
+        then_block: Box<Loc<Expr>>,
+        else_block: Option<Box<Loc<Expr>>>,
+    ) -> Result<Loc<StmtT>, Loc<TypeError>> {
         let cond_t = self.expr(*cond)?;
         self.unify_or_err(cond_t.inner.get_type(), BOOL_INDEX, cond_t.location)?;
         let then_t = self.expr(*then_block)?;
@@ -335,7 +341,14 @@ impl TypeChecker {
             None
         };
         self.unify_or_err(then_t.inner.get_type(), UNIT_INDEX, then_t.location)?;
-        Ok(loc!(StmtT::If { cond: cond_t, then_block: then_t, else_block: else_t }, location))
+        Ok(loc!(
+            StmtT::If {
+                cond: cond_t,
+                then_block: then_t,
+                else_block: else_t
+            },
+            location
+        ))
     }
 
     pub fn stmt(&mut self, stmt: Loc<Stmt>) -> Result<Vec<Loc<StmtT>>, Loc<TypeError>> {
@@ -343,7 +356,9 @@ impl TypeChecker {
         match stmt.inner {
             Stmt::Expr(expr) => {
                 if let Expr::If(cond, then_block, else_block) = expr.inner {
-                    Ok(vec![self.if_expr_stmt(location, cond, then_block, else_block)?])
+                    Ok(vec![
+                        self.if_expr_stmt(location, cond, then_block, else_block)?
+                    ])
                 } else {
                     let typed_expr = self.expr(expr)?;
                     Ok(vec![Loc {
@@ -1209,6 +1224,15 @@ impl TypeChecker {
                     None
                 }
             }
+            Op::LogicalAnd | Op::LogicalOr => {
+                if self.is_unifiable(lhs_type, BOOL_INDEX)
+                    && self.is_unifiable(rhs_type, BOOL_INDEX)
+                {
+                    Some(BOOL_INDEX)
+                } else {
+                    None
+                }
+            }
         }
     }
 
@@ -1321,7 +1345,7 @@ impl TypeChecker {
                 } else {
                     None
                 }
-            },
+            }
             _ => None,
         }
     }

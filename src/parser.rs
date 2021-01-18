@@ -38,7 +38,7 @@ pub enum ParseError {
         float: String,
     },
     NotReachable,
-    TupleTypeSig
+    TupleTypeSig,
 }
 
 impl fmt::Display for ParseError {
@@ -183,7 +183,10 @@ impl<'input> Parser<'input> {
     fn peek(&mut self) -> Result<(), Loc<ParseError>> {
         let tok = self.bump()?;
         if let Some(tok) = tok {
-            println!("TOKEN: {}", token_to_string(&self.lexer.name_table, &tok.inner));
+            println!(
+                "TOKEN: {}",
+                token_to_string(&self.lexer.name_table, &tok.inner)
+            );
             self.pushback(tok);
         } else {
             println!("NO TOKEN");
@@ -218,6 +221,8 @@ impl<'input> Parser<'input> {
             Token::GreaterEqual => Ok(Op::GreaterEqual),
             Token::Less => Ok(Op::Less),
             Token::LessEqual => Ok(Op::LessEqual),
+            Token::AmpAmp => Ok(Op::LogicalAnd),
+            Token::PipePipe => Ok(Op::LogicalOr),
             _ => Err(loc!(ParseError::NotReachable, span.location)),
         }
     }
@@ -265,7 +270,6 @@ impl<'input> Parser<'input> {
         }
     }
 
-
     fn id(&mut self) -> Result<(Name, LocationRange), Loc<ParseError>> {
         match self.bump_or_err(vec![TokenDiscriminants::Ident])? {
             Loc {
@@ -282,7 +286,7 @@ impl<'input> Parser<'input> {
                     expected_tokens: format!("{}", TokenDiscriminants::Ident),
                 },
                 location
-            ))
+            )),
         }
     }
 
@@ -436,18 +440,23 @@ impl<'input> Parser<'input> {
     fn convert_params(
         &mut self,
         exprs: Vec<(Loc<Expr>, Option<Loc<TypeSig>>)>,
-        left: LocationRange
+        left: LocationRange,
     ) -> Result<Pat, Loc<ParseError>> {
         let mut params = Vec::new();
         let mut params_location = left;
         for (expr, sig) in exprs {
             match &expr.inner {
                 Expr::Var { name } => {
-                    let loc = LocationRange(expr.location.0, sig.as_ref().map(|s| s.location.1).unwrap_or(expr.location.1));
+                    let loc = LocationRange(
+                        expr.location.0,
+                        sig.as_ref()
+                            .map(|s| s.location.1)
+                            .unwrap_or(expr.location.1),
+                    );
                     params_location = LocationRange(params_location.0, loc.1);
                     params.push(Pat::Id(*name, sig, loc))
-                },
-                _ => return Err(loc!(ParseError::NotReachable, expr.location))
+                }
+                _ => return Err(loc!(ParseError::NotReachable, expr.location)),
             }
         }
         Ok(Pat::Tuple(params, params_location))
@@ -467,22 +476,22 @@ impl<'input> Parser<'input> {
                         self.record_literal(id, left)
                     } else {
                         self.pushback(loc!(Token::Ident(id), left));
-                        self.equality()
+                        self.logical()
                     }
                 }
                 token => {
                     self.pushback(loc!(token, left));
-                    self.equality()
+                    self.logical()
                 }
             }
         } else {
-            self.equality()
+            self.logical()
         }
     }
 
     fn if_expr(&mut self, left: LocationRange) -> Result<Loc<Expr>, Loc<ParseError>> {
         // Yeah...I'm not allowing functions or blocks in the cond spot
-        let cond = self.equality();
+        let cond = self.logical();
         let cond = cond?;
         let (_, block_left) = self.expect(TokenDiscriminants::LBrace)?;
         let then_block = self.expr_block(block_left);
@@ -546,6 +555,13 @@ impl<'input> Parser<'input> {
                         location: LocationRange(left.0, span.location.1),
                         inner: Expr::Block(stmts, Some(Box::new(expr))),
                     });
+                } else if matches!(expr.inner, Expr::If(_, _, _)) {
+                    // If it's not the end of the block and we have an if expression,
+                    // we don't need a semicolon
+                    stmts.push(Loc {
+                        location: expr.location,
+                        inner: Stmt::Expr(expr),
+                    });
                 }
             }
         }
@@ -584,6 +600,23 @@ impl<'input> Parser<'input> {
                 self.expr()
             }
         }
+    }
+
+    fn logical(&mut self) -> Result<Loc<Expr>, Loc<ParseError>> {
+        let mut expr = self.equality()?;
+        while let Some(span) = self.match_multiple(vec![Token::AmpAmp, Token::PipePipe])? {
+            let op = self.lookup_op_token(span)?;
+            let rhs = self.equality()?;
+            expr = Loc {
+                location: LocationRange(expr.location.0, rhs.location.1),
+                inner: Expr::BinOp {
+                    op,
+                    lhs: Box::new(expr),
+                    rhs: Box::new(rhs),
+                },
+            }
+        }
+        Ok(expr)
     }
 
     fn equality(&mut self) -> Result<Loc<Expr>, Loc<ParseError>> {
@@ -862,13 +895,13 @@ impl<'input> Parser<'input> {
                         let body = self.function_body()?;
                         let location = LocationRange(location.0, body.location.1);
                         Ok(loc!(
-                                Expr::Function {
-                                    params: Pat::Id(id, None, location),
-                                    return_type: None,
-                                    body: Box::new(body)
-                                },
-                                location
-                            ))
+                            Expr::Function {
+                                params: Pat::Id(id, None, location),
+                                return_type: None,
+                                body: Box::new(body)
+                            },
+                            location
+                        ))
                     }
                     token => {
                         self.pushback(loc!(token, span.location));
@@ -886,7 +919,7 @@ impl<'input> Parser<'input> {
                     }
                     let expr = self.expr()?;
                     match &expr.inner {
-                        Expr::Var { name: _ } => {},
+                        Expr::Var { name: _ } => {}
                         _ => {
                             is_params = false;
                         }
@@ -904,14 +937,17 @@ impl<'input> Parser<'input> {
                         let body = self.function_body()?;
                         let location = LocationRange(location.0, body.location.1);
                         let params = self.convert_params(exprs, location)?;
-                        return Ok(loc!(Expr::Function {
-                          params,
-                          return_type,
-                          body: Box::new(body)
-                        }, location))
+                        return Ok(loc!(
+                            Expr::Function {
+                                params,
+                                return_type,
+                                body: Box::new(body)
+                            },
+                            location
+                        ));
                     }
                     if let Some(return_type) = return_type {
-                        return Err(loc!(ParseError::TupleTypeSig, return_type.location))
+                        return Err(loc!(ParseError::TupleTypeSig, return_type.location));
                     }
                 }
                 let mut entries: Vec<Loc<Expr>> = exprs.into_iter().map(|(e, _)| e).collect();
@@ -1024,11 +1060,7 @@ impl<'input> Parser<'input> {
             Token::Ident(name) => {
                 if let Some(type_sig) = self.type_sig()? {
                     let loc = LocationRange(left.0, type_sig.location.1);
-                    Ok(Pat::Id(
-                        name,
-                        Some(type_sig),
-                        loc
-                    ))
+                    Ok(Pat::Id(name, Some(type_sig), loc))
                 } else {
                     Ok(Pat::Id(name, None, left))
                 }
@@ -1072,8 +1104,7 @@ impl<'input> Parser<'input> {
     }
 
     fn type_sig(&mut self) -> Result<Option<Loc<TypeSig>>, Loc<ParseError>> {
-        if self.match_one(TokenDiscriminants::Colon)?.is_some()
-        {
+        if self.match_one(TokenDiscriminants::Colon)?.is_some() {
             let type_sig = self.type_()?;
             Ok(Some(type_sig))
         } else {
