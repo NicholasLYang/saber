@@ -36,6 +36,7 @@ mod emitter;
 mod lexer;
 mod parser;
 mod printer;
+mod runtime;
 mod symbol_table;
 mod typechecker;
 mod types;
