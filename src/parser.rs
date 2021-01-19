@@ -314,9 +314,14 @@ impl<'input> Parser<'input> {
             TokenDiscriminants::Return,
             TokenDiscriminants::Export,
             TokenDiscriminants::Loop,
+            TokenDiscriminants::Break,
         ])?;
         let location = span.location;
         let res = match span.inner {
+            Token::Break => {
+                let (_, right) = self.expect(TokenDiscriminants::Semicolon)?;
+                Ok(loc!(Stmt::Break, LocationRange(location.0, right.1)))
+            }
             Token::Let => self.let_stmt(location),
             Token::Return => self.return_stmt(location),
             Token::Export => self.export_stmt(location),
@@ -540,9 +545,13 @@ impl<'input> Parser<'input> {
             }
             // If we're undeniably starting a statement then
             // parse it and push onto the vec
-            if let Some(span) =
-                self.match_multiple(vec![Token::Let, Token::Return, Token::Export, Token::Loop])?
-            {
+            if let Some(span) = self.match_multiple(vec![
+                Token::Let,
+                Token::Return,
+                Token::Export,
+                Token::Loop,
+                Token::Break,
+            ])? {
                 self.pushback(span);
                 self.stmt()?.map(|stmt| stmts.push(stmt));
             } else {

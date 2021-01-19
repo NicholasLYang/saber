@@ -8,6 +8,7 @@ use std::str::CharIndices;
 #[derive(Clone, Debug, PartialEq, EnumDiscriminants, Serialize, Deserialize)]
 #[strum_discriminants(derive(Serialize, Deserialize))]
 pub enum Token {
+    Break,
     False,
     True,
     Else,
@@ -64,6 +65,7 @@ impl Display for TokenDiscriminants {
             f,
             "{}",
             match self {
+                TokenDiscriminants::Break => "break",
                 TokenDiscriminants::False => "false",
                 TokenDiscriminants::True => "true",
                 TokenDiscriminants::Else => "else",
@@ -315,6 +317,7 @@ impl<'input> Lexer<'input> {
             .take_while(|ch| is_id_start(ch) || is_id_body(ch))
             .unwrap_or_else(|| self.source.len());
         let token = match &self.source[start_index..end_index] {
+            "break" => Token::Break,
             "else" => Token::Else,
             "false" => Token::False,
             "for" => Token::For,

@@ -51,6 +51,7 @@ pub struct ProgramT {
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum Stmt {
     Asgn(Pat, Loc<Expr>),
+    Break,
     Expr(Loc<Expr>),
     Loop(Loc<Expr>),
     Return(Loc<Expr>),
@@ -61,6 +62,7 @@ pub enum Stmt {
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum StmtT {
     Asgn(Name, Loc<ExprT>),
+    Break,
     Expr(Loc<ExprT>),
     Return(Loc<ExprT>),
     Loop(Loc<ExprT>),

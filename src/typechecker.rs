@@ -50,6 +50,7 @@ pub enum TypeError {
         index: u32,
         tuple_type: String,
     },
+    NoLoopBreak,
 }
 
 impl fmt::Display for TypeError {
@@ -89,6 +90,7 @@ impl fmt::Display for TypeError {
                 "Index {} is out of bounds of tuple {}",
                 index, tuple_type
             ),
+            TypeError::NoLoopBreak => write!(f, "Cannot break when not in loop"),
         }
     }
 }
@@ -116,6 +118,9 @@ pub struct TypeChecker {
     struct_types: Vec<(Name, TypeId)>,
     // Expr function index. Used for codegen
     expr_func_index: usize,
+    // TODO: Allow for more complicated loop
+    // breaking patterns
+    is_in_loop: bool,
 }
 
 fn build_type_names(name_table: &mut NameTable) -> HashMap<Name, TypeId> {
@@ -184,6 +189,7 @@ impl TypeChecker {
             name_table,
             struct_types: Vec::new(),
             expr_func_index: 0,
+            is_in_loop: false,
         }
     }
 
@@ -393,8 +399,18 @@ impl TypeChecker {
                 }])
             }
             Stmt::Asgn(pat, rhs) => Ok(self.asgn(pat, rhs, location)?),
+            Stmt::Break => {
+                if self.is_in_loop {
+                    Ok(vec![loc!(StmtT::Break, location)])
+                } else {
+                    Err(loc!(TypeError::NoLoopBreak, location))
+                }
+            }
             Stmt::Loop(block) => {
+                let old_is_in_loop = self.is_in_loop;
+                self.is_in_loop = true;
                 let block_t = self.expr(block)?;
+                self.is_in_loop = old_is_in_loop;
                 self.unify_or_err(block_t.inner.get_type(), UNIT_INDEX, location)?;
                 Ok(vec![loc!(StmtT::Loop(block_t), location)])
             }

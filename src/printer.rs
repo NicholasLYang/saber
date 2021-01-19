@@ -49,6 +49,7 @@ pub fn type_to_string(name_table: &NameTable, type_table: &TypeTable, type_id: T
 
 pub fn token_to_string(name_table: &NameTable, token: &Token) -> String {
     match token {
+        Token::Break => "break".to_string(),
         Token::False => "false".to_string(),
         Token::True => "true".to_string(),
         Token::Else => "else".to_string(),

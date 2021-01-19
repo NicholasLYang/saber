@@ -456,6 +456,7 @@ impl CodeGenerator {
                 opcodes.push(OpCode::SetLocal(var_index.try_into().unwrap()));
                 Ok(opcodes)
             }
+            StmtT::Break => Ok(vec![OpCode::Br(1)]),
             StmtT::Loop(block) => {
                 let mut opcodes = vec![OpCode::Loop, OpCode::Type(WasmType::Empty)];
                 opcodes.append(&mut self.generate_expr(block)?);
