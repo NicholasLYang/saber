@@ -1,23 +1,11 @@
-extern crate base64;
-extern crate bimap;
-extern crate byteorder;
-extern crate clap;
-extern crate failure;
-#[macro_use]
-extern crate failure_derive;
-extern crate im;
-extern crate itertools;
-extern crate leb128;
-extern crate strum;
 #[macro_use]
 extern crate strum_macros;
-extern crate serde;
-extern crate serde_json;
 
 use crate::emitter::Emitter;
 use crate::parser::Parser;
+use crate::runtime::run_code;
 use crate::typechecker::TypeChecker;
-use crate::types::Result;
+use anyhow::Result;
 use clap::{App, AppSettings, Arg};
 use code_generator::{CodeGenerator, ARRAY_ID, BOX_ARRAY_ID};
 use codespan_reporting::diagnostic::Diagnostic;
@@ -39,7 +27,6 @@ mod printer;
 mod runtime;
 mod symbol_table;
 mod typechecker;
-mod types;
 mod utils;
 mod wasm;
 
@@ -126,19 +113,6 @@ fn compile_saber_file<T: Write>(file_name: &str, debug_output: Option<T>) -> Res
         let diagnostic: Diagnostic<()> = error.into();
         term::emit(&mut writer.lock(), &config, &file, &diagnostic).unwrap();
     }
-
-    let type_info_str = runtime_type_info
-        .iter()
-        .map(|(name, type_info)| format!("{}:{}", name, format_bool_vec(&type_info)))
-        .collect::<Vec<String>>()
-        .join(",");
-    let mut type_info_file = File::create("runtime/type_info.ts")?;
-    write!(
-        type_info_file,
-        "export const typeInfo: {{ [n: number]: boolean[] }} = {{{}}};export const STR_INDEX = {};\
-        export const ARRAY_ID = {}; export const BOX_ARRAY_ID ={}",
-        type_info_str, STR_INDEX, ARRAY_ID, BOX_ARRAY_ID
-    )?;
     let code_generator = CodeGenerator::new(typechecker);
     let program = code_generator.generate_program(program_t)?;
     let mut emitter = Emitter::new();
@@ -146,13 +120,8 @@ fn compile_saber_file<T: Write>(file_name: &str, debug_output: Option<T>) -> Res
     if let Some(debug_output) = debug_output {
         emitter.output(debug_output)?;
     }
-    let js_str = format!("export const code =\"{}\"", emitter.output_base64());
-    let mut js_file = File::create("runtime/code.ts")?;
-    js_file.write_all(js_str.as_bytes())?;
-    let output = Command::new("npm")
-        .args(&["--prefix", "runtime", "run", "build"])
-        .output()
-        .expect("Failed to build code");
-    io::stderr().write_all(&output.stderr).unwrap();
+    let mut wasm_bytes = Vec::new();
+    emitter.output(&mut wasm_bytes)?;
+    run_code(wasm_bytes)?;
     Ok(())
 }

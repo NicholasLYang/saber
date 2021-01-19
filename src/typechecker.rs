@@ -240,12 +240,11 @@ impl TypeChecker {
     pub fn generate_runtime_type_info(
         &self,
         named_types: &Vec<(Name, TypeId)>,
-    ) -> Vec<(Name, Vec<bool>)> {
-        let mut type_info = Vec::new();
+    ) -> HashMap<Name, Vec<bool>> {
+        let mut type_info = HashMap::new();
         for (_, type_id) in named_types {
-            let final_type_id = self.type_table.get_final_type(*type_id);
-            self.generate_type_info(final_type_id)
-                .map(|info| type_info.push(info));
+            self.generate_type_info(*type_id)
+                .map(|(type_id, field_info)| type_info.insert(type_id, field_info));
         }
         type_info
     }

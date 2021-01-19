@@ -418,28 +418,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "failure"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "795bd83d3abeb9220f257e597aa0080a508b27533824adf336529648f6abf7e2"
-dependencies = [
- "backtrace",
- "failure_derive",
-]
-
-[[package]]
-name = "failure_derive"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ea1063915fd7ef4309e222a5a07cf9c319fb9c7836b1f89b85458672dbb127e1"
-dependencies = [
- "proc-macro2 0.4.13",
- "quote 0.6.8",
- "syn 0.15.15",
- "synstructure",
-]
-
-[[package]]
 name = "fallible-iterator"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -890,13 +868,12 @@ checksum = "535622e6be132bccd223f4bb2b8ac8d53cda3c7a6394944d3b2b33fb974f9d76"
 name = "saber"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "base64 0.12.3",
  "bimap",
  "byteorder",
  "clap",
  "codespan-reporting",
- "failure",
- "failure_derive",
  "im",
  "itertools 0.8.0",
  "leb128",
@@ -904,6 +881,7 @@ dependencies = [
  "serde_json",
  "strum",
  "strum_macros",
+ "thiserror",
  "wasmtime",
 ]
 
@@ -1068,18 +1046,6 @@ dependencies = [
  "proc-macro2 1.0.24",
  "quote 1.0.3",
  "syn 1.0.58",
-]
-
-[[package]]
-name = "synstructure"
-version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "73687139bf99285483c96ac0add482c3776528beac1d97d444f6e91f203a2015"
-dependencies = [
- "proc-macro2 0.4.13",
- "quote 0.6.8",
- "syn 0.15.15",
- "unicode-xid 0.1.0",
 ]
 
 [[package]]

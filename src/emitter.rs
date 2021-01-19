@@ -1,24 +1,23 @@
-use crate::types::Result;
 use crate::wasm::{
     ElemSegment, ExportEntry, FunctionBody, FunctionType, GlobalType, ImportEntry, ImportKind,
     OpCode, ProgramData, WasmType,
 };
+use anyhow::Result;
 use byteorder::{LittleEndian, WriteBytesExt};
 use std::convert::TryInto;
 use std::io::prelude::*;
+use thiserror::Error;
 
 pub struct Emitter {
     output: Vec<u8>,
     buffer: Vec<u8>,
 }
 
-#[derive(Debug, Fail, PartialEq)]
+#[derive(Debug, Error, PartialEq)]
 pub enum EmitError {
-    #[fail(
-        display = "INTERNAL: Index is larger than 32 bit integer. Should have been caught earlier"
-    )]
+    #[error("INTERNAL: Index is larger than 32 bit integer. Should have been caught earlier")]
     IndexTooLarge,
-    #[fail(display = "Failed to emit code")]
+    #[error("Failed to emit code")]
     EmitFailure,
 }
 

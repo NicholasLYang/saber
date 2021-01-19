@@ -1223,7 +1223,7 @@ mod tests {
 
     #[test]
     #[ignore]
-    fn generate_baseline() -> Result<(), failure::Error> {
+    fn generate_baseline() -> anyhow::Result<()> {
         for entry in fs::read_dir("tests/parser")? {
             let entry = &entry?.path();
             if entry.extension() == Some(OsStr::new("sbr")) {
