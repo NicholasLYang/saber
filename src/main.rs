@@ -16,7 +16,6 @@ use std::fs::{self, File};
 use std::io;
 use std::io::Write;
 use std::process::Command;
-use utils::STR_INDEX;
 
 mod ast;
 mod code_generator;
@@ -63,38 +62,17 @@ fn main() -> Result<()> {
     };
     if let Some(build_matches) = matches.subcommand_matches("build") {
         let file = build_matches.value_of("file").unwrap();
-        compile_saber_file(file, debug_file)
+        compile_saber_file(file, debug_file)?;
     } else if let Some(run_matches) = matches.subcommand_matches("run") {
         let file = run_matches.value_of("file").unwrap();
-        compile_saber_file(file, debug_file)?;
-        let output = Command::new("node")
-            .args(&["build/load.js"])
-            .output()
-            .expect("Failed to run code");
-        io::stderr().write_all(&output.stderr).unwrap();
-        io::stdout().write_all(&output.stdout).unwrap();
-        Ok(())
-    } else {
-        Ok(())
+        let wasm_bytes = compile_saber_file(file, debug_file)?;
+        run_code(wasm_bytes)?;
     }
-}
-
-fn format_bool_vec(vec: &Vec<bool>) -> String {
-    format!(
-        "[{}]",
-        vec.iter()
-            .map(|b| if *b {
-                "true".to_string()
-            } else {
-                "false".to_string()
-            })
-            .collect::<Vec<String>>()
-            .join(",")
-    )
+    Ok(())
 }
 
 // TODO: Add some more general format for flags/build config
-fn compile_saber_file<T: Write>(file_name: &str, debug_output: Option<T>) -> Result<()> {
+fn compile_saber_file<T: Write>(file_name: &str, debug_output: Option<T>) -> Result<Vec<u8>> {
     let contents = fs::read_to_string(file_name)?;
     let writer = StandardStream::stderr(ColorChoice::Always);
     let config = codespan_reporting::term::Config::default();
@@ -122,6 +100,5 @@ fn compile_saber_file<T: Write>(file_name: &str, debug_output: Option<T>) -> Res
     }
     let mut wasm_bytes = Vec::new();
     emitter.output(&mut wasm_bytes)?;
-    run_code(wasm_bytes)?;
-    Ok(())
+    Ok(wasm_bytes)
 }

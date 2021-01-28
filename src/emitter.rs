@@ -168,15 +168,12 @@ impl Emitter {
         self.emit_imports_section(program.import_section)?;
         self.emit_functions_section(program.function_section)?;
         self.emit_table_section(program.elements_section.elems.len())?;
+        self.emit_memory_section()?;
         self.emit_global_section(program.global_section)?;
         self.emit_exports_section(program.exports_section)?;
         self.emit_elements_section(program.elements_section)?;
         self.emit_code_section(program.code_section.into_iter().filter_map(|t| t).collect())?;
         Ok(())
-    }
-
-    pub fn output_base64(&mut self) -> String {
-        base64::encode(&self.output)
     }
 
     pub fn output<T: Write>(&mut self, mut dest: T) -> Result<()> {
@@ -281,6 +278,12 @@ impl Emitter {
             OpCode::Bool(false),
             OpCode::Count(usize_to_u32(initial_length)?),
         ];
+        self.write_section(opcodes)
+    }
+
+    fn emit_memory_section(&mut self) -> Result<()> {
+        self.emit_code_to_buffer(OpCode::SectionId(5))?;
+        let opcodes = vec![OpCode::Count(1), OpCode::Bool(false), OpCode::Count(1)];
         self.write_section(opcodes)
     }
 
