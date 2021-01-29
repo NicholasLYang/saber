@@ -119,7 +119,6 @@ pub fn emit_code<T: Write>(mut dest: T, op_code: OpCode) -> Result<()> {
             leb128::write::unsigned(&mut dest, offset.into())?;
             Ok(())
         }
-        OpCode::Block => dest.write_u8(0x02),
         OpCode::Loop => dest.write_u8(0x03),
         OpCode::If => dest.write_u8(0x04),
         OpCode::Else => dest.write_u8(0x05),
@@ -239,16 +238,15 @@ impl Emitter {
                 ImportKind::Function { type_ } => {
                     opcodes.push(OpCode::Kind(0));
                     opcodes.push(OpCode::Index(usize_to_u32(type_)?));
-                }
-                ImportKind::Memory(memory_type) => {
-                    opcodes.push(OpCode::Kind(2));
-                    let is_max_present = memory_type.limits.1.is_some();
-                    opcodes.push(OpCode::Bool(is_max_present));
-                    opcodes.push(OpCode::Count(memory_type.limits.0));
-                    if let Some(max) = memory_type.limits.1 {
-                        opcodes.push(OpCode::Count(max));
-                    }
-                }
+                } /*                ImportKind::Memory(memory_type) => {
+                      opcodes.push(OpCode::Kind(2));
+                      let is_max_present = memory_type.limits.1.is_some();
+                      opcodes.push(OpCode::Bool(is_max_present));
+                      opcodes.push(OpCode::Count(memory_type.limits.0));
+                      if let Some(max) = memory_type.limits.1 {
+                          opcodes.push(OpCode::Count(max));
+                      }
+                  }*/
             };
         }
         self.write_section(opcodes)

@@ -2,8 +2,7 @@ use crate::ast::{ExprT, Function, Loc, Name, Op, ProgramT, StmtT, Type, TypeId, 
 use crate::lexer::LocationRange;
 use crate::printer::type_to_string;
 use crate::symbol_table::{
-    FunctionInfo, SymbolTable, VarIndex, ALLOC_INDEX, DEALLOC_INDEX, PRINT_CHAR_INDEX,
-    PRINT_HEAP_INDEX, PRINT_INT_INDEX, PRINT_STRING_INDEX, STREQ_INDEX,
+    FunctionInfo, SymbolTable, VarIndex, ALLOC_INDEX, DEALLOC_INDEX, PRINT_CHAR_INDEX, STREQ_INDEX,
 };
 use crate::typechecker::{is_ref_type, TypeChecker};
 use crate::utils::{NameTable, TypeTable, FLOAT_INDEX, STR_INDEX};

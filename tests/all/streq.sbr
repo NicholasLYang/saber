@@ -1,0 +1,11 @@
+let main = () => {
+  let a = "foo";
+  let b = "foo";
+  if a == b {
+    printString("equal!");
+  } else {
+    printString("not equal!");
+  }
+}
+
+export main;

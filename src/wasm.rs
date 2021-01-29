@@ -42,7 +42,6 @@ pub enum OpCode {
     F32Load(u32, u32),
     I32Store(u32, u32),
     F32Store(u32, u32),
-    Block,
     Loop,
     If,
     Else,
@@ -118,7 +117,7 @@ pub struct ImportEntry {
 pub enum ImportKind {
     Function { type_: usize },
     //    Table { type_: TableType },
-    Memory(MemoryType),
+    //    Memory(MemoryType),
     //    Global { type_: GlobalType },
 }
 

@@ -7,15 +7,13 @@ use crate::runtime::run_code;
 use crate::typechecker::TypeChecker;
 use anyhow::Result;
 use clap::{App, AppSettings, Arg};
-use code_generator::{CodeGenerator, ARRAY_ID, BOX_ARRAY_ID};
+use code_generator::CodeGenerator;
 use codespan_reporting::diagnostic::Diagnostic;
 use codespan_reporting::files::SimpleFile;
 use codespan_reporting::term;
 use codespan_reporting::term::termcolor::{ColorChoice, StandardStream};
 use std::fs::{self, File};
-use std::io;
 use std::io::Write;
-use std::process::Command;
 
 mod ast;
 mod code_generator;
@@ -86,7 +84,6 @@ fn compile_saber_file<T: Write>(file_name: &str, debug_output: Option<T>) -> Res
     }
     let mut typechecker = TypeChecker::new(parser.get_name_table());
     let program_t = typechecker.check_program(program);
-    let runtime_type_info = typechecker.generate_runtime_type_info(&program_t.named_types);
     for error in &program_t.errors {
         let diagnostic: Diagnostic<()> = error.into();
         term::emit(&mut writer.lock(), &config, &file, &diagnostic).unwrap();

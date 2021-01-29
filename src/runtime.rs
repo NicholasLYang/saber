@@ -1,7 +1,7 @@
 use anyhow::Result;
 use byteorder::{LittleEndian, WriteBytesExt};
 use std::convert::TryInto;
-use wasmtime::{Caller, Extern, Func, Instance, Limits, Memory, MemoryType, Module, Store, Trap};
+use wasmtime::{Caller, Extern, Func, Instance, Memory, Module, Store, Trap};
 
 #[inline]
 fn get_u32(ptr: usize, mem: &Memory) -> Result<u32> {
@@ -115,8 +115,47 @@ pub fn run_code(wasm_bytes: Vec<u8>) -> Result<()> {
     let alloc = Func::wrap(&store, alloc);
     let dealloc = Func::wrap(&store, |param: i32| ());
     let clone = Func::wrap(&store, |p1: i32| ());
-    let streq = Func::wrap(&store, |p1: i32, p2: i32| 0);
-    let print_heap = Func::wrap(&store, || println!("Printing heap!"));
+    let streq = Func::wrap(
+        &store,
+        |caller: Caller<'_>, p1: i32, p2: i32| -> Result<u32, Trap> {
+            if p1 == p2 {
+                return Ok(1);
+            }
+            let mem = match caller.get_export("memory") {
+                Some(Extern::Memory(mem)) => mem,
+                _ => return Err(Trap::new("failed to find host memory")),
+            };
+
+            let p1_len = get_u32((p1 + 4) as usize, &mem)? as usize;
+            let p2_len = get_u32((p2 + 4) as usize, &mem)? as usize;
+
+            if p1_len != p2_len {
+                return Ok(0);
+            }
+
+            for i in 0..p1_len {
+                unsafe {
+                    let mem_slice = mem.data_unchecked();
+                    if mem_slice.get(p1 as usize + 4 + i).cloned()
+                        != mem_slice.get(p2 as usize + 4 + i).cloned()
+                    {
+                        return Ok(0);
+                    }
+                }
+            }
+            Ok(1)
+        },
+    );
+
+    let print_heap = Func::wrap(&store, |caller: Caller<'_>| {
+        let mem = match caller.get_export("memory") {
+            Some(Extern::Memory(mem)) => mem,
+            _ => return Err(Trap::new("failed to find host memory")),
+        };
+        unsafe { println!("{:?}", mem.data_unchecked()) }
+        Ok(())
+    });
+
     let print_int = Func::wrap(&store, |param: i32| {
         println!("{}", param);
     });
@@ -127,7 +166,7 @@ pub fn run_code(wasm_bytes: Vec<u8>) -> Result<()> {
     let print_string = Func::wrap(&store, print_string);
 
     let print_char = Func::wrap(&store, |param: i32| {
-        println!("PRINT CHAR {}", param);
+        println!("{}", std::char::from_u32(param as u32).unwrap());
     });
     let instance = Instance::new(
         &store,
