@@ -5,6 +5,7 @@ use crate::emitter::Emitter;
 use crate::parser::Parser;
 use crate::runtime::run_code;
 use crate::typechecker::TypeChecker;
+use crate::utils::SaberProgram;
 use anyhow::Result;
 use clap::{App, AppSettings, Arg};
 use code_generator::CodeGenerator;
@@ -63,14 +64,14 @@ fn main() -> Result<()> {
         compile_saber_file(file, debug_file)?;
     } else if let Some(run_matches) = matches.subcommand_matches("run") {
         let file = run_matches.value_of("file").unwrap();
-        let wasm_bytes = compile_saber_file(file, debug_file)?;
-        run_code(wasm_bytes)?;
+        let saber_program = compile_saber_file(file, debug_file)?;
+        run_code(saber_program)?;
     }
     Ok(())
 }
 
 // TODO: Add some more general format for flags/build config
-fn compile_saber_file<T: Write>(file_name: &str, debug_output: Option<T>) -> Result<Vec<u8>> {
+fn compile_saber_file<T: Write>(file_name: &str, debug_output: Option<T>) -> Result<SaberProgram> {
     let contents = fs::read_to_string(file_name)?;
     let writer = StandardStream::stderr(ColorChoice::Always);
     let config = codespan_reporting::term::Config::default();
@@ -84,6 +85,7 @@ fn compile_saber_file<T: Write>(file_name: &str, debug_output: Option<T>) -> Res
     }
     let mut typechecker = TypeChecker::new(parser.get_name_table());
     let program_t = typechecker.check_program(program);
+    let runtime_types = typechecker.generate_runtime_type_info();
     for error in &program_t.errors {
         let diagnostic: Diagnostic<()> = error.into();
         term::emit(&mut writer.lock(), &config, &file, &diagnostic).unwrap();
@@ -97,5 +99,8 @@ fn compile_saber_file<T: Write>(file_name: &str, debug_output: Option<T>) -> Res
     }
     let mut wasm_bytes = Vec::new();
     emitter.output(&mut wasm_bytes)?;
-    Ok(wasm_bytes)
+    Ok(SaberProgram {
+        wasm_bytes,
+        runtime_types,
+    })
 }

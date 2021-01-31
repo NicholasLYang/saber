@@ -1,5 +1,9 @@
+use crate::ast::TypeId;
+use crate::code_generator::BOX_ARRAY_ID;
+use crate::utils::SaberProgram;
 use anyhow::Result;
 use byteorder::{LittleEndian, WriteBytesExt};
+use std::collections::HashMap;
 use std::convert::TryInto;
 use wasmtime::{Caller, Extern, Func, Instance, Memory, Module, Store, Trap};
 
@@ -107,13 +111,54 @@ fn print_string(caller: Caller<'_>, ptr: i32) -> Result<(), Trap> {
     Ok(())
 }
 
+fn dealloc(
+    mem: &Memory,
+    ptr: usize,
+    runtime_types: &HashMap<TypeId, Vec<bool>>,
+) -> Result<(), Trap> {
+    let ref_count_ptr = ptr + 4;
+    let ref_count = get_u32(ref_count_ptr, &mem)?;
+    set_u32(ref_count_ptr, ref_count - 1, &mem)?;
+
+    if ref_count == 1 {
+        // Remove allocated flag
+        set_u32(ptr as usize, get_u32(ptr, &mem)? - 1, &mem)?;
+        let type_id = get_u32(ptr + 8, &mem)? as usize;
+
+        if type_id as i32 == BOX_ARRAY_ID {
+            let len = get_u32(ptr + 16, &mem)? as usize;
+            for idx in 0..len {
+                dealloc(&mem, ptr + 16 + (idx * 4), runtime_types)?;
+            }
+        } else if let Some(struct_info) = runtime_types.get(&type_id) {
+            for (idx, is_ref) in struct_info.iter().enumerate() {
+                if *is_ref {
+                    let field_ptr = get_u32(ptr + 3 + (idx * 4), &mem)?;
+                    dealloc(&mem, field_ptr as usize, runtime_types)?;
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
 static PAGE_SIZE: u32 = 65536;
 
-pub fn run_code(wasm_bytes: Vec<u8>) -> Result<()> {
+pub fn run_code(program: SaberProgram) -> Result<()> {
+    let wasm_bytes = program.wasm_bytes;
+    let runtime_types = program.runtime_types;
     let store = Store::default();
     let module = Module::new(store.engine(), wasm_bytes)?;
     let alloc = Func::wrap(&store, alloc);
-    let dealloc = Func::wrap(&store, |param: i32| ());
+    let dealloc = Func::wrap(&store, move |caller: Caller<'_>, ptr: i32| {
+        let mem = match caller.get_export("memory") {
+            Some(Extern::Memory(mem)) => mem,
+            _ => return Err(Trap::new("failed to find host memory")),
+        };
+
+        dealloc(&mem, ptr as usize, &runtime_types)
+    });
     let clone = Func::wrap(&store, |p1: i32| ());
     let streq = Func::wrap(
         &store,

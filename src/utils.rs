@@ -1,5 +1,11 @@
 use crate::ast::{Type, TypeId};
 use bimap::BiMap;
+use std::collections::HashMap;
+
+pub struct SaberProgram {
+    pub wasm_bytes: Vec<u8>,
+    pub runtime_types: HashMap<TypeId, Vec<bool>>,
+}
 
 #[derive(Debug)]
 pub struct NameTable(BiMap<String, usize>, usize);
