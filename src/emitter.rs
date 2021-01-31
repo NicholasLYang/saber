@@ -1,24 +1,23 @@
-use crate::types::Result;
 use crate::wasm::{
     ElemSegment, ExportEntry, FunctionBody, FunctionType, GlobalType, ImportEntry, ImportKind,
     OpCode, ProgramData, WasmType,
 };
+use anyhow::Result;
 use byteorder::{LittleEndian, WriteBytesExt};
 use std::convert::TryInto;
 use std::io::prelude::*;
+use thiserror::Error;
 
 pub struct Emitter {
     output: Vec<u8>,
     buffer: Vec<u8>,
 }
 
-#[derive(Debug, Fail, PartialEq)]
+#[derive(Debug, Error, PartialEq)]
 pub enum EmitError {
-    #[fail(
-        display = "INTERNAL: Index is larger than 32 bit integer. Should have been caught earlier"
-    )]
+    #[error("INTERNAL: Index is larger than 32 bit integer. Should have been caught earlier")]
     IndexTooLarge,
-    #[fail(display = "Failed to emit code")]
+    #[error("Failed to emit code")]
     EmitFailure,
 }
 
@@ -120,7 +119,6 @@ pub fn emit_code<T: Write>(mut dest: T, op_code: OpCode) -> Result<()> {
             leb128::write::unsigned(&mut dest, offset.into())?;
             Ok(())
         }
-        OpCode::Block => dest.write_u8(0x02),
         OpCode::Loop => dest.write_u8(0x03),
         OpCode::If => dest.write_u8(0x04),
         OpCode::Else => dest.write_u8(0x05),
@@ -169,15 +167,12 @@ impl Emitter {
         self.emit_imports_section(program.import_section)?;
         self.emit_functions_section(program.function_section)?;
         self.emit_table_section(program.elements_section.elems.len())?;
+        self.emit_memory_section()?;
         self.emit_global_section(program.global_section)?;
         self.emit_exports_section(program.exports_section)?;
         self.emit_elements_section(program.elements_section)?;
         self.emit_code_section(program.code_section.into_iter().filter_map(|t| t).collect())?;
         Ok(())
-    }
-
-    pub fn output_base64(&mut self) -> String {
-        base64::encode(&self.output)
     }
 
     pub fn output<T: Write>(&mut self, mut dest: T) -> Result<()> {
@@ -243,16 +238,15 @@ impl Emitter {
                 ImportKind::Function { type_ } => {
                     opcodes.push(OpCode::Kind(0));
                     opcodes.push(OpCode::Index(usize_to_u32(type_)?));
-                }
-                ImportKind::Memory(memory_type) => {
-                    opcodes.push(OpCode::Kind(2));
-                    let is_max_present = memory_type.limits.1.is_some();
-                    opcodes.push(OpCode::Bool(is_max_present));
-                    opcodes.push(OpCode::Count(memory_type.limits.0));
-                    if let Some(max) = memory_type.limits.1 {
-                        opcodes.push(OpCode::Count(max));
-                    }
-                }
+                } /*                ImportKind::Memory(memory_type) => {
+                      opcodes.push(OpCode::Kind(2));
+                      let is_max_present = memory_type.limits.1.is_some();
+                      opcodes.push(OpCode::Bool(is_max_present));
+                      opcodes.push(OpCode::Count(memory_type.limits.0));
+                      if let Some(max) = memory_type.limits.1 {
+                          opcodes.push(OpCode::Count(max));
+                      }
+                  }*/
             };
         }
         self.write_section(opcodes)
@@ -282,6 +276,12 @@ impl Emitter {
             OpCode::Bool(false),
             OpCode::Count(usize_to_u32(initial_length)?),
         ];
+        self.write_section(opcodes)
+    }
+
+    fn emit_memory_section(&mut self) -> Result<()> {
+        self.emit_code_to_buffer(OpCode::SectionId(5))?;
+        let opcodes = vec![OpCode::Count(1), OpCode::Bool(false), OpCode::Count(1)];
         self.write_section(opcodes)
     }
 

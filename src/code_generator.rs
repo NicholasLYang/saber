@@ -2,8 +2,7 @@ use crate::ast::{ExprT, Function, Loc, Name, Op, ProgramT, StmtT, Type, TypeId, 
 use crate::lexer::LocationRange;
 use crate::printer::type_to_string;
 use crate::symbol_table::{
-    FunctionInfo, SymbolTable, VarIndex, ALLOC_INDEX, DEALLOC_INDEX, PRINT_CHAR_INDEX,
-    PRINT_HEAP_INDEX, PRINT_INT_INDEX, PRINT_STRING_INDEX, STREQ_INDEX,
+    FunctionInfo, SymbolTable, VarIndex, ALLOC_INDEX, DEALLOC_INDEX, PRINT_CHAR_INDEX, STREQ_INDEX,
 };
 use crate::typechecker::{is_ref_type, TypeChecker};
 use crate::utils::{NameTable, TypeTable, FLOAT_INDEX, STR_INDEX};
@@ -12,42 +11,43 @@ use crate::wasm::{
     OpCode, ProgramData, WasmType,
 };
 use std::convert::TryInto;
+use thiserror::Error;
 
 // Indicates value is an array of primitives
 pub static ARRAY_ID: i32 = -1;
 // Indicates value is an array of boxed values
 pub static BOX_ARRAY_ID: i32 = -2;
 
-#[derive(Debug, Fail, PartialEq)]
+#[derive(Debug, Error, PartialEq)]
 pub enum GenerationError {
-    #[fail(display = "Operator '{}' for type {} does not exist", op, input_type)]
+    #[error("Operator '{op}' for type {input_type} does not exist")]
     InvalidOperator { op: Op, input_type: String },
-    #[fail(display = "Function '{}' not defined", name)]
+    #[error("Function '{name}' not defined")]
     FunctionNotDefined { name: String },
-    #[fail(display = "Cannot have () as type")]
+    #[error("Cannot have () as type")]
     EmptyType,
-    #[fail(display = "{}: Could not infer type var {:?}", location, type_)]
+    #[error("{location}: Could not infer type var {type_:?}")]
     CouldNotInfer {
         location: LocationRange,
         type_: Type,
     },
-    #[fail(display = "Code Generator: Not implemented yet! {}", reason)]
+    #[error("Code Generator: Not implemented yet! {reason}")]
     NotImplemented { reason: &'static str },
-    #[fail(display = "Code Generator: Not reachable")]
+    #[error("Code Generator: Not reachable")]
     NotReachable,
-    #[fail(display = "Cannot return at top level")]
+    #[error("Cannot return at top level")]
     TopLevelReturn,
-    #[fail(display = "{}: Cannot convert type {} to type {}", location, t1, t2)]
+    #[error("{location}: Cannot convert type {t1} to type {t2}")]
     CannotConvert {
         location: LocationRange,
         t1: String,
         t2: String,
     },
-    #[fail(display = "{}: Record cannot have more than 64 fields", location)]
+    #[error("{location}: Record cannot have more than 64 fields")]
     RecordTooLarge { location: LocationRange },
-    #[fail(display = "Cannot export value")]
+    #[error("Cannot export value")]
     ExportValue,
-    #[fail(display = "{}: Value is not a function", location)]
+    #[error("{location}: Value is not a function")]
     NotAFunction { location: LocationRange },
 }
 

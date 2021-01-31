@@ -42,7 +42,6 @@ pub enum OpCode {
     F32Load(u32, u32),
     I32Store(u32, u32),
     F32Store(u32, u32),
-    Block,
     Loop,
     If,
     Else,
@@ -118,7 +117,7 @@ pub struct ImportEntry {
 pub enum ImportKind {
     Function { type_: usize },
     //    Table { type_: TableType },
-    Memory(MemoryType),
+    //    Memory(MemoryType),
     //    Global { type_: GlobalType },
 }
 
@@ -157,18 +156,11 @@ pub struct ProgramData {
 
 impl ProgramData {
     pub fn new(func_count: usize, expr_func_count: usize) -> Self {
-        let import_section = vec![ImportEntry {
-            module_str: "mem".as_bytes().to_vec(),
-            field_str: "heap".as_bytes().to_vec(),
-            kind: ImportKind::Memory(MemoryType {
-                limits: ResizableLimits(0, None),
-            }),
-        }];
         // Add one for start function
         let func_count = func_count + 1;
         ProgramData {
             type_section: Vec::new(),
-            import_section,
+            import_section: Vec::new(),
             function_section: vec![None; func_count],
             global_section: vec![
                 (
@@ -186,7 +178,11 @@ impl ProgramData {
                     vec![OpCode::I32Const(0)],
                 ),
             ],
-            exports_section: Vec::new(),
+            exports_section: vec![ExportEntry {
+                field_str: "memory".to_string().into_bytes(),
+                kind: ExternalKind::Memory,
+                index: 0,
+            }],
             elements_section: ElemSegment {
                 offset: vec![OpCode::I32Const(0), OpCode::End],
                 elems: vec![None; expr_func_count],
