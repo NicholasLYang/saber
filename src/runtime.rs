@@ -143,6 +143,15 @@ fn dealloc(
     Ok(())
 }
 
+macro_rules! get_memory {
+    ($caller:expr) => {
+        match ($caller).get_export("memory") {
+            Some(Extern::Memory(mem)) => mem,
+            _ => return Err(Trap::new("failed to find host memory")),
+        }
+    };
+}
+
 static PAGE_SIZE: u32 = 65536;
 
 pub fn run_code(program: SaberProgram) -> Result<()> {
@@ -151,15 +160,24 @@ pub fn run_code(program: SaberProgram) -> Result<()> {
     let store = Store::default();
     let module = Module::new(store.engine(), wasm_bytes)?;
     let alloc = Func::wrap(&store, alloc);
+
     let dealloc = Func::wrap(&store, move |caller: Caller<'_>, ptr: i32| {
-        let mem = match caller.get_export("memory") {
-            Some(Extern::Memory(mem)) => mem,
-            _ => return Err(Trap::new("failed to find host memory")),
-        };
+        let mem = get_memory!(caller);
 
         dealloc(&mem, ptr as usize, &runtime_types)
     });
-    let clone = Func::wrap(&store, |p1: i32| ());
+
+    let clone = Func::wrap(&store, |caller: Caller<'_>, ptr: i32| {
+        let mem = get_memory!(caller);
+        let ref_count = get_u32((ptr - 4) as usize, &mem)?;
+        if ref_count < 1 {
+            Err(Trap::new("Internal Error: Invalid refcount for struct"))
+        } else {
+            set_u32((ptr - 4) as usize, ref_count + 1, &mem)?;
+            Ok(())
+        }
+    });
+
     let streq = Func::wrap(
         &store,
         |caller: Caller<'_>, p1: i32, p2: i32| -> Result<u32, Trap> {
