@@ -685,9 +685,7 @@ impl TypeChecker {
         rhs: Loc<Expr>,
         location: LocationRange,
     ) -> Result<Vec<Loc<StmtT>>, Loc<TypeError>> {
-        let pat_type = self.pat(&pat)?;
         let typed_rhs = self.expr(rhs)?;
-        let type_ = self.unify_or_err(pat_type, typed_rhs.inner.get_type(), location)?;
         let name = if let Pat::Id(name, _, _) = pat {
             name
         } else {
@@ -701,7 +699,8 @@ impl TypeChecker {
         {
             return Err(loc!(TypeError::ShadowingFunction, location));
         }
-        self.symbol_table.insert_var(name, type_);
+        self.symbol_table
+            .insert_var(name, typed_rhs.inner.get_type());
         let mut pat_bindings =
             self.generate_pattern_bindings(&pat, name, typed_rhs.inner.get_type(), location)?;
         let mut bindings = vec![Loc {
