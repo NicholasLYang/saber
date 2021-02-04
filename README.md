@@ -11,20 +11,22 @@ hopefully I'll be able to port it to other platforms.
 ## Contributing
 
 Contributors are welcome! To develop on Saber, all you need is Rust, either stable 
-or nightly. Currently Saber compiles on rustc 1.44.1 and rustc 1.46.0-nightly.
-
-To run Saber code, you need NodeJS, version 12 or later.
+or nightly. Saber compiles on rustc 1.47.0 stable and rustc 1.46.0-nightly.
 
 I'm currently running Saber on macOS Catalina, but I don't see why it shouldn't work 
 on Linux or Windows 
 
 ### Setup
 
-Clone the repo, then `cd` into `build/`. Run `npm install`.
+The entire saber codebase builds into a single executable containing the runtime, 
+compiler and CLI. This isn't ideal, but it's what works.
 
-To compile a Saber file, run `cargo run <file>`. It will generate into `build/`. To run 
-the generated code, run `node build/load.ts`.
-  
+Run `cargo build` to get the executable or `cargo run` to run the executable. We use clap so there's some help text specific subcommands
+
+If you're using `cargo run`, add the subcommands after `--`:
+```
+cargo run -- run tests/all/factorial.sbr
+```
 
 ## Code of Conduct
 

@@ -40,7 +40,6 @@ fn main() -> Result<()> {
                 .about("Debugging the compiler")
                 .value_name("DEBUG_FILE"),
         )
-        .arg(Arg::with_name("out-file").long("out-file"))
         .subcommand(
             App::new("build")
                 .about("Build file")
