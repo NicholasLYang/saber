@@ -79,6 +79,11 @@ pub fn emit_code<T: Write>(mut dest: T, op_code: OpCode) -> Result<()> {
             leb128::write::unsigned(&mut dest, i.into())?;
             Ok(())
         }
+        OpCode::TeeLocal(i) => {
+            dest.write_u8(0x22)?;
+            leb128::write::unsigned(&mut dest, i.into())?;
+            Ok(())
+        }
         OpCode::GetGlobal(i) => {
             dest.write_u8(0x23)?;
             leb128::write::unsigned(&mut dest, i.into())?;

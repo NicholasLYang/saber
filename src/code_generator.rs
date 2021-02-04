@@ -449,7 +449,7 @@ impl CodeGenerator {
                     Ok(opcodes)
                 }
             }
-            StmtT::Asgn(name, expr) => {
+            StmtT::Let(name, expr) => {
                 let entry = self.symbol_table.lookup_name(*name).unwrap();
                 let var_index = entry.var_index;
                 let mut opcodes = self.generate_expr(&expr)?;
@@ -539,6 +539,28 @@ impl CodeGenerator {
 
     fn generate_expr(&mut self, expr: &Loc<ExprT>) -> Result<Vec<OpCode>> {
         match &expr.inner {
+            ExprT::Asgn { lhs, rhs, type_: _ } => {
+                if lhs.inner.accessors.len() != 0 {
+                    todo!()
+                }
+                let mut opcodes = self.generate_expr(rhs)?;
+                let index = self.symbol_table.codegen_lookup(lhs.inner.ident).unwrap();
+                match index {
+                    VarIndex::Local(index) => {
+                        opcodes.push(OpCode::TeeLocal(index.try_into().unwrap()));
+                        Ok(opcodes)
+                    }
+                    VarIndex::Capture(index) => {
+                        let index = index + 1;
+                        opcodes.push(OpCode::SetGlobal(0));
+                        opcodes.push(OpCode::GetLocal(0));
+                        opcodes.push(OpCode::GetGlobal(0));
+                        opcodes.push(OpCode::I32Store(2, (index * 4).try_into().unwrap()));
+                        opcodes.push(OpCode::GetGlobal(0));
+                        Ok(opcodes)
+                    }
+                }
+            }
             ExprT::Primary { value, type_: _ } => self.generate_primary(value),
             ExprT::Var { name, type_: _ } => {
                 let index = self.symbol_table.codegen_lookup(*name).unwrap();

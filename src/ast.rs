@@ -50,7 +50,7 @@ pub struct ProgramT {
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum Stmt {
-    Asgn(Pat, Loc<Expr>),
+    Let(Pat, Loc<Expr>),
     Break,
     Expr(Loc<Expr>),
     Loop(Loc<Expr>),
@@ -61,7 +61,7 @@ pub enum Stmt {
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum StmtT {
-    Asgn(Name, Loc<ExprT>),
+    Let(Name, Loc<ExprT>),
     Break,
     Expr(Loc<ExprT>),
     Return(Loc<ExprT>),
@@ -82,6 +82,10 @@ pub enum StmtT {
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum Expr {
+    Asgn {
+        lhs: Box<Loc<Expr>>,
+        rhs: Box<Loc<Expr>>,
+    },
     Block(Vec<Loc<Stmt>>, Option<Box<Loc<Expr>>>),
     If(Box<Loc<Expr>>, Box<Loc<Expr>>, Option<Box<Loc<Expr>>>),
     Primary {
@@ -122,8 +126,28 @@ pub enum Expr {
     Array(Vec<Loc<Expr>>),
 }
 
+// Field or index accesses on a struct/array
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum Accessor {
+    Field(Name),
+    Index(Loc<ExprT>),
+}
+// Lvalue or target for assignment
+// An identifier followed by any number of index or field accesses
+// foo.bar[0].baz = 10
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct Target {
+    pub ident: Name,
+    pub accessors: Vec<Loc<Accessor>>,
+}
+
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum ExprT {
+    Asgn {
+        lhs: Loc<Target>,
+        rhs: Box<Loc<ExprT>>,
+        type_: TypeId,
+    },
     Block {
         stmts: Vec<Loc<StmtT>>,
         end_expr: Option<Box<Loc<ExprT>>>,
@@ -351,6 +375,11 @@ pub enum Pat {
 impl ExprT {
     pub fn get_type(&self) -> TypeId {
         match &self {
+            ExprT::Asgn {
+                lhs: _,
+                rhs: _,
+                type_,
+            } => *type_,
             ExprT::Primary { value: _, type_ } => *type_,
             ExprT::Var { name: _, type_ } => *type_,
             ExprT::Tuple(_elems, type_) => *type_,

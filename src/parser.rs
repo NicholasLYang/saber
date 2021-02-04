@@ -434,7 +434,7 @@ impl<'input> Parser<'input> {
             self.expect(TokenDiscriminants::Semicolon)?;
             let right = rhs_expr.location;
             Ok(loc!(
-                Stmt::Asgn(pat, rhs_expr),
+                Stmt::Let(pat, rhs_expr),
                 LocationRange(left.0, right.1)
             ))
         }
@@ -488,22 +488,22 @@ impl<'input> Parser<'input> {
                         self.record_literal(id, left)
                     } else {
                         self.pushback(loc!(Token::Ident(id), left));
-                        self.logical()
+                        self.asgn()
                     }
                 }
                 token => {
                     self.pushback(loc!(token, left));
-                    self.logical()
+                    self.asgn()
                 }
             }
         } else {
-            self.logical()
+            self.asgn()
         }
     }
 
     fn if_expr(&mut self, left: LocationRange) -> Result<Loc<Expr>, Loc<ParseError>> {
         // Yeah...I'm not allowing functions or blocks in the cond spot
-        let cond = self.logical();
+        let cond = self.asgn();
         let cond = cond?;
         let (_, block_left) = self.expect(TokenDiscriminants::LBrace)?;
         let then_block = self.expr_block(block_left);
@@ -616,6 +616,21 @@ impl<'input> Parser<'input> {
                 self.expr()
             }
         }
+    }
+
+    fn asgn(&mut self) -> Result<Loc<Expr>, Loc<ParseError>> {
+        let mut expr = self.logical()?;
+        if self.match_one(TokenDiscriminants::Equal)?.is_some() {
+            let rhs = self.expr()?;
+            expr = Loc {
+                location: LocationRange(expr.location.0, rhs.location.1),
+                inner: Expr::Asgn {
+                    lhs: Box::new(expr),
+                    rhs: Box::new(rhs),
+                },
+            }
+        }
+        Ok(expr)
     }
 
     fn logical(&mut self) -> Result<Loc<Expr>, Loc<ParseError>> {

@@ -1,6 +1,6 @@
 use crate::ast::{
-    Expr, ExprT, Function, Loc, Name, Op, Pat, Program, ProgramT, Stmt, StmtT, Type, TypeDef,
-    TypeId, TypeSig, UnaryOp, Value,
+    Expr, ExprT, Function, Loc, Name, Op, Pat, Program, ProgramT, Stmt, StmtT, Target, Type,
+    TypeDef, TypeId, TypeSig, UnaryOp, Value,
 };
 use crate::lexer::LocationRange;
 use crate::loc;
@@ -50,6 +50,7 @@ pub enum TypeError {
         index: u32,
         tuple_type: String,
     },
+    InvalidAsgnTarget,
     NoLoopBreak,
 }
 
@@ -90,6 +91,7 @@ impl fmt::Display for TypeError {
                 "Index {} is out of bounds of tuple {}",
                 index, tuple_type
             ),
+            TypeError::InvalidAsgnTarget => write!(f, "Invalid left hand side of an assignment"),
             TypeError::NoLoopBreak => write!(f, "Cannot break when not in loop"),
         }
     }
@@ -394,7 +396,7 @@ impl TypeChecker {
                     },
                 }])
             }
-            Stmt::Asgn(pat, rhs) => Ok(self.asgn(pat, rhs, location)?),
+            Stmt::Let(pat, rhs) => Ok(self.let_binding(pat, rhs, location)?),
             Stmt::Break => {
                 if self.is_in_loop {
                     Ok(vec![loc!(StmtT::Break, location)])
@@ -620,7 +622,7 @@ impl TypeChecker {
                     self.symbol_table.insert_var(*name, type_.clone());
                     bindings.push(Loc {
                         location,
-                        inner: StmtT::Asgn(
+                        inner: StmtT::Let(
                             *name,
                             Loc {
                                 location,
@@ -648,7 +650,7 @@ impl TypeChecker {
                     let name = self.name_table.get_fresh_name();
                     bindings.push(Loc {
                         location,
-                        inner: StmtT::Asgn(
+                        inner: StmtT::Let(
                             name,
                             Loc {
                                 location,
@@ -675,7 +677,7 @@ impl TypeChecker {
         }
     }
 
-    fn asgn(
+    fn let_binding(
         &mut self,
         pat: Pat,
         rhs: Loc<Expr>,
@@ -701,7 +703,7 @@ impl TypeChecker {
             self.generate_pattern_bindings(&pat, name, typed_rhs.inner.get_type(), location)?;
         let mut bindings = vec![Loc {
             location,
-            inner: StmtT::Asgn(name, typed_rhs),
+            inner: StmtT::Let(name, typed_rhs),
         }];
         bindings.append(&mut pat_bindings);
         Ok(bindings)
@@ -785,9 +787,46 @@ impl TypeChecker {
         ))
     }
 
+    fn asgn_lhs(&mut self, lhs: Loc<Expr>) -> Result<(Loc<Target>, TypeId), Loc<TypeError>> {
+        match lhs.inner {
+            Expr::Var { name } => {
+                let entry = self.symbol_table.lookup_name(name).ok_or(loc!(
+                    TypeError::VarNotDefined {
+                        name: self.name_table.get_str(&name).to_string(),
+                    },
+                    lhs.location
+                ))?;
+                Ok((
+                    loc!(
+                        Target {
+                            ident: name,
+                            accessors: Vec::new()
+                        },
+                        lhs.location
+                    ),
+                    entry.var_type,
+                ))
+            }
+            _ => Err(loc!(TypeError::InvalidAsgnTarget, lhs.location)),
+        }
+    }
+
     fn expr(&mut self, expr: Loc<Expr>) -> Result<Loc<ExprT>, Loc<TypeError>> {
         let location = expr.location;
         match expr.inner {
+            Expr::Asgn { lhs, rhs } => {
+                let (target, target_type) = self.asgn_lhs(*lhs)?;
+                let rhs_t = self.expr(*rhs)?;
+                let type_ = self.unify_or_err(target_type, rhs_t.inner.get_type(), location)?;
+                Ok(loc!(
+                    ExprT::Asgn {
+                        lhs: target,
+                        rhs: Box::new(rhs_t),
+                        type_
+                    },
+                    location
+                ))
+            }
             Expr::Primary { value } => Ok(Loc {
                 location,
                 inner: self.value(value),

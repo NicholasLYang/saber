@@ -34,6 +34,7 @@ pub enum OpCode {
     F32ConvertI32,
     SetLocal(u32),
     GetLocal(u32),
+    TeeLocal(u32),
     SetGlobal(u32),
     GetGlobal(u32),
     I32Load8U(u32, u32),
