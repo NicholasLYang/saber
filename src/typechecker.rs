@@ -1,6 +1,6 @@
 use crate::ast::{
-    Expr, ExprT, Function, Loc, Name, Op, Pat, Program, ProgramT, Stmt, StmtT, Target, Type,
-    TypeDef, TypeId, TypeSig, UnaryOp, Value,
+    Accessor, Expr, ExprT, Function, Loc, Name, Op, Pat, Program, ProgramT, Stmt, StmtT, Target,
+    Type, TypeDef, TypeId, TypeSig, UnaryOp, Value,
 };
 use crate::lexer::LocationRange;
 use crate::loc;
@@ -13,7 +13,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt;
-use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum TypeError {
@@ -40,6 +39,9 @@ pub enum TypeError {
         type_: String,
     },
     NotATuple {
+        type_: String,
+    },
+    NotAnArray {
         type_: String,
     },
     InvalidUnaryExpr,
@@ -78,6 +80,7 @@ impl fmt::Display for TypeError {
             }
             TypeError::NotARecord { type_ } => write!(f, "Type {} is not a record", type_),
             TypeError::NotATuple { type_ } => write!(f, "Type {} is not a tuple", type_),
+            TypeError::NotAnArray { type_ } => write!(f, "Type {} is not an array", type_),
             TypeError::InvalidUnaryExpr => write!(f, "Cannot apply unary operator"),
             TypeError::CalleeNotFunction => write!(f, "Callee is not a function"),
             TypeError::TopLevelReturn => write!(f, "Cannot return at top level"),
@@ -95,12 +98,6 @@ impl fmt::Display for TypeError {
             TypeError::NoLoopBreak => write!(f, "Cannot break when not in loop"),
         }
     }
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub struct Scope {
-    pub names: HashMap<Name, Arc<Type>>,
-    pub parent: Option<usize>,
 }
 
 pub struct TypeChecker {
@@ -788,13 +785,14 @@ impl TypeChecker {
     }
 
     fn asgn_lhs(&mut self, lhs: Loc<Expr>) -> Result<(Loc<Target>, TypeId), Loc<TypeError>> {
+        let location = lhs.location;
         match lhs.inner {
             Expr::Var { name } => {
                 let entry = self.symbol_table.lookup_name(name).ok_or(loc!(
                     TypeError::VarNotDefined {
                         name: self.name_table.get_str(&name).to_string(),
                     },
-                    lhs.location
+                    location
                 ))?;
                 Ok((
                     loc!(
@@ -802,12 +800,41 @@ impl TypeChecker {
                             ident: name,
                             accessors: Vec::new()
                         },
-                        lhs.location
+                        location
                     ),
                     entry.var_type,
                 ))
             }
-            _ => Err(loc!(TypeError::InvalidAsgnTarget, lhs.location)),
+            Expr::Field(lhs, field_name) => {
+                let (mut target, lhs_type) = self.asgn_lhs(*lhs)?;
+                let (field_index, field_type) =
+                    self.get_field_in_type(lhs_type, field_name, location)?;
+                target
+                    .inner
+                    .accessors
+                    .push(loc!(Accessor::Field(field_index), location));
+                Ok((target, field_type))
+            }
+            Expr::Index { lhs, index } => {
+                let (mut target, lhs_type) = self.asgn_lhs(*lhs)?;
+                if let Type::Array(item_type) = self.type_table.get_type(lhs_type) {
+                    let item_type = *item_type;
+                    let index_t = self.expr(*index)?;
+                    target
+                        .inner
+                        .accessors
+                        .push(loc!(Accessor::Index(index_t), location));
+                    Ok((target, item_type))
+                } else {
+                    Err(loc!(
+                        TypeError::NotAnArray {
+                            type_: type_to_string(&self.name_table, &self.type_table, lhs_type)
+                        },
+                        location
+                    ))
+                }
+            }
+            _ => Err(loc!(TypeError::InvalidAsgnTarget, location)),
         }
     }
 
@@ -1188,48 +1215,45 @@ impl TypeChecker {
             }
             Expr::Field(lhs, name) => {
                 let lhs_t = self.expr(*lhs)?;
-                let type_ = self.type_table.get_type(lhs_t.inner.get_type());
-                if let Type::Record(_, fields) = type_ {
-                    let position = fields
-                        .iter()
-                        .position(|(field_name, _)| *field_name == name);
-
-                    if let Some(pos) = position {
-                        Ok(Loc {
-                            location,
-                            inner: ExprT::TupleField(
-                                Box::new(lhs_t),
-                                pos.try_into().unwrap(),
-                                fields[pos].1,
-                            ),
-                        })
-                    } else {
-                        let name_str = self.name_table.get_str(&name);
-                        Err(loc!(
-                            TypeError::FieldDoesNotExist {
-                                name: name_str.to_string(),
-                                record: type_to_string(
-                                    &self.name_table,
-                                    &self.type_table,
-                                    lhs_t.inner.get_type()
-                                )
-                            },
-                            location
-                        ))
-                    }
-                } else {
-                    Err(loc!(
-                        TypeError::NotARecord {
-                            type_: type_to_string(
-                                &self.name_table,
-                                &self.type_table,
-                                lhs_t.inner.get_type(),
-                            ),
-                        },
-                        location
-                    ))
-                }
+                let (field_index, field_type) =
+                    self.get_field_in_type(lhs_t.inner.get_type(), name, location)?;
+                Ok(loc!(
+                    ExprT::TupleField(Box::new(lhs_t), field_index as u32, field_type),
+                    location
+                ))
             }
+        }
+    }
+
+    fn get_field_in_type(
+        &self,
+        record_type_id: TypeId,
+        field_name: Name,
+        location: LocationRange,
+    ) -> Result<(usize, TypeId), Loc<TypeError>> {
+        let record_type = self.type_table.get_type(record_type_id);
+        if let Type::Record(_, fields) = record_type {
+            let position = fields.iter().position(|(name, _)| *name == field_name);
+
+            if let Some(pos) = position {
+                Ok((pos, fields[pos].1))
+            } else {
+                let name_str = self.name_table.get_str(&field_name);
+                Err(loc!(
+                    TypeError::FieldDoesNotExist {
+                        name: name_str.to_string(),
+                        record: type_to_string(&self.name_table, &self.type_table, record_type_id)
+                    },
+                    location
+                ))
+            }
+        } else {
+            Err(loc!(
+                TypeError::NotARecord {
+                    type_: type_to_string(&self.name_table, &self.type_table, record_type_id),
+                },
+                location
+            ))
         }
     }
 

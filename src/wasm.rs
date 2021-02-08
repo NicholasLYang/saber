@@ -54,7 +54,7 @@ pub enum OpCode {
     Drop,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum WasmType {
     #[allow(non_camel_case_types)]
     i32,

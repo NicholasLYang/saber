@@ -15,9 +15,11 @@ use codespan_reporting::term;
 use codespan_reporting::term::termcolor::{ColorChoice, StandardStream};
 use std::fs::{self, File};
 use std::io::Write;
+use wabt::wasm2wat;
 
 mod ast;
 mod code_generator;
+mod cps;
 mod emitter;
 mod lexer;
 mod parser;
@@ -64,6 +66,7 @@ fn main() -> Result<()> {
     } else if let Some(run_matches) = matches.subcommand_matches("run") {
         let file = run_matches.value_of("file").unwrap();
         let saber_program = compile_saber_file(file, debug_file)?;
+        println!("{}", wasm2wat(&saber_program.wasm_bytes).unwrap());
         run_code(saber_program)?;
     }
     Ok(())

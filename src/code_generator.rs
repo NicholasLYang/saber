@@ -286,7 +286,7 @@ impl CodeGenerator {
         location: LocationRange,
     ) -> Result<(FunctionType, FunctionBody)> {
         let return_type = self.generate_wasm_type(return_type, location)?;
-        self.return_type = return_type.clone();
+        self.return_type = return_type;
         let function_type = self.generate_function_type(&return_type, params, location)?;
         let function_body = self.generate_function_body(body, local_variables, params.len())?;
         Ok((function_type, function_body))
@@ -540,26 +540,25 @@ impl CodeGenerator {
     fn generate_expr(&mut self, expr: &Loc<ExprT>) -> Result<Vec<OpCode>> {
         match &expr.inner {
             ExprT::Asgn { lhs, rhs, type_: _ } => {
-                if lhs.inner.accessors.len() != 0 {
-                    todo!()
-                }
                 let mut opcodes = self.generate_expr(rhs)?;
+                opcodes.push(OpCode::SetGlobal(0));
                 let index = self.symbol_table.codegen_lookup(lhs.inner.ident).unwrap();
-                match index {
-                    VarIndex::Local(index) => {
-                        opcodes.push(OpCode::TeeLocal(index.try_into().unwrap()));
-                        Ok(opcodes)
-                    }
-                    VarIndex::Capture(index) => {
-                        let index = index + 1;
-                        opcodes.push(OpCode::SetGlobal(0));
-                        opcodes.push(OpCode::GetLocal(0));
-                        opcodes.push(OpCode::GetGlobal(0));
-                        opcodes.push(OpCode::I32Store(2, (index * 4).try_into().unwrap()));
-                        opcodes.push(OpCode::GetGlobal(0));
-                        Ok(opcodes)
+                if lhs.inner.accessors.len() == 0 {
+                    match index {
+                        VarIndex::Local(index) => {
+                            opcodes.push(OpCode::GetGlobal(0));
+                            opcodes.push(OpCode::TeeLocal(index.try_into().unwrap()));
+                        }
+                        VarIndex::Capture(index) => {
+                            let index = index + 1;
+                            opcodes.push(OpCode::GetLocal(0));
+                            opcodes.push(OpCode::GetGlobal(0));
+                            opcodes.push(OpCode::I32Store(2, (index * 4).try_into().unwrap()));
+                            opcodes.push(OpCode::GetGlobal(0));
+                        }
                     }
                 }
+                Ok(opcodes)
             }
             ExprT::Primary { value, type_: _ } => self.generate_primary(value),
             ExprT::Var { name, type_: _ } => {
@@ -804,23 +803,7 @@ impl CodeGenerator {
                 }
             },
             ExprT::TupleField(lhs, index, type_) => {
-                let mut opcodes = self.generate_expr(&**lhs)?;
-                let field_wasm_type = self
-                    .generate_wasm_type(*type_, expr.location)?
-                    .unwrap_or(WasmType::Empty);
-                // Account for type_id
-                let field_loc = index + 1;
-                let offset: u32 = (4 * field_loc).try_into().unwrap();
-                let load_code = match field_wasm_type {
-                    WasmType::i32 => OpCode::I32Load(2, offset),
-                    WasmType::f32 => OpCode::F32Load(2, offset),
-                    WasmType::Empty => OpCode::Drop,
-                    _ => {
-                        return Err(GenerationError::NotReachable);
-                    }
-                };
-                opcodes.push(load_code);
-                Ok(opcodes)
+                self.generate_tuple_field(lhs, *index as u32, type_)
             }
             ExprT::Record {
                 name: _,
@@ -833,6 +816,31 @@ impl CodeGenerator {
                 expr.location,
             ),
         }
+    }
+
+    fn generate_tuple_field(
+        &mut self,
+        lhs: &Box<Loc<ExprT>>,
+        index: u32,
+        type_: &TypeId,
+    ) -> Result<Vec<OpCode>> {
+        let mut opcodes = self.generate_expr(&**lhs)?;
+        let field_wasm_type = self
+            .generate_wasm_type(*type_, lhs.location)?
+            .unwrap_or(WasmType::Empty);
+        // Account for type_id
+        let field_loc = index + 1;
+        let offset: u32 = (4 * field_loc).try_into().unwrap();
+        let load_code = match field_wasm_type {
+            WasmType::i32 => OpCode::I32Load(2, offset),
+            WasmType::f32 => OpCode::F32Load(2, offset),
+            WasmType::Empty => OpCode::Drop,
+            _ => {
+                return Err(GenerationError::NotReachable);
+            }
+        };
+        opcodes.push(load_code);
+        Ok(opcodes)
     }
 
     fn generate_array(

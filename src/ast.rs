@@ -129,7 +129,7 @@ pub enum Expr {
 // Field or index accesses on a struct/array
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum Accessor {
-    Field(Name),
+    Field(usize),
     Index(Loc<ExprT>),
 }
 // Lvalue or target for assignment
