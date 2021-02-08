@@ -6,9 +6,8 @@ use crate::lexer::LocationRange;
 use crate::loc;
 use crate::printer::type_to_string;
 use crate::symbol_table::{FunctionInfo, SymbolTable};
-use crate::utils::{
-    NameTable, TypeTable, BOOL_INDEX, CHAR_INDEX, FLOAT_INDEX, INT_INDEX, STR_INDEX, UNIT_INDEX,
-};
+use crate::utils::NameTable;
+use id_arena::Arena;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::convert::TryInto;
@@ -21,8 +20,8 @@ pub enum TypeError {
     },
     OpFailure {
         op: Op,
-        lhs_type: Type,
-        rhs_type: Type,
+        lhs_type: String,
+        rhs_type: String,
     },
     UnificationFailure {
         type1: String,
@@ -109,8 +108,8 @@ pub struct TypeChecker {
     return_type: Option<TypeId>,
     // Index for type variable names
     type_var_index: usize,
-    // Type table
-    type_table: TypeTable,
+    // Type arena
+    type_arena: Arena<Type>,
     // Symbol table
     name_table: NameTable,
     // Struct types
@@ -122,13 +121,16 @@ pub struct TypeChecker {
     is_in_loop: bool,
 }
 
-fn build_type_names(name_table: &mut NameTable) -> HashMap<Name, TypeId> {
+fn build_type_names(
+    name_table: &mut NameTable,
+    type_table: &mut Arena<Type>,
+) -> HashMap<Name, TypeId> {
     let primitive_types = vec![
-        ("int", INT_INDEX),
-        ("float", FLOAT_INDEX),
-        ("char", CHAR_INDEX),
-        ("string", STR_INDEX),
-        ("bool", BOOL_INDEX),
+        ("int", type_table.alloc(Type::Int)),
+        ("float", type_table.alloc(Type::Float)),
+        ("char", type_table.alloc(Type::Char)),
+        ("string", type_table.alloc(Type::String)),
+        ("bool", type_table.alloc(Type::Bool)),
     ];
     let mut type_names = HashMap::new();
     for (name, type_id) in primitive_types {
@@ -138,53 +140,47 @@ fn build_type_names(name_table: &mut NameTable) -> HashMap<Name, TypeId> {
     type_names
 }
 
-pub fn is_ref_type(type_id: TypeId) -> bool {
-    !(type_id == INT_INDEX
-        || type_id == BOOL_INDEX
-        || type_id == UNIT_INDEX
-        || type_id == CHAR_INDEX
-        || type_id == FLOAT_INDEX)
-}
-
 impl TypeChecker {
     pub fn new(mut name_table: NameTable) -> TypeChecker {
         let mut symbol_table = SymbolTable::new();
-        let mut type_table = TypeTable::new();
+        let mut type_arena = Arena::<Type>::new();
         let print_int_id = name_table.insert("printInt".into());
         symbol_table.insert_function(
             print_int_id,
             INT_INDEX,
             UNIT_INDEX,
-            type_table.insert(Type::Arrow(INT_INDEX, UNIT_INDEX)),
+            type_arena.alloc(Type::Arrow(INT_INDEX, UNIT_INDEX)),
         );
         let print_float_id = name_table.insert("printFloat".into());
         symbol_table.insert_function(
             print_float_id,
             FLOAT_INDEX,
             UNIT_INDEX,
-            type_table.insert(Type::Arrow(FLOAT_INDEX, UNIT_INDEX)),
+            type_arena.alloc(Type::Arrow(FLOAT_INDEX, UNIT_INDEX)),
         );
         let print_string_id = name_table.insert("printString".into());
         symbol_table.insert_function(
             print_string_id,
             STR_INDEX,
             UNIT_INDEX,
-            type_table.insert(Type::Arrow(STR_INDEX, UNIT_INDEX)),
+            type_arena.alloc(Type::Arrow(STR_INDEX, UNIT_INDEX)),
         );
         let print_char_id = name_table.insert("printChar".into());
         symbol_table.insert_function(
             print_char_id,
             CHAR_INDEX,
             UNIT_INDEX,
-            type_table.insert(Type::Arrow(CHAR_INDEX, UNIT_INDEX)),
+            type_arena.alloc(Type::Arrow(CHAR_INDEX, UNIT_INDEX)),
         );
+
+        let type_names = build_type_names(&mut name_table, &mut type_arena);
 
         TypeChecker {
             symbol_table,
-            type_names: build_type_names(&mut name_table),
+            type_names,
             return_type: None,
             type_var_index: 0,
-            type_table,
+            type_arena,
             name_table,
             struct_types: Vec::new(),
             expr_func_index: 0,
@@ -192,8 +188,15 @@ impl TypeChecker {
         }
     }
 
-    pub fn get_tables(self) -> (SymbolTable, NameTable, TypeTable) {
-        (self.symbol_table, self.name_table, self.type_table)
+    pub fn is_ref_type(&self, type_id: TypeId) -> bool {
+        matches!(
+            self.type_arena[type_id],
+            Type::Int | Type::Bool | Type::Unit | Type::Char | Type::Float
+        )
+    }
+
+    pub fn get_tables(self) -> (SymbolTable, NameTable, Arena<Type>) {
+        (self.symbol_table, self.name_table, self.type_arena)
     }
 
     pub fn get_expr_func_index(&self) -> usize {
@@ -208,12 +211,12 @@ impl TypeChecker {
     pub fn get_fresh_type_var(&mut self) -> TypeId {
         let type_var = Type::Var(self.type_var_index);
         self.type_var_index += 1;
-        self.type_table.insert(type_var)
+        self.type_arena.alloc(type_var)
     }
 
     fn generate_field_info<'a, I>(&self, fields: I) -> Vec<bool>
     where
-        I: Iterator<Item = &'a usize>,
+        I: Iterator<Item = &'a TypeId>,
     {
         // Stores whether or not a field is a reference
         let mut field_info = Vec::new();
@@ -223,8 +226,8 @@ impl TypeChecker {
         field_info
     }
 
-    fn generate_type_info(&self, type_id: TypeId) -> Option<(usize, Vec<bool>)> {
-        match self.type_table.get_type(type_id) {
+    fn generate_type_info(&self, type_id: TypeId) -> Option<(TypeId, Vec<bool>)> {
+        match &self.type_arena[type_id] {
             Type::Record(_, fields) => {
                 let field_info =
                     self.generate_field_info(fields.iter().map(|(_, type_id)| type_id));
@@ -236,7 +239,7 @@ impl TypeChecker {
         }
     }
 
-    pub fn generate_runtime_type_info(&self) -> HashMap<Name, Vec<bool>> {
+    pub fn generate_runtime_type_info(&self) -> HashMap<TypeId, Vec<bool>> {
         let mut type_info = HashMap::new();
         for (_, type_id) in &self.struct_types {
             self.generate_type_info(*type_id)
@@ -291,9 +294,7 @@ impl TypeChecker {
                 } else {
                     self.get_fresh_type_var()
                 };
-                let type_ = self
-                    .type_table
-                    .insert(Type::Arrow(params_type, return_type));
+                let type_ = self.type_arena.alloc(Type::Arrow(params_type, return_type));
                 self.symbol_table
                     .insert_function(*func_name, params_type, return_type, type_);
             }
@@ -309,7 +310,7 @@ impl TypeChecker {
                     let field_type = self.lookup_type_sig(&type_sig)?;
                     typed_fields.push((name, field_type));
                 }
-                let type_id = self.type_table.insert(Type::Record(name, typed_fields));
+                let type_id = self.type_arena.alloc(Type::Record(name, typed_fields));
                 self.type_names.insert(name, type_id);
                 Ok((name, type_id))
             }
@@ -464,7 +465,7 @@ impl TypeChecker {
         match &sig.inner {
             TypeSig::Array(sig) => {
                 let type_ = self.lookup_type_sig(sig)?;
-                Ok(self.type_table.insert(Type::Array(type_)))
+                Ok(self.type_arena.alloc(Type::Array(type_)))
             }
             TypeSig::Name(name) => self
                 .type_names
@@ -485,13 +486,11 @@ impl TypeChecker {
                     for param in param_sigs {
                         types.push(self.lookup_type_sig(param)?);
                     }
-                    self.type_table.insert(Type::Tuple(types))
+                    self.type_arena.alloc(Type::Tuple(types))
                 };
 
                 let return_type = self.lookup_type_sig(return_sig)?;
-                Ok(self
-                    .type_table
-                    .insert(Type::Arrow(param_types, return_type)))
+                Ok(self.type_arena.alloc(Type::Arrow(param_types, return_type)))
             }
         }
     }
@@ -508,7 +507,7 @@ impl TypeChecker {
             }
             Pat::Tuple(pats, _) => {
                 let types: Result<Vec<_>, _> = pats.iter().map(|pat| self.pat(pat)).collect();
-                Ok(self.type_table.insert(Type::Tuple(types?)))
+                Ok(self.type_arena.alloc(Type::Tuple(types?)))
             }
             Pat::Record(pats, type_sig, _) => {
                 // In the future I should unify these two if they both exist.
@@ -520,8 +519,8 @@ impl TypeChecker {
                         .map(|name| Ok((*name, self.get_fresh_type_var())))
                         .collect();
                     Ok(self
-                        .type_table
-                        .insert(Type::Record(self.name_table.get_fresh_name(), types?)))
+                        .type_arena
+                        .alloc(Type::Record(self.name_table.get_fresh_name(), types?)))
                 }
             }
             Pat::Empty(_) => Ok(UNIT_INDEX),
@@ -576,14 +575,14 @@ impl TypeChecker {
         field_name: usize,
         location: LocationRange,
     ) -> Result<(u32, TypeId), Loc<TypeError>> {
-        if let Type::Record(_, fields) = self.type_table.get_type(record_type) {
+        if let Type::Record(_, fields) = &self.type_arena[record_type] {
             if let Some(pos) = fields.iter().position(|(name, _)| *name == field_name) {
                 let (_, type_) = fields[pos];
                 Ok((pos.try_into().unwrap(), type_))
             } else {
                 Err(loc!(
                     TypeError::FieldDoesNotExist {
-                        record: type_to_string(&self.name_table, &self.type_table, record_type),
+                        record: type_to_string(&self.name_table, &self.type_arena, record_type),
                         name: self.name_table.get_str(&field_name).to_string(),
                     },
                     location
@@ -592,7 +591,7 @@ impl TypeChecker {
         } else {
             Err(loc!(
                 TypeError::NotARecord {
-                    type_: type_to_string(&self.name_table, &self.type_table, record_type),
+                    type_: type_to_string(&self.name_table, &self.type_arena, record_type),
                 },
                 location
             ))
@@ -723,7 +722,7 @@ impl TypeChecker {
             });
             types.push(*type_);
         }
-        let type_id = self.type_table.insert(Type::Tuple(types));
+        let type_id = self.type_arena.alloc(Type::Tuple(types));
         let name = self.name_table.get_fresh_name();
         self.struct_types.push((name, type_id));
         Some(loc!(ExprT::Tuple(fields, type_id), location))
@@ -764,8 +763,8 @@ impl TypeChecker {
         };
 
         // If return type is a type var, we just set it be unit
-        if let Type::Var(_) = self.type_table.get_type(return_type) {
-            self.type_table.update(return_type, Type::Unit);
+        if matches!(self.type_arena[return_type], Type::Var(..)) {
+            self.type_arena[return_type] = Type::Unit;
         };
 
         let captures = self.create_captures_tuple(body.location);
@@ -817,7 +816,7 @@ impl TypeChecker {
             }
             Expr::Index { lhs, index } => {
                 let (mut target, lhs_type) = self.asgn_lhs(*lhs)?;
-                if let Type::Array(item_type) = self.type_table.get_type(lhs_type) {
+                if let Type::Array(item_type) = &self.type_arena[lhs_type] {
                     let item_type = *item_type;
                     let index_t = self.expr(*index)?;
                     target
@@ -828,7 +827,7 @@ impl TypeChecker {
                 } else {
                     Err(loc!(
                         TypeError::NotAnArray {
-                            type_: type_to_string(&self.name_table, &self.type_table, lhs_type)
+                            type_: type_to_string(&self.name_table, &self.type_arena, lhs_type)
                         },
                         location
                     ))
@@ -889,8 +888,8 @@ impl TypeChecker {
                         },
                     }),
                     None => {
-                        let lhs_type = self.type_table.get_type(typed_lhs.inner.get_type()).clone();
-                        let rhs_type = self.type_table.get_type(typed_rhs.inner.get_type()).clone();
+                        let lhs_type = self.type_arena[typed_lhs.inner.get_type()].clone();
+                        let rhs_type = self.type_arena[typed_rhs.inner.get_type()].clone();
                         Err(loc!(
                             TypeError::OpFailure {
                                 op: op.clone(),
@@ -911,7 +910,7 @@ impl TypeChecker {
                     typed_elems.push(typed_elem);
                 }
                 let name = self.name_table.get_fresh_name();
-                let type_id = self.type_table.insert(Type::Tuple(types));
+                let type_id = self.type_arena.alloc(Type::Tuple(types));
                 self.struct_types.push((name, type_id));
                 Ok(Loc {
                     location,
@@ -930,7 +929,7 @@ impl TypeChecker {
                     )?;
                     typed_entries.push(typed_entry);
                 }
-                let array_type = self.type_table.insert(Type::Array(entry_type));
+                let array_type = self.type_arena.alloc(Type::Array(entry_type));
                 Ok(loc!(
                     ExprT::Array {
                         entries: typed_entries,
@@ -952,9 +951,7 @@ impl TypeChecker {
                 } else {
                     self.get_fresh_type_var()
                 };
-                let type_ = self
-                    .type_table
-                    .insert(Type::Arrow(params_type, return_type));
+                let type_ = self.type_arena.alloc(Type::Arrow(params_type, return_type));
                 self.symbol_table
                     .insert_function(name, params_type, return_type, type_);
 
@@ -972,7 +969,7 @@ impl TypeChecker {
                     capture_struct_type.push(captures_type);
                     capture_struct_fields.push(*captures);
                 }
-                let type_id = self.type_table.insert(Type::Tuple(capture_struct_type));
+                let type_id = self.type_arena.alloc(Type::Tuple(capture_struct_type));
                 self.struct_types
                     .push((self.name_table.get_fresh_name(), type_id));
                 function.captures = Some(Box::new(loc!(
@@ -1046,15 +1043,13 @@ impl TypeChecker {
                     }
                 }
                 let callee_type = typed_callee.inner.get_type();
-                let (params_type, return_type) = match self.type_table.get_type(callee_type) {
+                let (params_type, return_type) = match &self.type_arena[callee_type] {
                     Type::Arrow(params_type, return_type) => (*params_type, *return_type),
                     Type::Var(_) => {
                         let params_type = self.get_fresh_type_var();
                         let return_type = self.get_fresh_type_var();
-                        let new_id = self
-                            .type_table
-                            .insert(Type::Arrow(params_type, return_type));
-                        self.type_table.update(callee_type, Type::Solved(new_id));
+                        let new_id = self.type_arena.alloc(Type::Arrow(params_type, return_type));
+                        self.type_arena[callee_type] = Type::Solved(new_id);
                         (params_type, return_type)
                     }
                     _ => return Err(loc!(TypeError::CalleeNotFunction, location)),
@@ -1144,7 +1139,7 @@ impl TypeChecker {
                     field_types.push((name, expr_t.inner.get_type()));
                     fields_t.push((name, expr_t));
                 }
-                let expr_type = self.type_table.insert(Type::Record(name, field_types));
+                let expr_type = self.type_arena.alloc(Type::Record(name, field_types));
                 let type_ = self.unify_or_err(type_id, expr_type, location)?;
                 self.type_names.insert(name, type_);
                 Ok(Loc {
@@ -1161,7 +1156,7 @@ impl TypeChecker {
                 let index_t = self.expr(*index)?;
                 let lhs_type = lhs_t.inner.get_type();
                 self.unify_or_err(index_t.inner.get_type(), INT_INDEX, index_t.location)?;
-                let type_ = if let Type::Array(entry_type) = self.type_table.get_type(lhs_type) {
+                let type_ = if let Type::Array(entry_type) = &self.type_arena[lhs_type] {
                     *entry_type
                 } else {
                     self.unify_or_err(lhs_t.inner.get_type(), STR_INDEX, lhs_t.location)?;
@@ -1178,7 +1173,7 @@ impl TypeChecker {
             }
             Expr::TupleField(lhs, index) => {
                 let lhs_t = self.expr(*lhs)?;
-                let lhs_type = self.type_table.get_type(lhs_t.inner.get_type());
+                let lhs_type = &self.type_arena[lhs_t.inner.get_type()];
                 if let Type::Tuple(entries) = lhs_type {
                     let usize_index: usize = index.try_into().unwrap();
                     if usize_index < entries.len() {
@@ -1193,7 +1188,7 @@ impl TypeChecker {
                                 index,
                                 tuple_type: type_to_string(
                                     &self.name_table,
-                                    &self.type_table,
+                                    &self.type_arena,
                                     lhs_t.inner.get_type(),
                                 ),
                             },
@@ -1205,7 +1200,7 @@ impl TypeChecker {
                         TypeError::NotATuple {
                             type_: type_to_string(
                                 &self.name_table,
-                                &self.type_table,
+                                &self.type_arena,
                                 lhs_t.inner.get_type(),
                             ),
                         },
@@ -1231,7 +1226,7 @@ impl TypeChecker {
         field_name: Name,
         location: LocationRange,
     ) -> Result<(usize, TypeId), Loc<TypeError>> {
-        let record_type = self.type_table.get_type(record_type_id);
+        let record_type = &self.type_arena[record_type_id];
         if let Type::Record(_, fields) = record_type {
             let position = fields.iter().position(|(name, _)| *name == field_name);
 
@@ -1242,7 +1237,7 @@ impl TypeChecker {
                 Err(loc!(
                     TypeError::FieldDoesNotExist {
                         name: name_str.to_string(),
-                        record: type_to_string(&self.name_table, &self.type_table, record_type_id)
+                        record: type_to_string(&self.name_table, &self.type_arena, record_type_id)
                     },
                     location
                 ))
@@ -1250,7 +1245,7 @@ impl TypeChecker {
         } else {
             Err(loc!(
                 TypeError::NotARecord {
-                    type_: type_to_string(&self.name_table, &self.type_table, record_type_id),
+                    type_: type_to_string(&self.name_table, &self.type_arena, record_type_id),
                 },
                 location
             ))
@@ -1327,8 +1322,8 @@ impl TypeChecker {
         if type_id1 == type_id2 {
             return Some(type_id1);
         }
-        let type1 = self.type_table.get_type(type_id1).clone();
-        let type2 = self.type_table.get_type(type_id2).clone();
+        let type1 = &self.type_arena[type_id1];
+        let type2 = &self.type_arena[type_id2];
         match (type1, type2) {
             (Type::Record(name, fields), Type::Record(other_name, other_fields)) => {
                 if fields.len() != other_fields.len() || name != other_name {
@@ -1345,9 +1340,9 @@ impl TypeChecker {
                         return None;
                     }
                 }
-                let id = self.type_table.insert(Type::Record(name, unified_fields));
-                self.type_table.update(type_id1, Type::Solved(id));
-                self.type_table.update(type_id2, Type::Solved(id));
+                let id = self.type_arena.alloc(Type::Record(*name, unified_fields));
+                self.type_arena[type_id1] = Type::Solved(id);
+                self.type_arena[type_id2] = Type::Solved(id);
                 Some(id)
             }
             (Type::Tuple(ts), Type::Unit) | (Type::Unit, Type::Tuple(ts)) => {
@@ -1359,7 +1354,7 @@ impl TypeChecker {
             }
             (Type::Tuple(t1), Type::Tuple(t2)) => {
                 if let Some(types) = self.unify_type_vectors(&t1, &t2) {
-                    let id = self.type_table.insert(Type::Tuple(types));
+                    let id = self.type_arena.alloc(Type::Tuple(types));
                     Some(id)
                 } else {
                     None
@@ -1381,11 +1376,11 @@ impl TypeChecker {
             }
             (Type::Arrow(param_type1, return_type1), Type::Arrow(param_type2, return_type2)) => {
                 match (
-                    self.unify(param_type1, param_type2),
-                    self.unify(return_type1, return_type2),
+                    self.unify(*param_type1, *param_type2),
+                    self.unify(*return_type1, *return_type2),
                 ) {
                     (Some(param_type), Some(return_type)) => {
-                        let id = self.type_table.insert(Type::Arrow(param_type, return_type));
+                        let id = self.type_arena.alloc(Type::Arrow(param_type, return_type));
                         Some(id)
                     }
                     _ => None,
@@ -1395,20 +1390,20 @@ impl TypeChecker {
             (Type::Int, Type::Bool) => Some(type_id1),
             (Type::Bool, Type::Int) => Some(type_id2),
             (Type::Var(_), _) => {
-                self.type_table.update(type_id1, Type::Solved(type_id2));
+                self.type_arena[type_id1] = Type::Solved(type_id2);
                 Some(type_id2)
             }
             (_, Type::Var(_)) => {
-                self.type_table.update(type_id2, Type::Solved(type_id1));
+                self.type_arena[type_id2] = Type::Solved(type_id1);
                 Some(type_id1)
             }
-            (Type::Solved(t1), _) => self.unify(t1, type_id2),
-            (_, Type::Solved(t2)) => self.unify(type_id1, t2),
+            (Type::Solved(t1), _) => self.unify(*t1, type_id2),
+            (_, Type::Solved(t2)) => self.unify(type_id1, *t2),
             (Type::Array(t1), Type::Array(t2)) => {
-                if let Some(t) = self.unify(t1, t2) {
-                    let new_type = self.type_table.insert(Type::Array(t));
-                    self.type_table.update(type_id1, Type::Solved(new_type));
-                    self.type_table.update(type_id2, Type::Solved(new_type));
+                if let Some(t) = self.unify(*t1, *t2) {
+                    let new_type = self.type_arena.alloc(Type::Array(t));
+                    self.type_arena[type_id1] = Type::Solved(new_type);
+                    self.type_arena[type_id2] = Type::Solved(new_type);
                     Some(new_type)
                 } else {
                     None
@@ -1431,8 +1426,8 @@ impl TypeChecker {
         self.unify(type1, type2).ok_or_else(|| {
             loc!(
                 TypeError::UnificationFailure {
-                    type1: type_to_string(&self.name_table, &self.type_table, type1),
-                    type2: type_to_string(&self.name_table, &self.type_table, type2),
+                    type1: type_to_string(&self.name_table, &self.type_arena, type1),
+                    type2: type_to_string(&self.name_table, &self.type_arena, type2),
                 },
                 location
             )

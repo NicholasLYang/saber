@@ -4,10 +4,11 @@ use crate::parser::ParseError;
 use crate::typechecker::TypeError;
 use crate::utils::{NameTable, TypeTable};
 use codespan_reporting::diagnostic::{Diagnostic, Label};
+use id_arena::Arena;
 use itertools::Itertools;
 
-pub fn type_to_string(name_table: &NameTable, type_table: &TypeTable, type_id: TypeId) -> String {
-    match type_table.get_type(type_id) {
+pub fn type_to_string(name_table: &NameTable, type_table: &Arena<Type>, type_id: TypeId) -> String {
+    match &type_table[type_id] {
         Type::Unit => "()".to_string(),
         Type::Int => "int".to_string(),
         Type::Float => "float".to_string(),

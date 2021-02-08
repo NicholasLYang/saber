@@ -4,12 +4,13 @@ use crate::printer::type_to_string;
 use crate::symbol_table::{
     FunctionInfo, SymbolTable, VarIndex, ALLOC_INDEX, DEALLOC_INDEX, PRINT_CHAR_INDEX, STREQ_INDEX,
 };
-use crate::typechecker::{is_ref_type, TypeChecker};
-use crate::utils::{NameTable, TypeTable, FLOAT_INDEX, STR_INDEX};
+use crate::typechecker::TypeChecker;
+use crate::utils::{NameTable, TypeTable};
 use crate::wasm::{
     ExportEntry, ExternalKind, FunctionBody, FunctionType, ImportEntry, ImportKind, LocalEntry,
     OpCode, ProgramData, WasmType,
 };
+use id_arena::Arena;
 use std::convert::TryInto;
 use thiserror::Error;
 
@@ -54,7 +55,7 @@ pub enum GenerationError {
 pub struct CodeGenerator {
     symbol_table: SymbolTable,
     name_table: NameTable,
-    type_table: TypeTable,
+    type_arena: Arena<Type>,
     // All the generated code
     program_data: ProgramData,
     return_type: Option<WasmType>,
@@ -71,7 +72,7 @@ impl CodeGenerator {
         CodeGenerator {
             symbol_table,
             name_table,
-            type_table,
+            type_arena: type_table,
             program_data: ProgramData::new(func_count, expr_func_count),
             return_type: None,
             current_function: None,
@@ -342,7 +343,7 @@ impl CodeGenerator {
         location: LocationRange,
         mut initial_args: Vec<WasmType>,
     ) -> Result<Vec<WasmType>> {
-        if let Type::Tuple(elems) = self.type_table.get_type(arg_type) {
+        if let Type::Tuple(elems) = &self.type_arena[arg_type] {
             let mut wasm_types = initial_args;
             for elem in elems {
                 wasm_types = self.get_args_type(*elem, location, wasm_types)?;
@@ -365,7 +366,7 @@ impl CodeGenerator {
         sbr_type: TypeId,
         location: LocationRange,
     ) -> Result<Option<WasmType>> {
-        match self.type_table.get_type(sbr_type) {
+        match &self.type_arena[sbr_type] {
             Type::Unit => Ok(None),
             Type::Int | Type::Bool | Type::Char => Ok(Some(WasmType::i32)),
             Type::Float => Ok(Some(WasmType::f32)),
@@ -420,7 +421,7 @@ impl CodeGenerator {
             }
             StmtT::Expr(expr) => {
                 let mut opcodes = self.generate_expr(expr)?;
-                match self.type_table.get_type(expr.inner.get_type()) {
+                match self.type_arena.get_type(expr.inner.get_type()) {
                     Type::Unit => {}
                     _ => opcodes.push(OpCode::Drop),
                 }
@@ -497,8 +498,8 @@ impl CodeGenerator {
             return Ok(type1);
         }
         match (
-            self.type_table.get_type(type1),
-            self.type_table.get_type(type2),
+            self.type_arena.get_type(type1),
+            self.type_arena.get_type(type2),
         ) {
             (Type::Int, Type::Float) => {
                 ops1.push(OpCode::F32ConvertI32);
@@ -515,8 +516,8 @@ impl CodeGenerator {
                     Ok(type1)
                 } else {
                     Err(GenerationError::CannotConvert {
-                        t1: type_to_string(&self.name_table, &self.type_table, type1),
-                        t2: type_to_string(&self.name_table, &self.type_table, type2),
+                        t1: type_to_string(&self.name_table, &self.type_arena, type1),
+                        t2: type_to_string(&self.name_table, &self.type_arena, type2),
                         location,
                     })
                 }
@@ -647,7 +648,7 @@ impl CodeGenerator {
             } => {
                 self.symbol_table.swap_scope(*scope_index);
                 let (_, return_type) = if let Type::Arrow(params_type, return_type) =
-                    self.type_table.get_type(*type_)
+                    self.type_arena.get_type(*type_)
                 {
                     (*params_type, *return_type)
                 } else {
@@ -784,7 +785,7 @@ impl CodeGenerator {
                 )?;
                 lhs_ops.append(&mut rhs_ops);
                 let opcode =
-                    self.generate_operator(&op, self.type_table.get_type(*type_), promoted_type)?;
+                    self.generate_operator(&op, self.type_arena.get_type(*type_), promoted_type)?;
                 lhs_ops.push(opcode);
                 Ok(lhs_ops)
             }
@@ -864,7 +865,7 @@ impl CodeGenerator {
         // Set type_id
         // Get ptr to record
         opcodes.push(OpCode::GetGlobal(0));
-        if is_ref_type(self.type_table.get_final_type(entry_type)) {
+        if is_ref_type(self.type_arena.get_final_type(entry_type)) {
             opcodes.push(OpCode::I32Const(BOX_ARRAY_ID));
         } else {
             opcodes.push(OpCode::I32Const(ARRAY_ID));
@@ -938,7 +939,7 @@ impl CodeGenerator {
         // Get ptr to record
         opcodes.push(OpCode::GetGlobal(0));
         // TODO: Add proper error handling for too many types.
-        let final_type_id = self.type_table.get_final_type(type_id);
+        let final_type_id = self.type_arena.get_final_type(type_id);
         opcodes.push(OpCode::I32Const(final_type_id.try_into().unwrap()));
         // *ptr = type_id
         opcodes.push(OpCode::I32Store(2, offset));
@@ -1017,7 +1018,7 @@ impl CodeGenerator {
     }
 
     fn generate_operator(&self, op: &Op, result_type: &Type, input_type: TypeId) -> Result<OpCode> {
-        match (op, self.type_table.get_type(input_type), result_type) {
+        match (op, self.type_arena.get_type(input_type), result_type) {
             (Op::Plus, Type::Int, Type::Int) => Ok(OpCode::I32Add),
             (Op::Minus, Type::Int, Type::Int) => Ok(OpCode::I32Sub),
             (Op::Plus, Type::Float, Type::Float) => Ok(OpCode::F32Add),
@@ -1033,7 +1034,7 @@ impl CodeGenerator {
             (Op::EqualEqual, Type::String, Type::Bool) => Ok(OpCode::Call(STREQ_INDEX)),
             (op, _, _) => Err(GenerationError::InvalidOperator {
                 op: op.clone(),
-                input_type: type_to_string(&self.name_table, &self.type_table, input_type),
+                input_type: type_to_string(&self.name_table, &self.type_arena, input_type),
             }),
         }
     }

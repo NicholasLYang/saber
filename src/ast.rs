@@ -1,12 +1,21 @@
 use crate::lexer::LocationRange;
 use crate::parser::ParseError;
 use crate::typechecker::TypeError;
+use id_arena::Id;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 pub type Name = usize;
-pub type TypeId = usize;
 pub type FunctionId = usize;
+pub type TypeId = Id<Type>;
+
+// To appease Serde
+#[derive(Deserialize)]
+#[serde(remote = "TypeId")]
+pub struct TypeIdDef {
+    #[serde(getter = "TypeId::index")]
+    index: usize,
+}
 
 // Wrapper to provide location to AST nodes
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -146,43 +155,50 @@ pub enum ExprT {
     Asgn {
         lhs: Loc<Target>,
         rhs: Box<Loc<ExprT>>,
+        #[serde(skip)]
         type_: TypeId,
     },
     Block {
         stmts: Vec<Loc<StmtT>>,
         end_expr: Option<Box<Loc<ExprT>>>,
         scope_index: usize,
+        #[serde(skip)]
         type_: TypeId,
     },
     If(
         Box<Loc<ExprT>>,
         Box<Loc<ExprT>>,
         Option<Box<Loc<ExprT>>>,
-        TypeId,
+        #[serde(skip)] TypeId,
     ),
     Primary {
         value: Value,
+        #[serde(skip)]
         type_: TypeId,
     },
     Var {
         name: Name,
+        #[serde(skip)]
         type_: TypeId,
     },
     BinOp {
         op: Op,
         lhs: Box<Loc<ExprT>>,
         rhs: Box<Loc<ExprT>>,
+        #[serde(skip)]
         type_: TypeId,
     },
     UnaryOp {
         op: UnaryOp,
         rhs: Box<Loc<ExprT>>,
+        #[serde(skip)]
         type_: TypeId,
     },
     // Note: only used for anonymous functions. Functions that are
     // bound with let are StmtT::Function
     Function {
         function: Function,
+        #[serde(skip)]
         type_: TypeId,
         name: Name,
         table_index: usize,
@@ -190,29 +206,34 @@ pub enum ExprT {
     Record {
         name: Name,
         fields: Vec<(Name, Loc<ExprT>)>,
+        #[serde(skip)]
         type_: TypeId,
     },
     Index {
         lhs: Box<Loc<ExprT>>,
         index: Box<Loc<ExprT>>,
+        #[serde(skip)]
         type_: TypeId,
     },
-    TupleField(Box<Loc<ExprT>>, u32, TypeId),
+    TupleField(Box<Loc<ExprT>>, u32, #[serde(skip)] TypeId),
     DirectCall {
         callee: FunctionId,
         captures_index: Option<usize>,
         args: Box<Loc<ExprT>>,
+        #[serde(skip)]
         type_: TypeId,
     },
     IndirectCall {
         callee: Box<Loc<ExprT>>,
         args: Box<Loc<ExprT>>,
+        #[serde(skip)]
         type_: TypeId,
     },
-    Tuple(Vec<Loc<ExprT>>, TypeId),
+    Tuple(Vec<Loc<ExprT>>, #[serde(skip)] TypeId),
     Array {
         entries: Vec<Loc<ExprT>>,
         entry_type: TypeId,
+        #[serde(skip)]
         type_: TypeId,
     },
 }
@@ -311,43 +332,6 @@ pub enum Type {
     // Points to a type that is solved further
     // Not the greatest solution but meh
     Solved(TypeId),
-}
-
-impl fmt::Display for Type {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                Type::Unit => "()".into(),
-                Type::Float => "float".into(),
-                Type::Int => "int".into(),
-                Type::Bool => "bool".into(),
-                Type::Char => "char".into(),
-                Type::String => "string".into(),
-                Type::Var(name) => format!("var({})", name),
-                Type::Array(t) => format!("[{}]", t),
-                Type::Record(name, fields) => {
-                    let elems = fields
-                        .iter()
-                        .map(|(n, t)| format!("{}: {}", n, t))
-                        .collect::<Vec<String>>()
-                        .join(", ");
-                    format!("{} {{ {} }}", name, elems)
-                }
-                Type::Tuple(ts) => {
-                    let elems = ts
-                        .iter()
-                        .map(|t| format!("{}", t))
-                        .collect::<Vec<String>>()
-                        .join(", ");
-                    format!("({})", elems)
-                }
-                Type::Arrow(t1, t2) => format!("{} => {}", t1, t2),
-                Type::Solved(t) => format!("solved({})", t),
-            }
-        )
-    }
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
