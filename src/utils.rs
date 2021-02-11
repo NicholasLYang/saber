@@ -1,10 +1,11 @@
 use crate::ast::{Type, TypeId};
 use bimap::BiMap;
+use id_arena::Arena;
 use std::collections::HashMap;
 
 pub struct SaberProgram {
     pub wasm_bytes: Vec<u8>,
-    pub runtime_types: HashMap<TypeId, Vec<bool>>,
+    pub runtime_types: HashMap<usize, Vec<bool>>,
 }
 
 #[derive(Debug)]
@@ -39,7 +40,10 @@ impl NameTable {
     }
 }
 
-// "Table" is a loose term here
-pub struct TypeTable {
-    table: Vec<Type>,
+pub fn get_final_type(type_arena: &Arena<Type>, type_id: TypeId) -> TypeId {
+    if let Type::Solved(id) = &type_arena[type_id] {
+        get_final_type(type_arena, *id)
+    } else {
+        type_id
+    }
 }

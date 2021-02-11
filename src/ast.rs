@@ -1,21 +1,13 @@
 use crate::lexer::LocationRange;
 use crate::parser::ParseError;
 use crate::typechecker::TypeError;
-use id_arena::Id;
+use id_arena::{Arena, Id};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 pub type Name = usize;
 pub type FunctionId = usize;
 pub type TypeId = Id<Type>;
-
-// To appease Serde
-#[derive(Deserialize)]
-#[serde(remote = "TypeId")]
-pub struct TypeIdDef {
-    #[serde(getter = "TypeId::index")]
-    index: usize,
-}
 
 // Wrapper to provide location to AST nodes
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -50,7 +42,7 @@ pub struct Program {
     pub errors: Vec<Loc<ParseError>>,
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct ProgramT {
     pub stmts: Vec<Loc<StmtT>>,
     pub named_types: Vec<(Name, TypeId)>,
@@ -68,7 +60,7 @@ pub enum Stmt {
     Export(Name),
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum StmtT {
     Let(Name, Loc<ExprT>),
     Break,
@@ -136,7 +128,7 @@ pub enum Expr {
 }
 
 // Field or index accesses on a struct/array
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Accessor {
     Field(usize),
     Index(Loc<ExprT>),
@@ -144,61 +136,54 @@ pub enum Accessor {
 // Lvalue or target for assignment
 // An identifier followed by any number of index or field accesses
 // foo.bar[0].baz = 10
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Target {
     pub ident: Name,
     pub accessors: Vec<Loc<Accessor>>,
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum ExprT {
     Asgn {
         lhs: Loc<Target>,
         rhs: Box<Loc<ExprT>>,
-        #[serde(skip)]
         type_: TypeId,
     },
     Block {
         stmts: Vec<Loc<StmtT>>,
         end_expr: Option<Box<Loc<ExprT>>>,
         scope_index: usize,
-        #[serde(skip)]
         type_: TypeId,
     },
     If(
         Box<Loc<ExprT>>,
         Box<Loc<ExprT>>,
         Option<Box<Loc<ExprT>>>,
-        #[serde(skip)] TypeId,
+        TypeId,
     ),
     Primary {
         value: Value,
-        #[serde(skip)]
         type_: TypeId,
     },
     Var {
         name: Name,
-        #[serde(skip)]
         type_: TypeId,
     },
     BinOp {
         op: Op,
         lhs: Box<Loc<ExprT>>,
         rhs: Box<Loc<ExprT>>,
-        #[serde(skip)]
         type_: TypeId,
     },
     UnaryOp {
         op: UnaryOp,
         rhs: Box<Loc<ExprT>>,
-        #[serde(skip)]
         type_: TypeId,
     },
     // Note: only used for anonymous functions. Functions that are
     // bound with let are StmtT::Function
     Function {
         function: Function,
-        #[serde(skip)]
         type_: TypeId,
         name: Name,
         table_index: usize,
@@ -206,34 +191,29 @@ pub enum ExprT {
     Record {
         name: Name,
         fields: Vec<(Name, Loc<ExprT>)>,
-        #[serde(skip)]
         type_: TypeId,
     },
     Index {
         lhs: Box<Loc<ExprT>>,
         index: Box<Loc<ExprT>>,
-        #[serde(skip)]
         type_: TypeId,
     },
-    TupleField(Box<Loc<ExprT>>, u32, #[serde(skip)] TypeId),
+    TupleField(Box<Loc<ExprT>>, u32, TypeId),
     DirectCall {
         callee: FunctionId,
         captures_index: Option<usize>,
         args: Box<Loc<ExprT>>,
-        #[serde(skip)]
         type_: TypeId,
     },
     IndirectCall {
         callee: Box<Loc<ExprT>>,
         args: Box<Loc<ExprT>>,
-        #[serde(skip)]
         type_: TypeId,
     },
-    Tuple(Vec<Loc<ExprT>>, #[serde(skip)] TypeId),
+    Tuple(Vec<Loc<ExprT>>, TypeId),
     Array {
         entries: Vec<Loc<ExprT>>,
         entry_type: TypeId,
-        #[serde(skip)]
         type_: TypeId,
     },
 }
@@ -246,7 +226,7 @@ pub enum Value {
     String(String),
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Function {
     pub params: Vec<(Name, TypeId)>,
     pub body: Box<Loc<ExprT>>,
@@ -316,7 +296,7 @@ impl fmt::Display for Op {
     }
 }
 
-#[derive(Debug, Hash, PartialEq, Eq, Clone, Serialize, Deserialize)]
+#[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub enum Type {
     Unit,
     Float,
@@ -332,6 +312,38 @@ pub enum Type {
     // Points to a type that is solved further
     // Not the greatest solution but meh
     Solved(TypeId),
+}
+
+impl Type {
+    pub fn is_ref_type(&self) -> bool {
+        matches!(
+            self,
+            Type::Int | Type::Bool | Type::Unit | Type::Char | Type::Float
+        )
+    }
+}
+
+// Struct for the builtin types to prevent reallocation
+pub struct BuiltInTypes {
+    pub unit: TypeId,
+    pub float: TypeId,
+    pub int: TypeId,
+    pub bool: TypeId,
+    pub char: TypeId,
+    pub string: TypeId,
+}
+
+impl BuiltInTypes {
+    pub fn new(type_arena: &mut Arena<Type>) -> Self {
+        BuiltInTypes {
+            unit: type_arena.alloc(Type::Unit),
+            float: type_arena.alloc(Type::Float),
+            int: type_arena.alloc(Type::Int),
+            bool: type_arena.alloc(Type::Bool),
+            char: type_arena.alloc(Type::Char),
+            string: type_arena.alloc(Type::String),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]

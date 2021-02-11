@@ -1,4 +1,3 @@
-use crate::ast::TypeId;
 use crate::code_generator::BOX_ARRAY_ID;
 use crate::utils::SaberProgram;
 use anyhow::Result;
@@ -114,7 +113,7 @@ fn print_string(caller: Caller<'_>, ptr: i32) -> Result<(), Trap> {
 fn dealloc(
     mem: &Memory,
     ptr: usize,
-    runtime_types: &HashMap<TypeId, Vec<bool>>,
+    runtime_types: &HashMap<usize, Vec<bool>>,
 ) -> Result<(), Trap> {
     let ref_count_ptr = ptr + 4;
     let ref_count = get_u32(ref_count_ptr, &mem)?;

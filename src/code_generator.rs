@@ -1,11 +1,13 @@
-use crate::ast::{ExprT, Function, Loc, Name, Op, ProgramT, StmtT, Type, TypeId, UnaryOp, Value};
+use crate::ast::{
+    BuiltInTypes, ExprT, Function, Loc, Name, Op, ProgramT, StmtT, Type, TypeId, UnaryOp, Value,
+};
 use crate::lexer::LocationRange;
 use crate::printer::type_to_string;
 use crate::symbol_table::{
     FunctionInfo, SymbolTable, VarIndex, ALLOC_INDEX, DEALLOC_INDEX, PRINT_CHAR_INDEX, STREQ_INDEX,
 };
 use crate::typechecker::TypeChecker;
-use crate::utils::{NameTable, TypeTable};
+use crate::utils::{get_final_type, NameTable};
 use crate::wasm::{
     ExportEntry, ExternalKind, FunctionBody, FunctionType, ImportEntry, ImportKind, LocalEntry,
     OpCode, ProgramData, WasmType,
@@ -55,6 +57,7 @@ pub enum GenerationError {
 pub struct CodeGenerator {
     symbol_table: SymbolTable,
     name_table: NameTable,
+    builtin_types: BuiltInTypes,
     type_arena: Arena<Type>,
     // All the generated code
     program_data: ProgramData,
@@ -67,11 +70,12 @@ type Result<T> = std::result::Result<T, GenerationError>;
 impl CodeGenerator {
     pub fn new(typechecker: TypeChecker) -> Self {
         let expr_func_count = typechecker.get_expr_func_index();
-        let (symbol_table, name_table, type_table) = typechecker.get_tables();
+        let (symbol_table, name_table, type_table, builtin_types) = typechecker.get_tables();
         let func_count = symbol_table.get_function_index();
         CodeGenerator {
             symbol_table,
             name_table,
+            builtin_types,
             type_arena: type_table,
             program_data: ProgramData::new(func_count, expr_func_count),
             return_type: None,
@@ -421,7 +425,7 @@ impl CodeGenerator {
             }
             StmtT::Expr(expr) => {
                 let mut opcodes = self.generate_expr(expr)?;
-                match self.type_arena.get_type(expr.inner.get_type()) {
+                match &self.type_arena[expr.inner.get_type()] {
                     Type::Unit => {}
                     _ => opcodes.push(OpCode::Drop),
                 }
@@ -497,17 +501,14 @@ impl CodeGenerator {
         if type1 == type2 {
             return Ok(type1);
         }
-        match (
-            self.type_arena.get_type(type1),
-            self.type_arena.get_type(type2),
-        ) {
+        match (&self.type_arena[type1], &self.type_arena[type2]) {
             (Type::Int, Type::Float) => {
                 ops1.push(OpCode::F32ConvertI32);
-                Ok(FLOAT_INDEX)
+                Ok(self.builtin_types.float)
             }
             (Type::Float, Type::Int) => {
                 ops2.push(OpCode::F32ConvertI32);
-                Ok(FLOAT_INDEX)
+                Ok(self.builtin_types.float)
             }
             (Type::Solved(t1), _) => self.promote_types(*t1, type2, ops1, ops2, location),
             (_, Type::Solved(t2)) => self.promote_types(type1, *t2, ops1, ops2, location),
@@ -647,15 +648,14 @@ impl CodeGenerator {
                     },
             } => {
                 self.symbol_table.swap_scope(*scope_index);
-                let (_, return_type) = if let Type::Arrow(params_type, return_type) =
-                    self.type_arena.get_type(*type_)
-                {
-                    (*params_type, *return_type)
-                } else {
-                    return Err(GenerationError::NotAFunction {
-                        location: expr.location,
-                    });
-                };
+                let (_, return_type) =
+                    if let Type::Arrow(params_type, return_type) = &self.type_arena[*type_] {
+                        (*params_type, *return_type)
+                    } else {
+                        return Err(GenerationError::NotAFunction {
+                            location: expr.location,
+                        });
+                    };
                 let func_index = self.generate_function_binding(
                     *name,
                     *scope_index,
@@ -693,7 +693,7 @@ impl CodeGenerator {
                 opcodes.push(OpCode::Type(WasmType::Empty));
                 // Push on index
                 opcodes.push(OpCode::GetGlobal(0));
-                if lhs.inner.get_type() != STR_INDEX {
+                if matches!(self.type_arena[lhs.inner.get_type()], Type::String) {
                     opcodes.push(OpCode::I32Const(4));
                     opcodes.push(OpCode::I32Mul);
                 }
@@ -706,7 +706,7 @@ impl CodeGenerator {
                 opcodes.push(OpCode::End);
                 opcodes.push(OpCode::SetGlobal(1));
                 opcodes.push(OpCode::GetGlobal(0));
-                if lhs.inner.get_type() == STR_INDEX {
+                if matches!(self.type_arena[lhs.inner.get_type()], Type::String) {
                     opcodes.push(OpCode::I32Load8U(0, 8));
                 } else {
                     opcodes.push(OpCode::I32Load(0, 8));
@@ -741,7 +741,7 @@ impl CodeGenerator {
                 }
                 let entries = self.symbol_table.get_scope_entries(*scope_index);
                 for (_, entry) in entries {
-                    if is_ref_type(entry.var_type) {
+                    if self.type_arena[entry.var_type].is_ref_type() {
                         opcodes.push(OpCode::GetLocal((entry.var_index).try_into().unwrap()));
                         opcodes.push(OpCode::Call(DEALLOC_INDEX));
                     }
@@ -785,7 +785,7 @@ impl CodeGenerator {
                 )?;
                 lhs_ops.append(&mut rhs_ops);
                 let opcode =
-                    self.generate_operator(&op, self.type_arena.get_type(*type_), promoted_type)?;
+                    self.generate_operator(&op, &self.type_arena[*type_], promoted_type)?;
                 lhs_ops.push(opcode);
                 Ok(lhs_ops)
             }
@@ -865,7 +865,7 @@ impl CodeGenerator {
         // Set type_id
         // Get ptr to record
         opcodes.push(OpCode::GetGlobal(0));
-        if is_ref_type(self.type_arena.get_final_type(entry_type)) {
+        if self.type_arena[entry_type].is_ref_type() {
             opcodes.push(OpCode::I32Const(BOX_ARRAY_ID));
         } else {
             opcodes.push(OpCode::I32Const(ARRAY_ID));
@@ -939,8 +939,8 @@ impl CodeGenerator {
         // Get ptr to record
         opcodes.push(OpCode::GetGlobal(0));
         // TODO: Add proper error handling for too many types.
-        let final_type_id = self.type_arena.get_final_type(type_id);
-        opcodes.push(OpCode::I32Const(final_type_id.try_into().unwrap()));
+        let final_type_id = get_final_type(&self.type_arena, type_id);
+        opcodes.push(OpCode::I32Const(final_type_id.index().try_into().unwrap()));
         // *ptr = type_id
         opcodes.push(OpCode::I32Store(2, offset));
         offset += 4;
@@ -987,7 +987,9 @@ impl CodeGenerator {
                 // Set type_id
                 // Get ptr to record
                 opcodes.push(OpCode::GetGlobal(0));
-                opcodes.push(OpCode::I32Const(STR_INDEX.try_into().unwrap()));
+                opcodes.push(OpCode::I32Const(
+                    self.builtin_types.string.index().try_into().unwrap(),
+                ));
                 // *ptr = type_id
                 opcodes.push(OpCode::I32Store(2, offset));
 
@@ -1018,7 +1020,7 @@ impl CodeGenerator {
     }
 
     fn generate_operator(&self, op: &Op, result_type: &Type, input_type: TypeId) -> Result<OpCode> {
-        match (op, self.type_arena.get_type(input_type), result_type) {
+        match (op, &self.type_arena[input_type], result_type) {
             (Op::Plus, Type::Int, Type::Int) => Ok(OpCode::I32Add),
             (Op::Minus, Type::Int, Type::Int) => Ok(OpCode::I32Sub),
             (Op::Plus, Type::Float, Type::Float) => Ok(OpCode::F32Add),

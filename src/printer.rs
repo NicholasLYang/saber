@@ -2,7 +2,7 @@ use crate::ast::{Loc, Type, TypeId};
 use crate::lexer::Token;
 use crate::parser::ParseError;
 use crate::typechecker::TypeError;
-use crate::utils::{NameTable, TypeTable};
+use crate::utils::NameTable;
 use codespan_reporting::diagnostic::{Diagnostic, Label};
 use id_arena::Arena;
 use itertools::Itertools;

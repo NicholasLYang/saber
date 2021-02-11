@@ -78,6 +78,7 @@ fn compile_saber_file<T: Write>(file_name: &str, debug_output: Option<T>) -> Res
     let writer = StandardStream::stderr(ColorChoice::Always);
     let config = codespan_reporting::term::Config::default();
     let file = SimpleFile::new(file_name, contents.as_str());
+
     let lexer = lexer::Lexer::new(&contents);
     let mut parser = Parser::new(lexer);
     let program = parser.program().expect("Error parsing");
@@ -85,6 +86,7 @@ fn compile_saber_file<T: Write>(file_name: &str, debug_output: Option<T>) -> Res
         let diagnostic: Diagnostic<()> = error.into();
         term::emit(&mut writer.lock(), &config, &file, &diagnostic).unwrap();
     }
+
     let mut typechecker = TypeChecker::new(parser.get_name_table());
     let program_t = typechecker.check_program(program);
     let runtime_types = typechecker.generate_runtime_type_info();
@@ -92,6 +94,7 @@ fn compile_saber_file<T: Write>(file_name: &str, debug_output: Option<T>) -> Res
         let diagnostic: Diagnostic<()> = error.into();
         term::emit(&mut writer.lock(), &config, &file, &diagnostic).unwrap();
     }
+
     let code_generator = CodeGenerator::new(typechecker);
     let program = code_generator.generate_program(program_t)?;
     let mut emitter = Emitter::new();

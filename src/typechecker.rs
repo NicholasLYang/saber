@@ -1,6 +1,6 @@
 use crate::ast::{
-    Accessor, Expr, ExprT, Function, Loc, Name, Op, Pat, Program, ProgramT, Stmt, StmtT, Target,
-    Type, TypeDef, TypeId, TypeSig, UnaryOp, Value,
+    Accessor, BuiltInTypes, Expr, ExprT, Function, Loc, Name, Op, Pat, Program, ProgramT, Stmt,
+    StmtT, Target, Type, TypeDef, TypeId, TypeSig, UnaryOp, Value,
 };
 use crate::lexer::LocationRange;
 use crate::loc;
@@ -101,6 +101,8 @@ impl fmt::Display for TypeError {
 
 pub struct TypeChecker {
     symbol_table: SymbolTable,
+    // Standard types like int, bool, etc.
+    builtin_types: BuiltInTypes,
     // Type names. Right now just has the primitives like string,
     // integer, float, char
     type_names: HashMap<Name, TypeId>,
@@ -123,14 +125,14 @@ pub struct TypeChecker {
 
 fn build_type_names(
     name_table: &mut NameTable,
-    type_table: &mut Arena<Type>,
+    builtin_types: &BuiltInTypes,
 ) -> HashMap<Name, TypeId> {
     let primitive_types = vec![
-        ("int", type_table.alloc(Type::Int)),
-        ("float", type_table.alloc(Type::Float)),
-        ("char", type_table.alloc(Type::Char)),
-        ("string", type_table.alloc(Type::String)),
-        ("bool", type_table.alloc(Type::Bool)),
+        ("int", builtin_types.int),
+        ("float", builtin_types.float),
+        ("char", builtin_types.char),
+        ("string", builtin_types.string),
+        ("bool", builtin_types.bool),
     ];
     let mut type_names = HashMap::new();
     for (name, type_id) in primitive_types {
@@ -145,38 +147,41 @@ impl TypeChecker {
         let mut symbol_table = SymbolTable::new();
         let mut type_arena = Arena::<Type>::new();
         let print_int_id = name_table.insert("printInt".into());
+        let builtin_types = BuiltInTypes::new(&mut type_arena);
+
         symbol_table.insert_function(
             print_int_id,
-            INT_INDEX,
-            UNIT_INDEX,
-            type_arena.alloc(Type::Arrow(INT_INDEX, UNIT_INDEX)),
+            builtin_types.int,
+            builtin_types.unit,
+            type_arena.alloc(Type::Arrow(builtin_types.int, builtin_types.unit)),
         );
         let print_float_id = name_table.insert("printFloat".into());
         symbol_table.insert_function(
             print_float_id,
-            FLOAT_INDEX,
-            UNIT_INDEX,
-            type_arena.alloc(Type::Arrow(FLOAT_INDEX, UNIT_INDEX)),
+            builtin_types.float,
+            builtin_types.unit,
+            type_arena.alloc(Type::Arrow(builtin_types.float, builtin_types.unit)),
         );
         let print_string_id = name_table.insert("printString".into());
         symbol_table.insert_function(
             print_string_id,
-            STR_INDEX,
-            UNIT_INDEX,
-            type_arena.alloc(Type::Arrow(STR_INDEX, UNIT_INDEX)),
+            builtin_types.string,
+            builtin_types.unit,
+            type_arena.alloc(Type::Arrow(builtin_types.string, builtin_types.unit)),
         );
         let print_char_id = name_table.insert("printChar".into());
         symbol_table.insert_function(
             print_char_id,
-            CHAR_INDEX,
-            UNIT_INDEX,
-            type_arena.alloc(Type::Arrow(CHAR_INDEX, UNIT_INDEX)),
+            builtin_types.char,
+            builtin_types.unit,
+            type_arena.alloc(Type::Arrow(builtin_types.char, builtin_types.unit)),
         );
 
-        let type_names = build_type_names(&mut name_table, &mut type_arena);
+        let type_names = build_type_names(&mut name_table, &builtin_types);
 
         TypeChecker {
             symbol_table,
+            builtin_types,
             type_names,
             return_type: None,
             type_var_index: 0,
@@ -188,15 +193,13 @@ impl TypeChecker {
         }
     }
 
-    pub fn is_ref_type(&self, type_id: TypeId) -> bool {
-        matches!(
-            self.type_arena[type_id],
-            Type::Int | Type::Bool | Type::Unit | Type::Char | Type::Float
+    pub fn get_tables(self) -> (SymbolTable, NameTable, Arena<Type>, BuiltInTypes) {
+        (
+            self.symbol_table,
+            self.name_table,
+            self.type_arena,
+            self.builtin_types,
         )
-    }
-
-    pub fn get_tables(self) -> (SymbolTable, NameTable, Arena<Type>) {
-        (self.symbol_table, self.name_table, self.type_arena)
     }
 
     pub fn get_expr_func_index(&self) -> usize {
@@ -221,7 +224,7 @@ impl TypeChecker {
         // Stores whether or not a field is a reference
         let mut field_info = Vec::new();
         for field_type in fields {
-            field_info.push(is_ref_type(*field_type))
+            field_info.push(self.type_arena[*field_type].is_ref_type())
         }
         field_info
     }
@@ -239,11 +242,11 @@ impl TypeChecker {
         }
     }
 
-    pub fn generate_runtime_type_info(&self) -> HashMap<TypeId, Vec<bool>> {
+    pub fn generate_runtime_type_info(&self) -> HashMap<usize, Vec<bool>> {
         let mut type_info = HashMap::new();
         for (_, type_id) in &self.struct_types {
             self.generate_type_info(*type_id)
-                .map(|(type_id, field_info)| type_info.insert(type_id, field_info));
+                .map(|(type_id, field_info)| type_info.insert(type_id.index(), field_info));
         }
         type_info
     }
@@ -333,16 +336,28 @@ impl TypeChecker {
         else_block: Option<Box<Loc<Expr>>>,
     ) -> Result<Loc<StmtT>, Loc<TypeError>> {
         let cond_t = self.expr(*cond)?;
-        self.unify_or_err(cond_t.inner.get_type(), BOOL_INDEX, cond_t.location)?;
+        self.unify_or_err(
+            cond_t.inner.get_type(),
+            self.builtin_types.bool,
+            cond_t.location,
+        )?;
         let then_t = self.expr(*then_block)?;
         let else_t = if let Some(else_block) = else_block {
             let else_t = self.expr(*else_block)?;
-            self.unify_or_err(else_t.inner.get_type(), UNIT_INDEX, else_t.location)?;
+            self.unify_or_err(
+                else_t.inner.get_type(),
+                self.builtin_types.unit,
+                else_t.location,
+            )?;
             Some(else_t)
         } else {
             None
         };
-        self.unify_or_err(then_t.inner.get_type(), UNIT_INDEX, then_t.location)?;
+        self.unify_or_err(
+            then_t.inner.get_type(),
+            self.builtin_types.unit,
+            then_t.location,
+        )?;
         Ok(loc!(
             StmtT::If {
                 cond: cond_t,
@@ -407,7 +422,7 @@ impl TypeChecker {
                 self.is_in_loop = true;
                 let block_t = self.expr(block)?;
                 self.is_in_loop = old_is_in_loop;
-                self.unify_or_err(block_t.inner.get_type(), UNIT_INDEX, location)?;
+                self.unify_or_err(block_t.inner.get_type(), self.builtin_types.unit, location)?;
                 Ok(vec![loc!(StmtT::Loop(block_t), location)])
             }
             Stmt::Return(expr) => {
@@ -444,19 +459,19 @@ impl TypeChecker {
         match value {
             Value::Integer(_i) => ExprT::Primary {
                 value,
-                type_: INT_INDEX,
+                type_: self.builtin_types.int,
             },
             Value::Float(_f) => ExprT::Primary {
                 value,
-                type_: FLOAT_INDEX,
+                type_: self.builtin_types.float,
             },
             Value::Bool(_b) => ExprT::Primary {
                 value,
-                type_: BOOL_INDEX,
+                type_: self.builtin_types.bool,
             },
             Value::String(s) => ExprT::Primary {
                 value: Value::String(s),
-                type_: STR_INDEX,
+                type_: self.builtin_types.string,
             },
         }
     }
@@ -477,7 +492,7 @@ impl TypeChecker {
                     sig.location
                 ))
                 .map(|t| *t),
-            TypeSig::Empty => Ok(UNIT_INDEX),
+            TypeSig::Empty => Ok(self.builtin_types.unit),
             TypeSig::Arrow(param_sigs, return_sig) => {
                 let param_types = if param_sigs.len() == 1 {
                     self.lookup_type_sig(&param_sigs[0])?
@@ -523,7 +538,7 @@ impl TypeChecker {
                         .alloc(Type::Record(self.name_table.get_fresh_name(), types?)))
                 }
             }
-            Pat::Empty(_) => Ok(UNIT_INDEX),
+            Pat::Empty(_) => Ok(self.builtin_types.unit),
         }
     }
 
@@ -756,7 +771,7 @@ impl TypeChecker {
         std::mem::swap(&mut old_return_type, &mut self.return_type);
         // If the body type is unit, we don't try to unify the body type
         // with return type.
-        let return_type = if body_type != UNIT_INDEX {
+        let return_type = if body_type != self.builtin_types.unit {
             self.unify_or_err(old_return_type.unwrap(), body_type, body_location)?
         } else {
             old_return_type.unwrap()
@@ -888,8 +903,16 @@ impl TypeChecker {
                         },
                     }),
                     None => {
-                        let lhs_type = self.type_arena[typed_lhs.inner.get_type()].clone();
-                        let rhs_type = self.type_arena[typed_rhs.inner.get_type()].clone();
+                        let lhs_type = type_to_string(
+                            &self.name_table,
+                            &self.type_arena,
+                            typed_lhs.inner.get_type(),
+                        );
+                        let rhs_type = type_to_string(
+                            &self.name_table,
+                            &self.type_arena,
+                            typed_rhs.inner.get_type(),
+                        );
                         Err(loc!(
                             TypeError::OpFailure {
                                 op: op.clone(),
@@ -960,10 +983,10 @@ impl TypeChecker {
                 let table_index = self.expr_func_index;
                 let table_index_expr = ExprT::Primary {
                     value: Value::Integer(table_index.try_into().unwrap()),
-                    type_: INT_INDEX,
+                    type_: self.builtin_types.int,
                 };
                 let mut capture_struct_fields = vec![loc!(table_index_expr, expr.location)];
-                let mut capture_struct_type = vec![INT_INDEX];
+                let mut capture_struct_type = vec![self.builtin_types.int];
                 if let Some(captures) = function.captures {
                     let captures_type = captures.inner.get_type();
                     capture_struct_type.push(captures_type);
@@ -993,10 +1016,10 @@ impl TypeChecker {
                 let rhs_type = typed_rhs.inner.get_type();
                 let is_valid_types = match op {
                     UnaryOp::Minus => {
-                        self.is_unifiable(rhs_type, INT_INDEX)
-                            || self.is_unifiable(rhs_type, FLOAT_INDEX)
+                        self.is_unifiable(rhs_type, self.builtin_types.int)
+                            || self.is_unifiable(rhs_type, self.builtin_types.float)
                     }
-                    UnaryOp::Not => self.is_unifiable(rhs_type, BOOL_INDEX),
+                    UnaryOp::Not => self.is_unifiable(rhs_type, self.builtin_types.bool),
                 };
                 if is_valid_types {
                     Ok(Loc {
@@ -1076,7 +1099,7 @@ impl TypeChecker {
                     let typed_expr = self.expr(*expr)?;
                     (typed_expr.inner.get_type(), Some(Box::new(typed_expr)))
                 } else {
-                    (UNIT_INDEX, None)
+                    (self.builtin_types.unit, None)
                 };
                 self.symbol_table.restore_scope();
                 Ok(Loc {
@@ -1107,14 +1130,14 @@ impl TypeChecker {
                         ),
                     })
                 } else {
-                    self.unify_or_err(UNIT_INDEX, then_type, location)?;
+                    self.unify_or_err(self.builtin_types.unit, then_type, location)?;
                     Ok(Loc {
                         location,
                         inner: ExprT::If(
                             Box::new(typed_cond),
                             Box::new(typed_then_block),
                             None,
-                            UNIT_INDEX,
+                            self.builtin_types.unit,
                         ),
                     })
                 }
@@ -1155,12 +1178,20 @@ impl TypeChecker {
                 let lhs_t = self.expr(*lhs)?;
                 let index_t = self.expr(*index)?;
                 let lhs_type = lhs_t.inner.get_type();
-                self.unify_or_err(index_t.inner.get_type(), INT_INDEX, index_t.location)?;
+                self.unify_or_err(
+                    index_t.inner.get_type(),
+                    self.builtin_types.int,
+                    index_t.location,
+                )?;
                 let type_ = if let Type::Array(entry_type) = &self.type_arena[lhs_type] {
                     *entry_type
                 } else {
-                    self.unify_or_err(lhs_t.inner.get_type(), STR_INDEX, lhs_t.location)?;
-                    CHAR_INDEX
+                    self.unify_or_err(
+                        lhs_t.inner.get_type(),
+                        self.builtin_types.string,
+                        lhs_t.location,
+                    )?;
+                    self.builtin_types.char
                 };
                 Ok(loc!(
                     ExprT::Index {
@@ -1255,43 +1286,47 @@ impl TypeChecker {
     fn op(&mut self, op: &Op, lhs_type: TypeId, rhs_type: TypeId) -> Option<TypeId> {
         match op {
             Op::Plus | Op::Minus | Op::Times | Op::Div => {
-                let lhs_is_unifiable = self.is_unifiable(lhs_type, INT_INDEX);
-                let rhs_is_unifiable = self.is_unifiable(rhs_type, INT_INDEX);
+                let lhs_is_unifiable = self.is_unifiable(lhs_type, self.builtin_types.int);
+                let rhs_is_unifiable = self.is_unifiable(rhs_type, self.builtin_types.int);
                 if lhs_is_unifiable && rhs_is_unifiable {
-                    Some(INT_INDEX)
-                } else if lhs_type == FLOAT_INDEX && rhs_type == INT_INDEX {
-                    Some(FLOAT_INDEX)
-                } else if lhs_type == INT_INDEX && rhs_type == FLOAT_INDEX {
-                    Some(FLOAT_INDEX)
-                } else if lhs_type == FLOAT_INDEX && rhs_type == FLOAT_INDEX {
-                    Some(FLOAT_INDEX)
+                    Some(self.builtin_types.int)
+                } else if lhs_type == self.builtin_types.float && rhs_type == self.builtin_types.int
+                {
+                    Some(self.builtin_types.float)
+                } else if lhs_type == self.builtin_types.int && rhs_type == self.builtin_types.float
+                {
+                    Some(self.builtin_types.float)
+                } else if lhs_type == self.builtin_types.float
+                    && rhs_type == self.builtin_types.float
+                {
+                    Some(self.builtin_types.float)
                 } else {
                     None
                 }
             }
             Op::BangEqual | Op::EqualEqual => {
                 if self.is_unifiable(lhs_type, rhs_type) {
-                    Some(BOOL_INDEX)
+                    Some(self.builtin_types.bool)
                 } else {
                     None
                 }
             }
             Op::GreaterEqual | Op::Greater | Op::Less | Op::LessEqual => {
-                if (self.is_unifiable(lhs_type, INT_INDEX)
-                    && self.is_unifiable(rhs_type, INT_INDEX))
-                    || (self.is_unifiable(lhs_type, FLOAT_INDEX)
-                        && self.is_unifiable(rhs_type, FLOAT_INDEX))
+                if (self.is_unifiable(lhs_type, self.builtin_types.int)
+                    && self.is_unifiable(rhs_type, self.builtin_types.int))
+                    || (self.is_unifiable(lhs_type, self.builtin_types.float)
+                        && self.is_unifiable(rhs_type, self.builtin_types.float))
                 {
-                    Some(BOOL_INDEX)
+                    Some(self.builtin_types.bool)
                 } else {
                     None
                 }
             }
             Op::LogicalAnd | Op::LogicalOr => {
-                if self.is_unifiable(lhs_type, BOOL_INDEX)
-                    && self.is_unifiable(rhs_type, BOOL_INDEX)
+                if self.is_unifiable(lhs_type, self.builtin_types.bool)
+                    && self.is_unifiable(rhs_type, self.builtin_types.bool)
                 {
-                    Some(BOOL_INDEX)
+                    Some(self.builtin_types.bool)
                 } else {
                     None
                 }
@@ -1322,8 +1357,9 @@ impl TypeChecker {
         if type_id1 == type_id2 {
             return Some(type_id1);
         }
-        let type1 = &self.type_arena[type_id1];
-        let type2 = &self.type_arena[type_id2];
+        // TODO: Figure out how bad these clones are perf-wise
+        let type1 = &self.type_arena[type_id1].clone();
+        let type2 = &self.type_arena[type_id2].clone();
         match (type1, type2) {
             (Type::Record(name, fields), Type::Record(other_name, other_fields)) => {
                 if fields.len() != other_fields.len() || name != other_name {
@@ -1386,7 +1422,7 @@ impl TypeChecker {
                     _ => None,
                 }
             }
-            (Type::Int, Type::Int) => Some(INT_INDEX),
+            (Type::Int, Type::Int) => Some(self.builtin_types.int),
             (Type::Int, Type::Bool) => Some(type_id1),
             (Type::Bool, Type::Int) => Some(type_id2),
             (Type::Var(_), _) => {
