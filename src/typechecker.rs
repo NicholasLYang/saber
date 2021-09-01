@@ -288,10 +288,10 @@ impl TypeChecker {
     }
 
     // Reads functions defined in this block
-    fn read_functions(&mut self, stmts: &Vec<Loc<Stmt>>) -> Result<(), Loc<TypeError>> {
+    fn read_functions(&mut self, stmts: &[Loc<Stmt>]) -> Result<(), Loc<TypeError>> {
         for stmt in stmts {
             if let Stmt::Function(func_name, params, return_type_sig, _) = &stmt.inner {
-                let params_type = self.pat(&params)?;
+                let params_type = self.pat(params)?;
                 let return_type = if let Some(type_sig) = return_type_sig {
                     self.lookup_type_sig(type_sig)?
                 } else {
@@ -331,17 +331,17 @@ impl TypeChecker {
     fn if_expr_stmt(
         &mut self,
         location: LocationRange,
-        cond: Box<Loc<Expr>>,
-        then_block: Box<Loc<Expr>>,
+        cond: Loc<Expr>,
+        then_block: Loc<Expr>,
         else_block: Option<Box<Loc<Expr>>>,
     ) -> Result<Loc<StmtT>, Loc<TypeError>> {
-        let cond_t = self.expr(*cond)?;
+        let cond_t = self.expr(cond)?;
         self.unify_or_err(
             cond_t.inner.get_type(),
             self.builtin_types.bool,
             cond_t.location,
         )?;
-        let then_t = self.expr(*then_block)?;
+        let then_t = self.expr(then_block)?;
         let else_t = if let Some(else_block) = else_block {
             let else_t = self.expr(*else_block)?;
             self.unify_or_err(
@@ -360,9 +360,9 @@ impl TypeChecker {
         )?;
         Ok(loc!(
             StmtT::If {
-                cond: cond_t,
-                then_block: then_t,
-                else_block: else_t
+                cond: Box::new(cond_t),
+                then_block: Box::new(then_t),
+                else_block: else_t.map(Box::new)
             },
             location
         ))
@@ -374,7 +374,7 @@ impl TypeChecker {
             Stmt::Expr(expr) => {
                 if let Expr::If(cond, then_block, else_block) = expr.inner {
                     Ok(vec![
-                        self.if_expr_stmt(location, cond, then_block, else_block)?
+                        self.if_expr_stmt(location, *cond, *then_block, else_block)?
                     ])
                 } else {
                     let typed_expr = self.expr(expr)?;
@@ -513,7 +513,7 @@ impl TypeChecker {
     fn pat(&mut self, pat: &Pat) -> Result<TypeId, Loc<TypeError>> {
         match pat {
             Pat::Id(_, Some(type_sig), _) => {
-                let type_ = self.lookup_type_sig(&type_sig)?;
+                let type_ = self.lookup_type_sig(type_sig)?;
                 Ok(type_)
             }
             Pat::Id(_, None, _) => {
@@ -527,7 +527,7 @@ impl TypeChecker {
             Pat::Record(pats, type_sig, _) => {
                 // In the future I should unify these two if they both exist.
                 if let Some(type_sig) = type_sig {
-                    self.lookup_type_sig(&type_sig)
+                    self.lookup_type_sig(type_sig)
                 } else {
                     let types: Result<Vec<_>, _> = pats
                         .iter()
@@ -547,7 +547,7 @@ impl TypeChecker {
     fn get_func_params(&mut self, pat: &Pat) -> Result<Vec<(Name, TypeId)>, Loc<TypeError>> {
         match pat {
             Pat::Id(name, Some(type_sig), _) => {
-                let type_ = self.lookup_type_sig(&type_sig)?;
+                let type_ = self.lookup_type_sig(type_sig)?;
                 self.symbol_table.insert_var(*name, type_);
                 Ok(vec![(*name, type_)])
             }
@@ -565,7 +565,7 @@ impl TypeChecker {
             }
             Pat::Record(names, type_sig, location) => {
                 let type_ = if let Some(type_sig) = type_sig {
-                    Some(self.lookup_type_sig(&type_sig)?)
+                    Some(self.lookup_type_sig(type_sig)?)
                 } else {
                     None
                 };
@@ -630,7 +630,7 @@ impl TypeChecker {
             Pat::Record(names, _, _) => {
                 for name in names {
                     let (index, type_) = self.get_field_type(rhs_type, *name, location)?;
-                    self.symbol_table.insert_var(*name, type_.clone());
+                    self.symbol_table.insert_var(*name, type_);
                     bindings.push(Loc {
                         location,
                         inner: StmtT::Let(
@@ -642,7 +642,7 @@ impl TypeChecker {
                                         location,
                                         inner: ExprT::Var {
                                             name: owner_name,
-                                            type_: rhs_type.clone(),
+                                            type_: rhs_type,
                                         },
                                     }),
                                     index,
@@ -670,7 +670,7 @@ impl TypeChecker {
                                         location,
                                         inner: ExprT::Var {
                                             name: owner_name,
-                                            type_: rhs_type.clone(),
+                                            type_: rhs_type,
                                         },
                                     }),
                                     i.try_into().unwrap(),
@@ -722,7 +722,7 @@ impl TypeChecker {
 
     fn create_captures_tuple(&mut self, location: LocationRange) -> Option<Loc<ExprT>> {
         let captures = self.symbol_table.get_captures().unwrap();
-        if captures.len() == 0 {
+        if captures.is_empty() {
             return None;
         }
         let mut fields = Vec::new();
@@ -1290,14 +1290,9 @@ impl TypeChecker {
                 let rhs_is_unifiable = self.is_unifiable(rhs_type, self.builtin_types.int);
                 if lhs_is_unifiable && rhs_is_unifiable {
                     Some(self.builtin_types.int)
-                } else if lhs_type == self.builtin_types.float && rhs_type == self.builtin_types.int
-                {
-                    Some(self.builtin_types.float)
-                } else if lhs_type == self.builtin_types.int && rhs_type == self.builtin_types.float
-                {
-                    Some(self.builtin_types.float)
-                } else if lhs_type == self.builtin_types.float
-                    && rhs_type == self.builtin_types.float
+                } else if lhs_type == self.builtin_types.float && rhs_type == self.builtin_types.int ||
+                    lhs_type == self.builtin_types.int && rhs_type == self.builtin_types.float ||
+                    lhs_type == self.builtin_types.float && rhs_type == self.builtin_types.float
                 {
                     Some(self.builtin_types.float)
                 } else {
@@ -1353,7 +1348,7 @@ impl TypeChecker {
         Some(types)
     }
 
-    fn unify<'a>(&mut self, type_id1: TypeId, type_id2: TypeId) -> Option<TypeId> {
+    fn unify(&mut self, type_id1: TypeId, type_id2: TypeId) -> Option<TypeId> {
         if type_id1 == type_id2 {
             return Some(type_id1);
         }
@@ -1389,7 +1384,7 @@ impl TypeChecker {
                 }
             }
             (Type::Tuple(t1), Type::Tuple(t2)) => {
-                if let Some(types) = self.unify_type_vectors(&t1, &t2) {
+                if let Some(types) = self.unify_type_vectors(t1, t2) {
                     let id = self.type_arena.alloc(Type::Tuple(types));
                     Some(id)
                 } else {

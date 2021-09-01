@@ -176,7 +176,7 @@ impl Emitter {
         self.emit_global_section(program.global_section)?;
         self.emit_exports_section(program.exports_section)?;
         self.emit_elements_section(program.elements_section)?;
-        self.emit_code_section(program.code_section.into_iter().filter_map(|t| t).collect())?;
+        self.emit_code_section(program.code_section.into_iter().flatten().collect())?;
         Ok(())
     }
 
@@ -216,7 +216,7 @@ impl Emitter {
             opcodes.push(OpCode::Type(WasmType::Function));
             opcodes.push(OpCode::Count(usize_to_u32(type_.param_types.len())?));
             for param in &type_.param_types {
-                opcodes.push(OpCode::Type(param.clone()));
+                opcodes.push(OpCode::Type(*param));
             }
             match type_.return_type {
                 Some(t) => {

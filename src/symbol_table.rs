@@ -195,9 +195,9 @@ impl SymbolTable {
                                 func_index: _,
                             } = &mut self.scopes[usage_func_scope].scope_type
                             {
-                                def_func_scope.map(|func_scope| {
+                                if let Some(func_scope) = def_func_scope {
                                     captures.push((name, func_scope, entry_type));
-                                });
+                                };
                             }
                         }
                     }
@@ -227,7 +227,7 @@ impl SymbolTable {
                 return captures
                     .iter()
                     .position(|(n, _, _)| name == *n)
-                    .map(|index| VarIndex::Capture(index));
+                    .map(VarIndex::Capture);
             }
             index = self.scopes[i].parent;
         }

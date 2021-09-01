@@ -74,9 +74,9 @@ pub enum StmtT {
         function: Function,
     },
     If {
-        cond: Loc<ExprT>,
-        then_block: Loc<ExprT>,
-        else_block: Option<Loc<ExprT>>,
+        cond: Box<Loc<ExprT>>,
+        then_block: Box<Loc<ExprT>>,
+        else_block: Option<Box<Loc<ExprT>>>,
     },
     Export(Name),
 }

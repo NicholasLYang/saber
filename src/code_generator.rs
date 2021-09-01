@@ -259,7 +259,7 @@ impl CodeGenerator {
         scope: usize,
         params: &[(Name, TypeId)],
         return_type: TypeId,
-        local_variables: &Vec<TypeId>,
+        local_variables: &[TypeId],
         body: &Loc<ExprT>,
         location: LocationRange,
     ) -> Result<usize> {
@@ -286,7 +286,7 @@ impl CodeGenerator {
         &mut self,
         return_type: TypeId,
         params: &[(Name, TypeId)],
-        local_variables: &Vec<TypeId>,
+        local_variables: &[TypeId],
         body: &Loc<ExprT>,
         location: LocationRange,
     ) -> Result<(FunctionType, FunctionBody)> {
@@ -312,7 +312,7 @@ impl CodeGenerator {
         }
         Ok(FunctionType {
             param_types: wasm_param_types,
-            return_type: return_type.clone(),
+            return_type: *return_type,
         })
     }
 
@@ -457,7 +457,7 @@ impl CodeGenerator {
             StmtT::Let(name, expr) => {
                 let entry = self.symbol_table.lookup_name(*name).unwrap();
                 let var_index = entry.var_index;
-                let mut opcodes = self.generate_expr(&expr)?;
+                let mut opcodes = self.generate_expr(expr)?;
                 opcodes.push(OpCode::SetLocal(var_index.try_into().unwrap()));
                 Ok(opcodes)
             }
@@ -545,7 +545,7 @@ impl CodeGenerator {
                 let mut opcodes = self.generate_expr(rhs)?;
                 opcodes.push(OpCode::SetGlobal(0));
                 let index = self.symbol_table.codegen_lookup(lhs.inner.ident).unwrap();
-                if lhs.inner.accessors.len() == 0 {
+                if lhs.inner.accessors.is_empty() {
                     match index {
                         VarIndex::Local(index) => {
                             opcodes.push(OpCode::GetGlobal(0));
@@ -719,7 +719,7 @@ impl CodeGenerator {
                 type_: _,
             } => self.generate_array(entries, *entry_type, expr.location),
             ExprT::Tuple(elems, type_id) => {
-                if elems.len() == 0 {
+                if elems.is_empty() {
                     Ok(Vec::new())
                 } else {
                     self.generate_tuple(elems.iter(), elems.len(), *type_id, expr.location)
@@ -785,7 +785,7 @@ impl CodeGenerator {
                 )?;
                 lhs_ops.append(&mut rhs_ops);
                 let opcode =
-                    self.generate_operator(&op, &self.type_arena[*type_], promoted_type)?;
+                    self.generate_operator(op, &self.type_arena[*type_], promoted_type)?;
                 lhs_ops.push(opcode);
                 Ok(lhs_ops)
             }
@@ -821,17 +821,17 @@ impl CodeGenerator {
 
     fn generate_tuple_field(
         &mut self,
-        lhs: &Box<Loc<ExprT>>,
+        lhs: &Loc<ExprT>,
         index: u32,
         type_: &TypeId,
     ) -> Result<Vec<OpCode>> {
-        let mut opcodes = self.generate_expr(&**lhs)?;
+        let mut opcodes = self.generate_expr(&*lhs)?;
         let field_wasm_type = self
             .generate_wasm_type(*type_, lhs.location)?
             .unwrap_or(WasmType::Empty);
         // Account for type_id
         let field_loc = index + 1;
-        let offset: u32 = (4 * field_loc).try_into().unwrap();
+        let offset = 4 * field_loc;
         let load_code = match field_wasm_type {
             WasmType::i32 => OpCode::I32Load(2, offset),
             WasmType::f32 => OpCode::F32Load(2, offset),
@@ -846,7 +846,7 @@ impl CodeGenerator {
 
     fn generate_array(
         &mut self,
-        entries: &Vec<Loc<ExprT>>,
+        entries: &[Loc<ExprT>],
         entry_type: TypeId,
         location: LocationRange,
     ) -> Result<Vec<OpCode>> {
@@ -1006,7 +1006,7 @@ impl CodeGenerator {
                 opcodes.push(OpCode::I32Store(2, offset));
                 for b in bytes.chunks_exact(4) {
                     offset += 4;
-                    let packed_bytes = ((b[0] as u32) << 0)
+                    let packed_bytes = (b[0] as u32)
                         + ((b[1] as u32) << 8)
                         + ((b[2] as u32) << 16)
                         + ((b[3] as u32) << 24);

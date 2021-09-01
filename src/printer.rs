@@ -63,8 +63,8 @@ pub fn token_to_string(name_table: &NameTable, token: &Token) -> String {
         Token::Let => "let".to_string(),
         Token::While => "while".to_string(),
         Token::Ident(i) => format!("<{}>", name_table.get_str(i)),
-        Token::Float(f) => format!("{}", f),
-        Token::Integer(i) => format!("{}", i),
+        Token::Float(f) => f.to_string(),
+        Token::Integer(i) => i.to_string(),
         Token::LBrace => "{".to_string(),
         Token::RBrace => "}".to_string(),
         Token::LBracket => "[".to_string(),
@@ -102,24 +102,26 @@ pub fn token_to_string(name_table: &NameTable, token: &Token) -> String {
     }
 }
 
-impl Into<Diagnostic<()>> for &Loc<TypeError> {
-    fn into(self) -> Diagnostic<()> {
-        let range: std::ops::Range<usize> = self.location.into();
+impl From<&Loc<TypeError>> for Diagnostic<()> {
+    fn from(type_error: &Loc<TypeError>) -> Self {
+        let range: std::ops::Range<usize> = type_error.location.into();
+
         Diagnostic::error()
             .with_message("Type Error")
             .with_labels(vec![
-                Label::primary((), range).with_message(self.inner.to_string())
+                Label::primary((), range).with_message(type_error.inner.to_string())
             ])
     }
 }
 
-impl Into<Diagnostic<()>> for &Loc<ParseError> {
-    fn into(self) -> Diagnostic<()> {
-        let range: std::ops::Range<usize> = self.location.into();
+impl From<&Loc<ParseError>> for Diagnostic<()> {
+    fn from(parse_error: &Loc<ParseError>) -> Self {
+        let range: std::ops::Range<usize> = parse_error.location.into();
+
         Diagnostic::error()
             .with_message("Parse Error")
             .with_labels(vec![
-                Label::primary((), range).with_message(self.inner.to_string())
+                Label::primary((), range).with_message(parse_error.inner.to_string())
             ])
     }
 }

@@ -138,11 +138,11 @@ impl Debug for LocationRange {
     }
 }
 
-impl Into<std::ops::Range<usize>> for LocationRange {
-    fn into(self) -> std::ops::Range<usize> {
+impl From<LocationRange> for std::ops::Range<usize> {
+    fn from(loc_range: LocationRange) -> std::ops::Range<usize> {
         std::ops::Range {
-            start: self.0,
-            end: self.1,
+            start: loc_range.0,
+            end: loc_range.1,
         }
     }
 }

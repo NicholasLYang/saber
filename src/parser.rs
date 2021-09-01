@@ -159,14 +159,13 @@ impl<'input> Parser<'input> {
     }
 
     fn bump(&mut self) -> Result<Option<Loc<Token>>, Loc<ParseError>> {
-        let tok = match self.pushedback_tokens.pop() {
+        match self.pushedback_tokens.pop() {
             Some(tok) => Ok(Some(tok)),
             None => match self.lexer.next() {
                 Some(tok) => Ok(Some(tok?)),
                 None => Ok(None),
             },
-        };
-        tok
+        }
     }
 
     fn bump_or_err(
@@ -347,7 +346,7 @@ impl<'input> Parser<'input> {
                 location,
                 inner: ParseError::EndOfFile { expected_tokens },
             }) => {
-                return Err(Loc {
+                Err(Loc {
                     location,
                     inner: ParseError::EndOfFile { expected_tokens },
                 })
@@ -553,7 +552,10 @@ impl<'input> Parser<'input> {
                 Token::Break,
             ])? {
                 self.pushback(span);
-                self.stmt()?.map(|stmt| stmts.push(stmt));
+
+                if let Some(stmt) = self.stmt()? {
+                    stmts.push(stmt);
+                }
             } else {
                 // Otherwise we could either be in an expr stmt or an ending expr situation
                 let expr = self.expr()?;
@@ -751,12 +753,7 @@ impl<'input> Parser<'input> {
 
     fn call(&mut self) -> Result<Loc<Expr>, Loc<ParseError>> {
         let mut expr = self.primary()?;
-        loop {
-            let span = if let Some(span) = self.bump()? {
-                span
-            } else {
-                break;
-            };
+        while let Some(span) = self.bump()? {
             match span.inner {
                 Token::LParen => {
                     expr = self.finish_call(expr, span.location)?;
@@ -802,7 +799,7 @@ impl<'input> Parser<'input> {
                         }
                         Token::Float(f_str) => {
                             let left = expr.location.0;
-                            let fields: Vec<&str> = f_str.split(".").collect();
+                            let fields: Vec<&str> = f_str.split('.').collect();
                             let first_index: u32 = fields[0].parse().expect("Invalid u32");
                             let second_index: u32 = fields[1].parse().expect("Invalid u32");
                             expr = loc!(

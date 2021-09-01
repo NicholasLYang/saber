@@ -12,8 +12,8 @@ fn get_u32(ptr: usize, mem: &Memory) -> Result<u32> {
         let mem_slice = mem
             .data_unchecked()
             .get(ptr..)
-            .ok_or(Trap::new("pointer/length out of bounds"))?;
-        Ok(((mem_slice[0] as u32) << 0)
+            .ok_or_else(|| Trap::new("pointer/length out of bounds"))?;
+        Ok((mem_slice[0] as u32)
             + ((mem_slice[1] as u32) << 8)
             + ((mem_slice[2] as u32) << 16)
             + ((mem_slice[3] as u32) << 24))
@@ -25,7 +25,7 @@ fn set_u32(ptr: usize, num: u32, mem: &Memory) -> Result<(), Trap> {
     unsafe {
         mem.data_unchecked_mut()
             .get_mut(ptr..)
-            .ok_or(Trap::new("failed to access memory"))?
+            .ok_or_else(|| Trap::new("failed to access memory"))?
             .write_u32::<LittleEndian>(num)
             .map_err(|_| Trap::new("Unable to write to memory"))
     }
@@ -116,24 +116,24 @@ fn dealloc(
     runtime_types: &HashMap<usize, Vec<bool>>,
 ) -> Result<(), Trap> {
     let ref_count_ptr = ptr + 4;
-    let ref_count = get_u32(ref_count_ptr, &mem)?;
-    set_u32(ref_count_ptr, ref_count - 1, &mem)?;
+    let ref_count = get_u32(ref_count_ptr, mem)?;
+    set_u32(ref_count_ptr, ref_count - 1, mem)?;
 
     if ref_count == 1 {
         // Remove allocated flag
-        set_u32(ptr as usize, get_u32(ptr, &mem)? - 1, &mem)?;
-        let type_id = get_u32(ptr + 8, &mem)? as usize;
+        set_u32(ptr as usize, get_u32(ptr, mem)? - 1, mem)?;
+        let type_id = get_u32(ptr + 8, mem)? as usize;
 
         if type_id as i32 == BOX_ARRAY_ID {
-            let len = get_u32(ptr + 16, &mem)? as usize;
+            let len = get_u32(ptr + 16, mem)? as usize;
             for idx in 0..len {
-                dealloc(&mem, ptr + 16 + (idx * 4), runtime_types)?;
+                dealloc(mem, ptr + 16 + (idx * 4), runtime_types)?;
             }
         } else if let Some(struct_info) = runtime_types.get(&type_id) {
             for (idx, is_ref) in struct_info.iter().enumerate() {
                 if *is_ref {
-                    let field_ptr = get_u32(ptr + 3 + (idx * 4), &mem)?;
-                    dealloc(&mem, field_ptr as usize, runtime_types)?;
+                    let field_ptr = get_u32(ptr + 3 + (idx * 4), mem)?;
+                    dealloc(mem, field_ptr as usize, runtime_types)?;
                 }
             }
         }
