@@ -497,6 +497,17 @@ impl TypeChecker {
                 ))
                 .map(|t| *t),
             TypeSig::Empty => Ok(self.builtin_types.unit),
+            TypeSig::Tuple(type_sigs) => {
+                Ok(if type_sigs.len() == 1 {
+                    self.lookup_type_sig(&type_sigs[0])?
+                } else {
+                    let mut types = Vec::new();
+                    for sig in type_sigs {
+                        types.push(self.lookup_type_sig(sig)?);
+                    }
+                    self.type_arena.alloc(Type::Tuple(types))
+                })
+            }
             TypeSig::Arrow(param_sigs, return_sig) => {
                 let param_types = if param_sigs.len() == 1 {
                     self.lookup_type_sig(&param_sigs[0])?
@@ -897,15 +908,17 @@ impl TypeChecker {
                 let lhs_type = typed_lhs.inner.get_type();
                 let rhs_type = typed_rhs.inner.get_type();
                 match self.op(&op, lhs_type, rhs_type) {
-                    Some(op_type) => Ok(Loc {
-                        location,
-                        inner: ExprT::BinOp {
-                            op,
-                            lhs: Box::new(typed_lhs),
-                            rhs: Box::new(typed_rhs),
-                            type_: op_type,
-                        },
-                    }),
+                    Some(op_type) => {
+                        Ok(Loc {
+                            location,
+                            inner: ExprT::BinOp {
+                                op,
+                                lhs: Box::new(typed_lhs),
+                                rhs: Box::new(typed_rhs),
+                                type_: op_type,
+                            },
+                        })
+                    },
                     None => {
                         let lhs_type = type_to_string(
                             &self.name_table,
@@ -1057,12 +1070,19 @@ impl TypeChecker {
                                 None
                             };
                             self.unify_or_err(params_type, typed_args.inner.get_type(), location)?;
+
+                            let params_count = match &self.type_arena[params_type] {
+                                Type::Tuple(entries) => entries.len(),
+                                _ => 1
+                            };
+
                             return Ok(Loc {
                                 location,
                                 inner: ExprT::DirectCall {
                                     callee: func_index,
                                     captures_index,
                                     args: Box::new(typed_args),
+                                    params_count,
                                     type_: return_type,
                                 },
                             });
@@ -1081,6 +1101,12 @@ impl TypeChecker {
                     }
                     _ => return Err(loc!(TypeError::CalleeNotFunction, location)),
                 };
+
+                let params_count = match &self.type_arena[params_type] {
+                    Type::Tuple(entries) => entries.len(),
+                    _ => 1
+                };
+
                 let args_type = typed_args.inner.get_type();
                 self.unify_or_err(params_type, args_type, typed_args.location)?;
                 Ok(Loc {
@@ -1089,6 +1115,7 @@ impl TypeChecker {
                         callee: Box::new(typed_callee),
                         args: Box::new(typed_args),
                         type_: return_type,
+                        params_count,
                     },
                 })
             }
@@ -1255,6 +1282,13 @@ impl TypeChecker {
         }
     }
 
+    // fn tuple_call(&mut self, callee: Loc<ExprT>, args_tuple: Loc<ExprT>) -> Result<Loc<ExprT>, Loc<TypeError>> {
+    //     ExprT::IndirectCall {
+    //         callee: Box::new(callee),
+    //         args:
+    //     }
+    // }
+
     fn get_field_in_type(
         &self,
         record_type_id: TypeId,
@@ -1328,6 +1362,17 @@ impl TypeChecker {
                     None
                 }
             }
+            Op::TupleCall => {
+                if let Type::Arrow(params_type, return_type) = self.type_arena[lhs_type] {
+                    if self.unify_or_err(params_type, rhs_type, LocationRange(0, 0)).is_err() {
+                        return None;
+                    }
+
+                    Some(return_type)
+                } else {
+                    None
+                }
+            }
         }
     }
 
@@ -1386,7 +1431,11 @@ impl TypeChecker {
                 }
             }
             (Type::Tuple(t1), Type::Tuple(t2)) => {
-                if let Some(types) = self.unify_type_vectors(t1, t2) {
+                if t1.len() == 1 {
+                    self.unify(t1[0], type_id2)
+                } else if t2.len() == 1 {
+                    self.unify(type_id1, t2[0])
+                } else if let Some(types) = self.unify_type_vectors(t1, t2) {
                     let id = self.type_arena.alloc(Type::Tuple(types));
                     Some(id)
                 } else {

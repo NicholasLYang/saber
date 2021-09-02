@@ -53,6 +53,7 @@ pub enum Token {
     DivEqual,
     Times,
     TimesEqual,
+    Hash,
     Arrow,
     FatArrow,
     Slash,
@@ -110,6 +111,7 @@ impl Display for TokenDiscriminants {
                 TokenDiscriminants::DivEqual => "/=",
                 TokenDiscriminants::Times => "*",
                 TokenDiscriminants::TimesEqual => "*=",
+                TokenDiscriminants::Hash => "#",
                 TokenDiscriminants::FatArrow => "=>",
                 TokenDiscriminants::Arrow => "->",
                 TokenDiscriminants::Slash => "\\",
@@ -392,6 +394,7 @@ impl<'input> Iterator for Lexer<'input> {
                     Token::Colon,
                     LocationRange(start_index, end_index)
                 ))),
+                '#' => Some(Ok(loc!(Token::Hash, LocationRange(start_index, end_index)))),
                 '+' => Some(self.lookahead_match(start_index, Token::PlusEqual, Token::Plus, '=')),
                 '-' => match self.lookahead {
                     Some((_, '>')) => {

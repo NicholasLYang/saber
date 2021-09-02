@@ -527,7 +527,40 @@ impl CodeGenerator {
                 }
                 Ok(opcodes)
             }
-            _ => self.generate_expr(args),
+            _ => {
+                let mut opcodes = self.generate_expr(args)?;
+                opcodes.push(OpCode::SetGlobal(0));
+
+                let field_types = match &self.type_arena[args.inner.get_type()] {
+                    Type::Tuple(field_types) => {
+                        field_types
+                    }
+                    ty => {
+                        unreachable!()
+                    }
+                };
+
+                for (index, field_type) in field_types.iter().enumerate() {
+                    opcodes.push(OpCode::GetGlobal(0));
+                    let field_wasm_type = self
+                        .generate_wasm_type(*field_type, args.location)?
+                        .unwrap_or(WasmType::Empty);
+                    // Account for type_id
+                    let field_loc = index + 1;
+                    let offset = 4 * field_loc;
+                    let load_code = match field_wasm_type {
+                        WasmType::i32 => OpCode::I32Load(2, offset as u32),
+                        WasmType::f32 => OpCode::F32Load(2, offset as u32),
+                        WasmType::Empty => OpCode::Drop,
+                        _ => {
+                            return Err(GenerationError::NotReachable);
+                        }
+                    };
+                    opcodes.push(load_code);
+                }
+
+                Ok(opcodes)
+            },
         }
     }
 
@@ -572,6 +605,7 @@ impl CodeGenerator {
             ExprT::DirectCall {
                 callee,
                 captures_index,
+                params_count,
                 args,
                 type_: _,
             } => {
@@ -592,13 +626,18 @@ impl CodeGenerator {
                 } else {
                     Vec::new()
                 };
-                opcodes.append(&mut self.generate_func_args(args)?);
+                if *params_count == 1 {
+                    opcodes.append(&mut self.generate_expr(args)?);
+                } else {
+                    opcodes.append(&mut self.generate_func_args(args)?);
+                }
                 opcodes.push(OpCode::Call((*callee).try_into().unwrap()));
                 Ok(opcodes)
             }
             ExprT::IndirectCall {
                 callee,
                 args,
+                params_count,
                 type_,
             } => {
                 let args_wasm_type =
@@ -619,7 +658,13 @@ impl CodeGenerator {
                 opcodes.push(OpCode::SetGlobal(1));
                 opcodes.push(OpCode::GetGlobal(1));
                 opcodes.push(OpCode::I32Load(2, 8));
-                opcodes.append(&mut self.generate_expr(args)?);
+
+                if *params_count == 1 {
+                    opcodes.append(&mut self.generate_expr(args)?);
+                } else {
+                    opcodes.append(&mut self.generate_func_args(args)?);
+                }
+
                 opcodes.push(OpCode::GetGlobal(1));
                 opcodes.push(OpCode::I32Load(2, 4));
                 opcodes.push(OpCode::CallIndirect(type_sig_index.try_into().unwrap()));

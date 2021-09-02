@@ -245,6 +245,7 @@ pub fn run_code(program: SaberProgram) -> Result<()> {
             print_char.into(),
         ],
     )?;
+
     let main = instance
         .get_func("main")
         .expect("No main function")

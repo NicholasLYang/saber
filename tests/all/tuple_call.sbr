@@ -1,0 +1,25 @@
+let add = (a: int, b: int, s: string) => {
+  printString(s);
+  a + b
+}
+
+let add2 = (triple: (int, int, string)) => {
+  add(triple)
+}
+
+let main = () => {
+  let args = (cond: bool): (int, int, string) => {
+    if cond {
+      (10, 12, "foo")
+    } else {
+      (32, 18, "foo")
+    }
+  }
+
+  //printInt(add(args(true)));
+  //printInt(add(args(false)));
+
+  printInt(add2(args(true)));
+}
+
+export main;

@@ -203,11 +203,13 @@ pub enum ExprT {
         callee: FunctionId,
         captures_index: Option<usize>,
         args: Box<Loc<ExprT>>,
+        params_count: usize,
         type_: TypeId,
     },
     IndirectCall {
         callee: Box<Loc<ExprT>>,
         args: Box<Loc<ExprT>>,
+        params_count: usize,
         type_: TypeId,
     },
     Tuple(Vec<Loc<ExprT>>, TypeId),
@@ -271,6 +273,7 @@ pub enum Op {
     LessEqual,
     LogicalAnd,
     LogicalOr,
+    TupleCall
 }
 
 impl fmt::Display for Op {
@@ -291,6 +294,7 @@ impl fmt::Display for Op {
                 Op::LessEqual => "<=",
                 Op::LogicalAnd => "&&",
                 Op::LogicalOr => "||",
+                Op::TupleCall => "#",
             }
         )
     }
@@ -351,6 +355,7 @@ pub enum TypeSig {
     Array(Box<Loc<TypeSig>>),
     Name(Name),
     Empty,
+    Tuple(Vec<Loc<TypeSig>>),
     Arrow(Vec<Loc<TypeSig>>, Box<Loc<TypeSig>>),
 }
 
@@ -410,12 +415,14 @@ impl ExprT {
             ExprT::DirectCall {
                 callee: _,
                 captures_index: _,
+                params_count: _,
                 args: _,
                 type_,
             } => *type_,
             ExprT::IndirectCall {
                 callee: _,
                 args: _,
+                params_count: _,
                 type_,
             } => *type_,
             ExprT::Block {
