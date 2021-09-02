@@ -1292,17 +1292,10 @@ impl TypeChecker {
             Op::Plus | Op::Minus | Op::Times | Op::Div => {
                 let lhs_type = get_final_type(&self.type_arena, lhs_type);
                 let rhs_type = get_final_type(&self.type_arena, rhs_type);
-                println!("LHS TYPE: {}", type_to_string(&self.name_table, &self.type_arena, lhs_type));
-                println!("RHS TYPE: {}", type_to_string(&self.name_table, &self.type_arena, rhs_type));
 
-                let both_are_int = lhs_type == self.builtin_types.int && rhs_type == self.builtin_types.int;
-                let both_are_float = lhs_type == self.builtin_types.float && rhs_type == self.builtin_types.float;
-                let one_is_float_one_is_int = lhs_type == self.builtin_types.float || rhs_type == self.builtin_types.float && lhs_type == self.builtin_types.int || rhs_type == self.builtin_types.int;
-
-
-                if both_are_int {
+                if self.is_unifiable(lhs_type, self.builtin_types.int) && self.is_unifiable(rhs_type, self.builtin_types.int) {
                     Some(self.builtin_types.int)
-                } else if both_are_float || one_is_float_one_is_int {
+                } else if self.is_unifiable(lhs_type, self.builtin_types.float) || self.is_unifiable(rhs_type, self.builtin_types.float) {
                     Some(self.builtin_types.float)
                 } else {
                     None
