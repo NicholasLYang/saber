@@ -1,0 +1,9 @@
+let foo = (a) => {
+  return a + 10.5;
+}
+
+let main = () => {
+  printInt(foo(25));
+}
+
+export main;

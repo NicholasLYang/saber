@@ -82,6 +82,7 @@ fn compile_saber_file<T: Write>(file_name: &str, debug_output: Option<T>) -> Res
     let lexer = lexer::Lexer::new(&contents);
     let mut parser = Parser::new(lexer);
     let program = parser.program().expect("Error parsing");
+
     for error in &program.errors {
         let diagnostic: Diagnostic<()> = error.into();
         term::emit(&mut writer.lock(), &config, &file, &diagnostic).unwrap();
@@ -90,6 +91,7 @@ fn compile_saber_file<T: Write>(file_name: &str, debug_output: Option<T>) -> Res
     let mut typechecker = TypeChecker::new(parser.get_name_table());
     let program_t = typechecker.check_program(program);
     let runtime_types = typechecker.generate_runtime_type_info();
+
     for error in &program_t.errors {
         let diagnostic: Diagnostic<()> = error.into();
         term::emit(&mut writer.lock(), &config, &file, &diagnostic).unwrap();

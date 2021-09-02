@@ -29,11 +29,6 @@ pub enum GenerationError {
     FunctionNotDefined { name: String },
     #[error("Cannot have () as type")]
     EmptyType,
-    #[error("{location}: Could not infer type var {type_:?}")]
-    CouldNotInfer {
-        location: LocationRange,
-        type_: Type,
-    },
     #[error("Code Generator: Not implemented yet! {reason}")]
     NotImplemented { reason: &'static str },
     #[error("Code Generator: Not reachable")]
@@ -378,12 +373,9 @@ impl CodeGenerator {
             | Type::Array(_)
             | Type::Arrow(_, _)
             | Type::Record(_, _)
-            | Type::Tuple(_) => Ok(Some(WasmType::i32)),
+            | Type::Tuple(_)
+            | Type::Var(_) => Ok(Some(WasmType::i32)),
             Type::Solved(type_id) => self.generate_wasm_type(*type_id, location),
-            Type::Var(id) => Err(GenerationError::CouldNotInfer {
-                location,
-                type_: Type::Var(*id),
-            }),
         }
     }
 

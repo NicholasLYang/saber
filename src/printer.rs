@@ -42,7 +42,7 @@ pub fn type_to_string(name_table: &NameTable, type_table: &Arena<Type>, type_id:
             format!("{} => {}", params_str, return_str)
         }
         Type::Solved(type_id) => format!(
-            "Solved as {}",
+            "{}",
             type_to_string(name_table, type_table, *type_id)
         ),
     }

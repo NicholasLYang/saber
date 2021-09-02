@@ -6,7 +6,7 @@ use crate::lexer::LocationRange;
 use crate::loc;
 use crate::printer::type_to_string;
 use crate::symbol_table::{FunctionInfo, SymbolTable};
-use crate::utils::NameTable;
+use crate::utils::{NameTable, get_final_type};
 use id_arena::Arena;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -263,7 +263,7 @@ impl TypeChecker {
                 }
             }
         }
-        if let Err(err) = self.read_functions(&program.stmts) {
+        if let Err(err) = self.hoist_functions(&program.stmts) {
             errors.push(err);
         }
         let mut typed_stmts = Vec::new();
@@ -287,8 +287,8 @@ impl TypeChecker {
         }
     }
 
-    // Reads functions defined in this block
-    fn read_functions(&mut self, stmts: &[Loc<Stmt>]) -> Result<(), Loc<TypeError>> {
+    // Reads functions defined in this block and inserts them into symbol table.
+    fn hoist_functions(&mut self, stmts: &[Loc<Stmt>]) -> Result<(), Loc<TypeError>> {
         for stmt in stmts {
             if let Stmt::Function(func_name, params, return_type_sig, _) = &stmt.inner {
                 let params_type = self.pat(params)?;
@@ -336,11 +336,13 @@ impl TypeChecker {
         else_block: Option<Box<Loc<Expr>>>,
     ) -> Result<Loc<StmtT>, Loc<TypeError>> {
         let cond_t = self.expr(cond)?;
+
         self.unify_or_err(
             cond_t.inner.get_type(),
             self.builtin_types.bool,
             cond_t.location,
         )?;
+
         let then_t = self.expr(then_block)?;
         let else_t = if let Some(else_block) = else_block {
             let else_t = self.expr(*else_block)?;
@@ -353,11 +355,13 @@ impl TypeChecker {
         } else {
             None
         };
+
         self.unify_or_err(
             then_t.inner.get_type(),
             self.builtin_types.unit,
             then_t.location,
         )?;
+
         Ok(loc!(
             StmtT::If {
                 cond: Box::new(cond_t),
@@ -1090,7 +1094,7 @@ impl TypeChecker {
             }
             Expr::Block(stmts, end_expr) => {
                 let scope_index = self.symbol_table.push_scope();
-                self.read_functions(&stmts)?;
+                self.hoist_functions(&stmts)?;
                 let mut typed_stmts = Vec::new();
                 for stmt in stmts {
                     typed_stmts.append(&mut self.stmt(stmt)?);
@@ -1286,14 +1290,19 @@ impl TypeChecker {
     fn op(&mut self, op: &Op, lhs_type: TypeId, rhs_type: TypeId) -> Option<TypeId> {
         match op {
             Op::Plus | Op::Minus | Op::Times | Op::Div => {
-                let lhs_is_unifiable = self.is_unifiable(lhs_type, self.builtin_types.int);
-                let rhs_is_unifiable = self.is_unifiable(rhs_type, self.builtin_types.int);
-                if lhs_is_unifiable && rhs_is_unifiable {
+                let lhs_type = get_final_type(&self.type_arena, lhs_type);
+                let rhs_type = get_final_type(&self.type_arena, rhs_type);
+                println!("LHS TYPE: {}", type_to_string(&self.name_table, &self.type_arena, lhs_type));
+                println!("RHS TYPE: {}", type_to_string(&self.name_table, &self.type_arena, rhs_type));
+
+                let both_are_int = lhs_type == self.builtin_types.int && rhs_type == self.builtin_types.int;
+                let both_are_float = lhs_type == self.builtin_types.float && rhs_type == self.builtin_types.float;
+                let one_is_float_one_is_int = lhs_type == self.builtin_types.float || rhs_type == self.builtin_types.float && lhs_type == self.builtin_types.int || rhs_type == self.builtin_types.int;
+
+
+                if both_are_int {
                     Some(self.builtin_types.int)
-                } else if lhs_type == self.builtin_types.float && rhs_type == self.builtin_types.int ||
-                    lhs_type == self.builtin_types.int && rhs_type == self.builtin_types.float ||
-                    lhs_type == self.builtin_types.float && rhs_type == self.builtin_types.float
-                {
+                } else if both_are_float || one_is_float_one_is_int {
                     Some(self.builtin_types.float)
                 } else {
                     None
