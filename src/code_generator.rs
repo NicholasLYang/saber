@@ -535,7 +535,7 @@ impl CodeGenerator {
                     Type::Tuple(field_types) => {
                         field_types
                     }
-                    ty => {
+                    _ => {
                         unreachable!()
                     }
                 };

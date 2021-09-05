@@ -1362,17 +1362,6 @@ impl TypeChecker {
                     None
                 }
             }
-            Op::TupleCall => {
-                if let Type::Arrow(params_type, return_type) = self.type_arena[lhs_type] {
-                    if self.unify_or_err(params_type, rhs_type, LocationRange(0, 0)).is_err() {
-                        return None;
-                    }
-
-                    Some(return_type)
-                } else {
-                    None
-                }
-            }
         }
     }
 

@@ -95,7 +95,6 @@ pub fn token_to_string(name_table: &NameTable, token: &Token) -> String {
         Token::DivEqual => "/=".to_string(),
         Token::Times => "*".to_string(),
         Token::TimesEqual => "*=".to_string(),
-        Token::Hash => "#".to_string(),
         Token::FatArrow => "=>".to_string(),
         Token::Arrow => "->".to_string(),
         Token::Slash => "\\".to_string(),

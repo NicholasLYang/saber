@@ -222,7 +222,6 @@ impl<'input> Parser<'input> {
             Token::LessEqual => Ok(Op::LessEqual),
             Token::AmpAmp => Ok(Op::LogicalAnd),
             Token::PipePipe => Ok(Op::LogicalOr),
-            Token::Hash => Ok(Op::TupleCall),
             _ => Err(loc!(ParseError::NotReachable, span.location)),
         }
     }
@@ -712,32 +711,14 @@ impl<'input> Parser<'input> {
     }
 
     fn multiplication(&mut self) -> Result<Loc<Expr>, Loc<ParseError>> {
-        let mut expr = self.tuple_call()?;
+        let mut expr = self.unary()?;
         while let Some(span) = self.match_multiple(vec![Token::Times, Token::Div])? {
             let op = self.lookup_op_token(span)?;
-            let rhs = self.tuple_call()?;
-            expr = Loc {
-                location: LocationRange(expr.location.0, rhs.location.1),
-                inner: Expr::BinOp {
-                    op,
-                    lhs: Box::new(expr),
-                    rhs: Box::new(rhs),
-                },
-            }
-        }
-        Ok(expr)
-    }
-    // (foo # bar) + 5
-    // foo # (bar + 5)
-    // foo # (bar # baz)
-    fn tuple_call(&mut self) -> Result<Loc<Expr>, Loc<ParseError>> {
-        let mut expr = self.unary()?;
-        if self.match_one(TokenDiscriminants::Hash)?.is_some() {
             let rhs = self.unary()?;
             expr = Loc {
                 location: LocationRange(expr.location.0, rhs.location.1),
                 inner: Expr::BinOp {
-                    op: Op::TupleCall,
+                    op,
                     lhs: Box::new(expr),
                     rhs: Box::new(rhs),
                 },

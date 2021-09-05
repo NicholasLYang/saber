@@ -273,7 +273,6 @@ pub enum Op {
     LessEqual,
     LogicalAnd,
     LogicalOr,
-    TupleCall
 }
 
 impl fmt::Display for Op {
@@ -294,7 +293,6 @@ impl fmt::Display for Op {
                 Op::LessEqual => "<=",
                 Op::LogicalAnd => "&&",
                 Op::LogicalOr => "||",
-                Op::TupleCall => "#",
             }
         )
     }
