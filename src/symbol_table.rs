@@ -1,5 +1,6 @@
 use crate::ast::{Name, TypeId};
 use im::hashmap::HashMap;
+use std::error::Error;
 
 pub type ScopeId = usize;
 
@@ -110,6 +111,14 @@ impl SymbolTable {
         self.scopes.push(new_scope);
         self.current_scope = self.scopes.len() - 1;
         self.current_scope
+    }
+
+    pub fn execute_in_scope<F, E: Error>(&mut self, scope: ScopeId, fun: F) -> Result<(), E> where F: Fn() -> Result<(), E> {
+        let old_scope = self.current_scope;
+        self.current_scope = scope;
+        fun()?;
+        self.current_scope = old_scope;
+        Ok(())
     }
 
     pub fn swap_scope(&mut self, scope: ScopeId) -> ScopeId {

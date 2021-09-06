@@ -11,13 +11,14 @@ use crate::symbol_table::{
 use crate::typechecker::TypeChecker;
 use crate::utils::{get_final_type, NameTable};
 use crate::wasm::{
-    ExportEntry, ExternalKind, FunctionBody, FunctionType, ImportEntry, ImportKind, LocalEntry,
+    ExportEntry, ExternalKind, FunctionBody, FunctionType, LocalEntry,
     OpCode, ProgramData, WasmType,
 };
 use id_arena::Arena;
 use std::convert::TryInto;
 use thiserror::Error;
-use walrus::{FunctionId, LocalFunction, Module, ModuleConfig, ValType};
+use walrus::{ModuleConfig, Module, ValType, FunctionId, LocalFunction, FunctionBuilder, GlobalId, InitExpr, MemoryId, TableId, InstrSeqBuilder};
+use walrus::ir::{StoreKind, MemArg, LoadKind, BinaryOp};
 
 // Indicates value is an array of primitives
 pub static ARRAY_ID: i32 = -1;
@@ -52,18 +53,44 @@ pub enum GenerationError {
     NotAFunction { location: LocationRange },
 }
 
+struct CurrentFunctionContext {
+    return_type: Option<ValType>,
+    id: usize,
+}
+
 pub struct CodeGenerator {
     symbol_table: SymbolTable,
     name_table: NameTable,
     builtin_types: BuiltInTypes,
     type_arena: Arena<Type>,
     module: Module,
-    current_function: Option<LocalFunction>,
+    memory_id: MemoryId,
+    current_function: Option<CurrentFunctionContext>,
     // All the generated code
     program_data: ProgramData,
-    return_type: Option<WasmType>,
     current_function_id: Option<usize>,
     default_functions: DefaultFunctions,
+    function_table: TableId,
+    global_variables: GlobalVariables,
+}
+
+// Global variables that we use almost as registers.
+// Probably not ideal or necessary, so TODO: remove
+struct GlobalVariables {
+    g_i32: GlobalId,
+    g_f32: GlobalId
+}
+
+impl GlobalVariables {
+    pub fn new(module: &mut Module) -> Self {
+        let g_i32 = module.globals.add_local(ValType::I32, true, InitExpr::Value(walrus::ir::Value::I32(0)));
+        let g_f32 = module.globals.add_local(ValType::F32, true, InitExpr::Value(walrus::ir::Value::F32(0.0)));
+
+        Self {
+            g_i32,
+            g_f32
+        }
+    }
 }
 
 pub struct DefaultFunctions {
@@ -78,32 +105,8 @@ pub struct DefaultFunctions {
     print_char: FunctionId,
 }
 
-type Result<T> = std::result::Result<T, GenerationError>;
-
-impl CodeGenerator {
-    pub fn new(typechecker: TypeChecker) -> Self {
-        let expr_func_count = typechecker.get_expr_func_index();
-        let (symbol_table, name_table, type_table, builtin_types) = typechecker.get_tables();
-        let func_count = symbol_table.get_function_index();
-        let config = ModuleConfig::new();
-        let mut module = Module::with_config(config);
-        let default_functions = Self::create_default_functions(&mut module);
-
-        CodeGenerator {
-            symbol_table,
-            name_table,
-            builtin_types,
-            type_arena: type_table,
-            module,
-            default_functions,
-            current_function: None,
-            program_data: ProgramData::new(func_count, expr_func_count),
-            return_type: None,
-            current_function_id: None,
-        }
-    }
-
-    fn create_default_functions(module: &mut Module) -> DefaultFunctions {
+impl DefaultFunctions {
+    pub fn new(module: &mut Module) -> Self {
         let alloc_type = module.types.add(&[ValType::I32], &[ValType::I32]);
         let (alloc, _) = module.add_import_func("std", "alloc", alloc_type);
 
@@ -116,6 +119,7 @@ impl CodeGenerator {
         let streq_type = module
             .types
             .add(&[ValType::I32, ValType::I32], &[ValType::I32]);
+
         let (streq, _) = module.add_import_func("std", "streq", streq_type);
 
         let print_heap_type = module.types.add(&[], &[]);
@@ -131,9 +135,10 @@ impl CodeGenerator {
         let (print_string, _) = module.add_import_func("std", "printString", print_string_type);
 
         let print_char_type = module.types.add(&[ValType::I32], &[]);
+
         let (print_char, _) = module.add_import_func("std", "printChar", print_char_type);
 
-        DefaultFunctions {
+        Self {
             alloc,
             dealloc,
             clone,
@@ -143,6 +148,35 @@ impl CodeGenerator {
             print_float,
             print_string,
             print_char,
+        }
+    }
+}
+
+type Result<T> = std::result::Result<T, GenerationError>;
+
+impl CodeGenerator {
+    pub fn new(typechecker: TypeChecker) -> Self {
+        let expr_func_count = typechecker.get_expr_func_index();
+        let (symbol_table, name_table, type_table, builtin_types) = typechecker.get_tables();
+        let func_count = symbol_table.get_function_index();
+        let config = ModuleConfig::new();
+        let mut module = Module::with_config(config);
+        let memory_id = module.memories.add_local(false, 1, None);
+        let default_functions = DefaultFunctions::new(&mut module);
+        let function_table = module.tables.insert(1, None, ValType::Funcref);
+
+        CodeGenerator {
+            symbol_table,
+            name_table,
+            builtin_types,
+            type_arena: type_table,
+            module,
+            memory_id,
+            function_table,
+            default_functions,
+            current_function: None,
+            global_variables: GlobalVariables::new(&mut module),
+            program_data: ProgramData::new(func_count, expr_func_count),
         }
     }
 
@@ -172,12 +206,12 @@ impl CodeGenerator {
                 )?;
 
                 if let Some(FunctionInfo {
-                    func_index,
-                    func_scope: _,
-                    params_type: _,
-                    return_type: _,
-                    is_top_level: _,
-                }) = &sym_entry.function_info
+                                func_index,
+                                func_scope: _,
+                                params_type: _,
+                                return_type: _,
+                                is_top_level: _,
+                            }) = &sym_entry.function_info
                 {
                     let entry = ExportEntry {
                         field_str: name_str.as_bytes().to_vec(),
@@ -230,32 +264,33 @@ impl CodeGenerator {
         Ok(())
     }
 
-    fn generate_function_type(
+    fn generate_function_builder(
         &mut self,
-        return_type: &Option<WasmType>,
+        return_type: &[ValType],
         params: &[(Name, TypeId)],
         location: LocationRange,
-    ) -> Result<FunctionType> {
-        let mut wasm_param_types = vec![WasmType::i32];
+    ) -> Result<FunctionBuilder> {
+        // First type is always i32 for pointer to closure
+        let mut wasm_param_types = vec![ValType::I32];
+
         for (_, param_type) in params {
             let wasm_type = self
                 .generate_wasm_type(*param_type, location)?
                 .ok_or(GenerationError::EmptyType)?;
             wasm_param_types.push(wasm_type);
         }
-        Ok(FunctionType {
-            param_types: wasm_param_types,
-            return_type: *return_type,
-        })
+
+        Ok(FunctionBuilder::new(&mut self.module.types, &wasm_param_types, return_type))
     }
 
     fn generate_function_body(
         &mut self,
+        fn_builder: &mut FunctionBuilder,
         body: &Loc<ExprT>,
         local_variables: &[TypeId],
         param_count: usize,
     ) -> Result<FunctionBody> {
-        let mut code = self.generate_expr(body)?;
+        self.generate_expr(fn_builder,body)?
         let mut local_entries = Vec::new();
         // We want to generate only the locals not params so we skip
         // to after the params
@@ -285,8 +320,8 @@ impl CodeGenerator {
         &self,
         arg_type: TypeId,
         location: LocationRange,
-        mut initial_args: Vec<WasmType>,
-    ) -> Result<Vec<WasmType>> {
+        mut initial_args: Vec<ValType>,
+    ) -> Result<Vec<ValType>> {
         if let Type::Tuple(elems) = &self.type_arena[arg_type] {
             let mut wasm_types = initial_args;
             for elem in elems {
@@ -309,22 +344,22 @@ impl CodeGenerator {
         &self,
         sbr_type: TypeId,
         location: LocationRange,
-    ) -> Result<Option<WasmType>> {
+    ) -> Result<Option<ValType>> {
         match &self.type_arena[sbr_type] {
             Type::Unit => Ok(None),
-            Type::Int | Type::Bool | Type::Char => Ok(Some(WasmType::i32)),
-            Type::Float => Ok(Some(WasmType::f32)),
+            Type::Int | Type::Bool | Type::Char => Ok(Some(ValType::I32)),
+            Type::Float => Ok(Some(ValType::F32)),
             Type::String
             | Type::Array(_)
             | Type::Arrow(_, _)
             | Type::Record(_, _)
             | Type::Tuple(_)
-            | Type::Var(_) => Ok(Some(WasmType::i32)),
+            | Type::Var(_) => Ok(Some(ValType::I32)),
             Type::Solved(type_id) => self.generate_wasm_type(*type_id, location),
         }
     }
 
-    fn generate_stmt(&mut self, stmt: &Loc<StmtT>, is_last: bool) -> Result<Vec<OpCode>> {
+    fn generate_stmt(&mut self, fn_body: &mut InstrSeqBuilder, stmt: &Loc<StmtT>, is_last: bool) -> Result<Vec<OpCode>> {
         match &stmt.inner {
             StmtT::Expr(expr) => {
                 let mut opcodes = self.generate_expr(expr)?;
@@ -334,18 +369,18 @@ impl CodeGenerator {
                 }
                 if is_last {
                     // If the return type is empty, we can safely return
-                    if let Some(WasmType::Empty) = self.return_type {
-                        Ok(opcodes)
+                    if self.return_type.is_none() {
+
                     } else {
                         // But otherwise, we need to push on an unreachable to assure
                         // wasm that we're not going to just end without returning
                         // anything.
                         // TODO: Actually check if we're returning nothing
                         opcodes.push(OpCode::Unreachable);
-                        Ok(opcodes)
+
                     }
                 } else {
-                    Ok(opcodes)
+
                 }
             }
             StmtT::Return(expr) => {
@@ -354,7 +389,7 @@ impl CodeGenerator {
                 } else {
                     let mut opcodes = self.generate_expr(expr)?;
                     opcodes.push(OpCode::Return);
-                    Ok(opcodes)
+
                 }
             }
             StmtT::Let(name, expr) => {
@@ -362,7 +397,7 @@ impl CodeGenerator {
                 let var_index = entry.var_index;
                 let mut opcodes = self.generate_expr(expr)?;
                 opcodes.push(OpCode::SetLocal(var_index.try_into().unwrap()));
-                Ok(opcodes)
+
             }
             StmtT::Break => Ok(vec![OpCode::Br(1)]),
             StmtT::Loop(block) => {
@@ -371,7 +406,7 @@ impl CodeGenerator {
                 // Break to loop
                 opcodes.push(OpCode::Br(0));
                 opcodes.push(OpCode::End);
-                Ok(opcodes)
+
             }
             StmtT::If {
                 cond,
@@ -387,45 +422,9 @@ impl CodeGenerator {
                     opcodes.append(&mut self.generate_expr(else_block)?);
                 }
                 opcodes.push(OpCode::End);
-                Ok(opcodes)
+
             }
             _ => todo!(),
-        }
-    }
-
-    fn promote_types(
-        &self,
-        type1: TypeId,
-        type2: TypeId,
-        ops1: &mut Vec<OpCode>,
-        ops2: &mut Vec<OpCode>,
-        location: LocationRange,
-    ) -> Result<TypeId> {
-        if type1 == type2 {
-            return Ok(type1);
-        }
-        match (&self.type_arena[type1], &self.type_arena[type2]) {
-            (Type::Int, Type::Float) => {
-                ops1.push(OpCode::F32ConvertI32);
-                Ok(self.builtin_types.float)
-            }
-            (Type::Float, Type::Int) => {
-                ops2.push(OpCode::F32ConvertI32);
-                Ok(self.builtin_types.float)
-            }
-            (Type::Solved(t1), _) => self.promote_types(*t1, type2, ops1, ops2, location),
-            (_, Type::Solved(t2)) => self.promote_types(type1, *t2, ops1, ops2, location),
-            (t1, t2) => {
-                if t1 == t2 {
-                    Ok(type1)
-                } else {
-                    Err(GenerationError::CannotConvert {
-                        t1: type_to_string(&self.name_table, &self.type_arena, type1),
-                        t2: type_to_string(&self.name_table, &self.type_arena, type2),
-                        location,
-                    })
-                }
-            }
         }
     }
 
@@ -436,16 +435,16 @@ impl CodeGenerator {
                 for entry in entries {
                     opcodes.append(&mut self.generate_expr(entry)?)
                 }
-                Ok(opcodes)
+
             }
             _ => self.generate_expr(args),
         }
     }
 
-    fn generate_expr(&mut self, expr: &Loc<ExprT>) -> Result<Vec<OpCode>> {
+    fn generate_expr(&mut self, fn_body: &mut InstrSeqBuilder, expr: &Loc<ExprT>) -> Result<()> {
         match &expr.inner {
             ExprT::Asgn { lhs, rhs, type_: _ } => {
-                let mut opcodes = self.generate_expr(rhs)?;
+                self.generate_expr(fn_body, rhs)?;
                 opcodes.push(OpCode::SetGlobal(0));
                 let index = self.symbol_table.codegen_lookup(lhs.inner.ident).unwrap();
                 if lhs.inner.accessors.is_empty() {
@@ -465,7 +464,7 @@ impl CodeGenerator {
                 }
                 Ok(opcodes)
             }
-            ExprT::Primary { value, type_: _ } => self.generate_primary(value),
+            ExprT::Primary { value, type_: _ } => self.generate_primary(fn_builder, value),
             ExprT::Var { name, type_: _ } => {
                 let index = self.symbol_table.codegen_lookup(*name).unwrap();
                 let opcodes = match index {
@@ -512,30 +511,34 @@ impl CodeGenerator {
                 args,
                 type_,
             } => {
-                let args_wasm_type =
-                    self.get_args_type(args.inner.get_type(), args.location, vec![WasmType::i32])?;
-                let return_wasm_type = self.generate_wasm_type(*type_, expr.location)?;
-                let func_type = FunctionType {
-                    param_types: args_wasm_type,
-                    return_type: return_wasm_type,
+                let arg_types =
+                    self.get_args_type(args.inner.get_type(), args.location, vec![ValType::I32])?;
+
+                let return_types = if let Some(ty) = self.generate_wasm_type(*type_, expr.location)? {
+                    vec![ty]
+                } else {
+                    Vec::new()
                 };
-                let type_sig_index = self.program_data.insert_type(func_type);
+
+                let type_sig_id = self.module.types.add(&arg_types, &return_types);
                 // We have a GetGlobal here because global #1 always needs to
                 // be restored to its original value after CallIndirect
                 //
                 // Why global #1? Well we don't have that same discipline with global #0
                 // And we need to use it across generate_expr which is tricky
-                let mut opcodes = vec![OpCode::GetGlobal(1)];
-                opcodes.append(&mut self.generate_expr(callee)?);
-                opcodes.push(OpCode::SetGlobal(1));
-                opcodes.push(OpCode::GetGlobal(1));
-                opcodes.push(OpCode::I32Load(2, 8));
-                opcodes.append(&mut self.generate_expr(args)?);
-                opcodes.push(OpCode::GetGlobal(1));
-                opcodes.push(OpCode::I32Load(2, 4));
-                opcodes.push(OpCode::CallIndirect(type_sig_index.try_into().unwrap()));
-                opcodes.push(OpCode::SetGlobal(1));
-                Ok(opcodes)
+                let callee_id = self.module.locals.add(ValType::I32);
+                self.generate_expr(fn_builder, callee)?;
+                fn_body
+                    .local_set(callee_id)
+                    // Loading pointer to closure as first argument
+                    .load(self.memory_id, LoadKind::I32, MemArg { align: 2, offset: 8 });
+                self.generate_expr(fn_builder, args)?;
+                // Loading function id as second argument
+                fn_body
+                    .load(self.memory_id, LoadKind::I32, MemArg { align: 2, offset: 4})
+                    .call_indirect(type_sig_id, self.function_table);
+
+                Ok(())
             }
             ExprT::Index {
                 lhs,
@@ -585,12 +588,10 @@ impl CodeGenerator {
                 entries,
                 entry_type,
                 type_: _,
-            } => self.generate_array(entries, *entry_type, expr.location),
+            } => self.generate_array(fn_body, entries, *entry_type, expr.location),
             ExprT::Tuple(elems, type_id) => {
-                if elems.is_empty() {
-                    Ok(Vec::new())
-                } else {
-                    self.generate_tuple(elems.iter(), elems.len(), *type_id, expr.location)
+                if !elems.is_empty() {
+                    self.generate_tuple(fn_body, elems.iter(), elems.len(), *type_id, expr.location);
                 }
             }
             ExprT::Block {
@@ -602,10 +603,10 @@ impl CodeGenerator {
                 let old_scope = self.symbol_table.swap_scope(*scope_index);
                 let mut opcodes = Vec::new();
                 for stmt in stmts {
-                    opcodes.append(&mut self.generate_stmt(stmt, false)?);
+                    self.generate_stmt(fn_body, stmt, false)?;
                 }
                 if let Some(expr) = end_expr {
-                    opcodes.append(&mut self.generate_expr(expr)?);
+                    self.generate_expr(fn_body, expr)?;
                 }
                 let entries = self.symbol_table.get_scope_entries(*scope_index);
                 for (_, entry) in entries {
@@ -615,23 +616,18 @@ impl CodeGenerator {
                     }
                 }
                 self.symbol_table.swap_scope(old_scope);
-                Ok(opcodes)
             }
             ExprT::If(cond, then_block, else_block, type_) => {
                 // Start with the cond opcodes
-                let mut opcodes = self.generate_expr(cond)?;
-                opcodes.push(OpCode::If);
-                opcodes.push(OpCode::Type(
-                    self.generate_wasm_type(*type_, expr.location)?
-                        .unwrap_or(WasmType::Empty),
-                ));
-                opcodes.append(&mut self.generate_expr(then_block)?);
-                if let Some(else_block) = else_block {
-                    opcodes.push(OpCode::Else);
-                    opcodes.append(&mut self.generate_expr(else_block)?);
-                }
-                opcodes.push(OpCode::End);
-                Ok(opcodes)
+                self.generate_expr(fn_builder, cond)?;
+                let if_type = self.generate_wasm_type(*type_, expr.location)?;
+                func_body().if_else(if_type.into(), |then_builder| {
+                    self.generate_expr(then_builder, then_block).unwrap()
+                }, |else_builder| {
+                    if let Some(else_block) = else_block {
+                        self.generate_expr(else_builder, else_block).unwrap();
+                    }
+                });
             }
             ExprT::BinOp {
                 op,
@@ -639,80 +635,75 @@ impl CodeGenerator {
                 rhs,
                 type_,
             } => {
-                let mut lhs_ops = self.generate_expr(lhs)?;
-                let lhs_type = lhs.inner.get_type();
-                let mut rhs_ops = self.generate_expr(rhs)?;
-                let rhs_type = rhs.inner.get_type();
-
-                let promoted_type = self.promote_types(
-                    lhs_type,
-                    rhs_type,
-                    &mut lhs_ops,
-                    &mut rhs_ops,
-                    expr.location,
-                )?;
-                lhs_ops.append(&mut rhs_ops);
-                let opcode = self.generate_operator(op, &self.type_arena[*type_], promoted_type)?;
-                lhs_ops.push(opcode);
-                Ok(lhs_ops)
+                self.generate_expr(fn_builder, lhs)?;
+                self.generate_expr(fn_builder, rhs)?;
+                self.generate_operator(fn_builder, op, lhs.inner.get_type())?;
             }
             ExprT::UnaryOp { op, rhs, type_: _ } => match op {
                 UnaryOp::Minus => {
-                    let mut opcodes = vec![OpCode::I32Const(0)];
-                    opcodes.append(&mut self.generate_expr(rhs)?);
-                    opcodes.push(OpCode::I32Sub);
-                    Ok(opcodes)
+                    fn_body.i32_const(0);
+                    self.generate_expr(fn_builder, rhs)?;
+                    fn_body.binop(BinaryOp::I32Sub);
                 }
                 UnaryOp::Not => {
-                    let mut opcodes = self.generate_expr(rhs)?;
-                    opcodes.push(OpCode::I32Const(-1));
-                    opcodes.push(OpCode::I32Xor);
-                    Ok(opcodes)
+                    self.generate_expr(fn_builder, rhs)?;
+                    fn_body.i32_const(-1).binop(BinaryOp::I32Xor);
                 }
             },
             ExprT::TupleField(lhs, index, type_) => {
-                self.generate_tuple_field(lhs, *index as u32, type_)
+                self.generate_tuple_field(fn_builder, lhs, *index as u32, type_);
             }
             ExprT::Record {
                 name: _,
                 fields,
                 type_,
             } => self.generate_tuple(
+                fn_body,
                 fields.iter().map(|(_, expr)| expr),
                 fields.len(),
                 *type_,
                 expr.location,
             ),
         }
+
+        Ok(())
     }
 
     fn generate_tuple_field(
         &mut self,
+        fn_body: &mut InstrSeqBuilder,
         lhs: &Loc<ExprT>,
         index: u32,
         type_: &TypeId,
-    ) -> Result<Vec<OpCode>> {
-        let mut opcodes = self.generate_expr(&*lhs)?;
-        let field_wasm_type = self
-            .generate_wasm_type(*type_, lhs.location)?
-            .unwrap_or(WasmType::Empty);
-        // Account for type_id
-        let field_loc = index + 1;
-        let offset = 4 * field_loc;
-        let load_code = match field_wasm_type {
-            WasmType::i32 => OpCode::I32Load(2, offset),
-            WasmType::f32 => OpCode::F32Load(2, offset),
-            WasmType::Empty => OpCode::Drop,
-            _ => {
-                return Err(GenerationError::NotReachable);
-            }
-        };
-        opcodes.push(load_code);
-        Ok(opcodes)
+    ) -> Result<()> {
+        self.generate_expr(fn_body, &*lhs)?;
+        let mut ty = self
+            .generate_wasm_type(*type_, lhs.location)?;
+
+        // In the future we'll have tuples expand to more than one type
+        if let Some(field_wasm_type) = ty {
+            // Account for type_id
+            let field_loc = index + 1;
+            let offset = 4 * field_loc;
+            let load_kind = match field_wasm_type {
+                ValType::I32 => LoadKind::I32,
+                ValType::F32 => LoadKind::F32,
+                _ => {
+                    return Err(GenerationError::NotReachable);
+                }
+            };
+
+            fn_body.func_body().load(self.memory_id, load_kind, MemArg { offset, align: 2});
+        } else {
+            fn_body.drop();
+        }
+
+        Ok(())
     }
 
     fn generate_array(
         &mut self,
+        fn_body: &mut InstrSeqBuilder,
         entries: &[Loc<ExprT>],
         entry_type: TypeId,
         location: LocationRange,
@@ -745,46 +736,47 @@ impl CodeGenerator {
         opcodes.push(OpCode::I32Store(2, offset));
         offset += 4;
         for entry in entries {
-            opcodes.append(&mut self.generate_allocated_expr(entry, offset)?);
+            self.generate_allocated_expr(fn_body, entry, offset)?;
             offset += 4;
         }
         Ok(opcodes)
     }
 
     // Generate allocated expression for array or tuple
-    fn generate_allocated_expr(&mut self, expr: &Loc<ExprT>, offset: u32) -> Result<Vec<OpCode>> {
-        // No, you're not seeing double. We push
-        // the value of Global 0 to "save" it
-        // in case it gets mutated when we generate
-        // the struct.
-        // We push it again as an address for store
-        let mut opcodes = vec![OpCode::GetGlobal(0), OpCode::GetGlobal(0)];
-        opcodes.append(&mut self.generate_expr(expr)?);
-        let wasm_type = self
-            .generate_wasm_type(expr.inner.get_type(), expr.location)?
-            .unwrap_or(WasmType::Empty);
-        let store_code = match wasm_type {
-            // Alignment of 2, offset of 0
-            WasmType::i32 => OpCode::I32Store(2, offset),
-            WasmType::f32 => OpCode::F32Store(2, offset),
-            _ => {
-                return Err(GenerationError::NotImplemented {
-                    reason: "Cannot generate code to store types other than i32 and f32",
-                })
-            }
-        };
-        opcodes.push(store_code);
-        opcodes.push(OpCode::SetGlobal(0));
-        Ok(opcodes)
+    fn generate_allocated_expr(&mut self, fn_body: &mut InstrSeqBuilder, expr: &Loc<ExprT>, offset: u32) -> Result<()> {
+        self.generate_expr(fn_body, expr)?;
+
+        let wasm_types = self
+            .generate_wasm_type(expr.inner.get_type(), expr.location)?;
+
+        for (idx, ty) in wasm_types.into_iter().enumerate() {
+            let store_kind = match ty {
+                // Alignment of 2, offset of 0
+                ValType::I32 => {
+                    StoreKind::I32
+                },
+                ValType::F32 => StoreKind::F32,
+                _ => {
+                    return Err(GenerationError::NotImplemented {
+                        reason: "Cannot generate code to store types other than i32 and f32",
+                    })
+                }
+            };
+
+            fn_body.store(self.memory_id, store_kind, MemArg { align: 5, offset: (idx * 4) as u32 });
+        }
+
+        Ok(())
     }
 
     fn generate_tuple<'a, I>(
         &mut self,
+        fn_body: &mut InstrSeqBuilder,
         fields: I,
         length: usize,
         type_id: TypeId,
         location: LocationRange,
-    ) -> Result<Vec<OpCode>>
+    ) -> Result<()>
     where
         I: Iterator<Item = &'a Loc<ExprT>>,
     {
@@ -798,41 +790,43 @@ impl CodeGenerator {
         }
         // Size of record in bytes
         let record_size: i32 = (4 * length).try_into().unwrap();
-        let mut opcodes = vec![OpCode::I32Const(record_size), OpCode::Call(ALLOC_INDEX)];
-        // Save pointer to block at global 0
-        opcodes.push(OpCode::SetGlobal(0));
 
-        // Set type_id
-        // Get ptr to record
-        opcodes.push(OpCode::GetGlobal(0));
+        let block_ptr = self.module.locals.add(ValType::I32);
+
+        fn_body.i32_const(record_size).call(self.default_functions.alloc).local_set(block_ptr);
+
         // TODO: Add proper error handling for too many types.
         let final_type_id = get_final_type(&self.type_arena, type_id);
-        opcodes.push(OpCode::I32Const(final_type_id.index().try_into().unwrap()));
-        // *ptr = type_id
-        opcodes.push(OpCode::I32Store(2, offset));
+
+        fn_body
+            .i32_const(final_type_id.index().try_into().unwrap())
+            .store(self.memory_id, StoreKind::I32, MemArg { align: 2, offset });
+
         offset += 4;
         // We need to write the struct to memory. This consists of
         // looping through entries, generating the opcodes and
         // storing them in the heap
         for expr in fields {
-            opcodes.append(&mut self.generate_allocated_expr(expr, offset)?);
+            self.generate_allocated_expr(fn_builder, expr, offset)?;
             offset += 4;
         }
-        // return heap_ptr - sizeof(record)
-        opcodes.push(OpCode::GetGlobal(0));
-        Ok(opcodes)
+
+        fn_body.local_get(block_ptr);
+
+        Ok(())
     }
 
-    fn generate_primary(&self, value: &Value) -> Result<Vec<OpCode>> {
+    fn generate_primary(&mut self, fn_builder: &mut InstrSeqBuilder, value: &Value) -> Result<()> {
+        let mut fn_body = fn_builder.func_body();
         match value {
-            Value::Float(f) => Ok(vec![OpCode::F32Const(*f)]),
-            Value::Integer(i) => Ok(vec![OpCode::I32Const(*i)]),
+            Value::Float(f) => {
+                fn_body.f32_const(*f);
+            },
+            Value::Integer(i) => {
+                fn_body.i32_const(*i);
+            },
             Value::Bool(b) => {
-                if *b {
-                    Ok(vec![OpCode::I32Const(1)])
-                } else {
-                    Ok(vec![OpCode::I32Const(0)])
-                }
+                fn_body.i32_const(*b as i32);
             }
             Value::String(s) => {
                 let mut bytes = s.as_bytes().to_vec();
@@ -844,67 +838,75 @@ impl CodeGenerator {
                 let buffer_length: i32 = bytes.len().try_into().expect("String is too long");
 
                 let mut offset = 0;
-                // We tack on 8 more bytes for the length and type_id
-                let mut opcodes = vec![
-                    OpCode::I32Const(buffer_length + 8),
-                    OpCode::Call(ALLOC_INDEX),
-                ];
-                opcodes.push(OpCode::SetGlobal(0));
+
+                let str_ptr = self.module.locals.add(ValType::I32);
+
+                fn_body
+                    // We tack on 8 more bytes for the length and type_id
+                    .i32_const(buffer_length + 8)
+                    .call(self.default_functions.alloc)
+                    .local_set(str_ptr);
 
                 // Set type_id
                 // Get ptr to record
-                opcodes.push(OpCode::GetGlobal(0));
-                opcodes.push(OpCode::I32Const(
-                    self.builtin_types.string.index().try_into().unwrap(),
-                ));
-                // *ptr = type_id
-                opcodes.push(OpCode::I32Store(2, offset));
-
-                // Pop on global 0 as return value (ptr to type id)
-                // This may seem weird, as intuitively we'd want the
-                // pointer to be to the start of the string
-                // but for GC reasons we want it to point to type id
-                opcodes.push(OpCode::GetGlobal(0));
+                fn_body
+                    .local_get(str_ptr)
+                    .i32_const(self.builtin_types.string.index().try_into().unwrap())
+                    .store(self.memory_id, StoreKind::I32 { atomic: false }, MemArg { align: 5, offset });
 
                 offset += 4;
 
-                opcodes.push(OpCode::GetGlobal(0));
-                opcodes.push(OpCode::I32Const(raw_str_length));
-                opcodes.push(OpCode::I32Store(2, offset));
+                fn_body
+                    .local_get(str_ptr)
+                    .i32_const(raw_str_length)
+                    .store(self.memory_id, StoreKind::I32 { atomic: false }, MemArg { align: 5, offset });
+
                 for b in bytes.chunks_exact(4) {
                     offset += 4;
                     let packed_bytes = (b[0] as u32)
                         + ((b[1] as u32) << 8)
                         + ((b[2] as u32) << 16)
                         + ((b[3] as u32) << 24);
-                    opcodes.push(OpCode::GetGlobal(0));
-                    opcodes.push(OpCode::I32Const(packed_bytes as i32));
-                    opcodes.push(OpCode::I32Store(2, offset))
+
+                    fn_body
+                        .local_get(str_ptr)
+                        .i32_const(packed_bytes as i32)
+                        .store(self.memory_id, StoreKind::I32 { atomic: false }, MemArg { align: 5, offset });
                 }
-                Ok(opcodes)
             }
         }
+
+        Ok(())
     }
 
-    fn generate_operator(&self, op: &Op, result_type: &Type, input_type: TypeId) -> Result<OpCode> {
-        match (op, &self.type_arena[input_type], result_type) {
-            (Op::Plus, Type::Int, Type::Int) => Ok(OpCode::I32Add),
-            (Op::Minus, Type::Int, Type::Int) => Ok(OpCode::I32Sub),
-            (Op::Plus, Type::Float, Type::Float) => Ok(OpCode::F32Add),
-            (Op::Minus, Type::Float, Type::Float) => Ok(OpCode::F32Sub),
-            (Op::Times, Type::Int, Type::Int) => Ok(OpCode::I32Mul),
-            (Op::Div, Type::Int, Type::Int) => Ok(OpCode::I32Div),
-            (Op::Times, Type::Float, Type::Float) => Ok(OpCode::F32Mul),
-            (Op::Div, Type::Float, Type::Float) => Ok(OpCode::F32Div),
-            (Op::Less, Type::Int, Type::Bool) => Ok(OpCode::I32LessSigned),
-            (Op::Greater, Type::Int, Type::Bool) => Ok(OpCode::I32GreaterSigned),
-            (Op::GreaterEqual, Type::Int, Type::Bool) => Ok(OpCode::I32GreaterEqSigned),
-            (Op::EqualEqual, Type::Int, Type::Bool) => Ok(OpCode::I32Eq),
-            (Op::EqualEqual, Type::String, Type::Bool) => Ok(OpCode::Call(STREQ_INDEX)),
-            (op, _, _) => Err(GenerationError::InvalidOperator {
-                op: op.clone(),
-                input_type: type_to_string(&self.name_table, &self.type_arena, input_type),
-            }),
-        }
+    fn generate_operator(&self, fn_builder: &mut InstrSeqBuilder, op: &Op, input_type: TypeId) -> Result<()> {
+        let op = match (op, &self.type_arena[input_type]) {
+            (Op::Plus, Type::Int) => BinaryOp::I32Add,
+            (Op::Minus, Type::Int) => BinaryOp::I32Sub,
+            (Op::Plus, Type::Float) => BinaryOp::F32Add,
+            (Op::Minus, Type::Float) => BinaryOp::F32Sub,
+            (Op::Times, Type::Int) => BinaryOp::I32Mul,
+            (Op::Div, Type::Int) => BinaryOp::I32DivS,
+            (Op::Times, Type::Float) => BinaryOp::F32Mul,
+            (Op::Div, Type::Float) => BinaryOp::F32Div,
+            (Op::Less, Type::Int) => BinaryOp::I32LtS,
+            (Op::Greater, Type::Int) => BinaryOp::I32GtS,
+            (Op::GreaterEqual, Type::Int) => BinaryOp::I32GeS,
+            (Op::EqualEqual, Type::Int) => BinaryOp::I32Eq,
+            (Op::EqualEqual, Type::String) => {
+                fn_builder.func_body().call(self.default_functions.streq);
+                return Ok(());
+            },
+            (op, _) => {
+                return Err(GenerationError::InvalidOperator {
+                    op: op.clone(),
+                    input_type: type_to_string(&self.name_table, &self.type_arena, input_type),
+                })
+            },
+        };
+
+        fn_builder.func_body().binop(op);
+
+        Ok(())
     }
 }

@@ -1300,7 +1300,7 @@ impl TypeChecker {
                 {
                     Some(self.builtin_types.int)
                 } else if self.is_unifiable(lhs_type, self.builtin_types.float)
-                    || self.is_unifiable(rhs_type, self.builtin_types.float)
+                    && self.is_unifiable(rhs_type, self.builtin_types.float)
                 {
                     Some(self.builtin_types.float)
                 } else {
@@ -1360,6 +1360,7 @@ impl TypeChecker {
         if type_id1 == type_id2 {
             return Some(type_id1);
         }
+
         // TODO: Figure out how bad these clones are perf-wise
         let type1 = &self.type_arena[type_id1].clone();
         let type2 = &self.type_arena[type_id2].clone();
@@ -1426,8 +1427,6 @@ impl TypeChecker {
                 }
             }
             (Type::Int, Type::Int) => Some(self.builtin_types.int),
-            (Type::Int, Type::Bool) => Some(type_id1),
-            (Type::Bool, Type::Int) => Some(type_id2),
             (Type::Var(_), _) => {
                 self.type_arena[type_id1] = Type::Solved(type_id2);
                 Some(type_id2)
