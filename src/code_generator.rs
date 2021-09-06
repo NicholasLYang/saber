@@ -11,14 +11,19 @@ use crate::symbol_table::{
 use crate::typechecker::TypeChecker;
 use crate::utils::{get_final_type, NameTable};
 use crate::wasm::{
-    ExportEntry, ExternalKind, FunctionBody, FunctionType, LocalEntry,
-    OpCode, ProgramData, WasmType,
+    ExportEntry, ExternalKind, FunctionBody, FunctionType, LocalEntry, OpCode, ProgramData,
+    WasmType,
 };
 use id_arena::Arena;
+use im::HashMap;
 use std::convert::TryInto;
 use thiserror::Error;
-use walrus::{ModuleConfig, Module, ValType, FunctionId, LocalFunction, FunctionBuilder, GlobalId, InitExpr, MemoryId, TableId, InstrSeqBuilder};
-use walrus::ir::{StoreKind, MemArg, LoadKind, BinaryOp, ExtendedLoad};
+use walrus::ir::{BinaryOp, ExtendedLoad, LoadKind, MemArg, StoreKind};
+use walrus::{
+    FunctionBuilder, FunctionId, GlobalId, InitExpr, InstrSeqBuilder, LocalFunction, LocalId,
+    MemoryId, Module, ModuleConfig, TableId, ValType,
+};
+use wasmtime::Val;
 
 // Indicates value is an array of primitives
 pub static ARRAY_ID: i32 = -1;
@@ -53,8 +58,9 @@ pub enum GenerationError {
     NotAFunction { location: LocationRange },
 }
 
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 struct CurrentFunctionContext {
+    params: HashMap<Name, LocalId>,
     return_type: Option<ValType>,
     id: usize,
 }
@@ -79,18 +85,23 @@ pub struct CodeGenerator {
 // Probably not ideal or necessary, so TODO: remove
 struct GlobalVariables {
     g_i32: GlobalId,
-    g_f32: GlobalId
+    g_f32: GlobalId,
 }
 
 impl GlobalVariables {
     pub fn new(module: &mut Module) -> Self {
-        let g_i32 = module.globals.add_local(ValType::I32, true, InitExpr::Value(walrus::ir::Value::I32(0)));
-        let g_f32 = module.globals.add_local(ValType::F32, true, InitExpr::Value(walrus::ir::Value::F32(0.0)));
+        let g_i32 = module.globals.add_local(
+            ValType::I32,
+            true,
+            InitExpr::Value(walrus::ir::Value::I32(0)),
+        );
+        let g_f32 = module.globals.add_local(
+            ValType::F32,
+            true,
+            InitExpr::Value(walrus::ir::Value::F32(0.0)),
+        );
 
-        Self {
-            g_i32,
-            g_f32
-        }
+        Self { g_i32, g_f32 }
     }
 }
 
@@ -207,12 +218,12 @@ impl CodeGenerator {
                 )?;
 
                 if let Some(FunctionInfo {
-                                func_index,
-                                func_scope: _,
-                                params_type: _,
-                                return_type: _,
-                                is_top_level: _,
-                            }) = &sym_entry.function_info
+                    func_index,
+                    func_scope: _,
+                    params_type: _,
+                    return_type: _,
+                    is_top_level: _,
+                }) = &sym_entry.function_info
                 {
                     let entry = ExportEntry {
                         field_str: name_str.as_bytes().to_vec(),
@@ -241,11 +252,17 @@ impl CodeGenerator {
         function: Function,
         location: LocationRange,
     ) -> Result<()> {
+        let entry = self.symbol_table.lookup_name_in_scope(name, scope).unwrap();
+        let id = entry.func_index.unwrap();
+        let params = self.generate_function_params(params);
         let old_func = self.current_function;
-        self.current_function = Some(func_index);
+        self.current_function = Some(CurrentFunctionContext {
+            id,
+            params,
+            return_type: self.generate_wasm_type(self.symbol_table.functions[id].return_type),
+        });
         let old_scope = self.symbol_table.swap_scope(function.scope_index);
-        let return_type = self.generate_wasm_type(function.return_type, location)?;
-        self.return_type = return_type;
+
         let function_type =
             self.generate_function_type(&return_type, &function.params, location)?;
         let function_body = self.generate_function_body(
@@ -265,6 +282,18 @@ impl CodeGenerator {
         Ok(())
     }
 
+    fn generate_function_params(&mut self, params: &[(Name, TypeId)]) -> HashMap<Name, LocalId> {
+        let mut wasm_params = HashMap::new();
+        for (param_name, param_type) in params {
+            if let Some(wasm_type) = self.generate_wasm_type(*param_type) {
+                let id = self.module.locals.add(wasm_type);
+                wasm_params.insert(*param_name, id);
+            }
+        }
+
+        wasm_params
+    }
+
     fn generate_function_builder(
         &mut self,
         return_type: &[ValType],
@@ -281,7 +310,11 @@ impl CodeGenerator {
             wasm_param_types.push(wasm_type);
         }
 
-        Ok(FunctionBuilder::new(&mut self.module.types, &wasm_param_types, return_type))
+        Ok(FunctionBuilder::new(
+            &mut self.module.types,
+            &wasm_param_types,
+            return_type,
+        ))
     }
 
     fn generate_function_body(
@@ -291,7 +324,8 @@ impl CodeGenerator {
         local_variables: &[TypeId],
         param_count: usize,
     ) -> Result<FunctionBody> {
-        self.generate_expr(fn_builder,body)?
+        self.generate_expr(fn_builder, body)?;
+
         let mut local_entries = Vec::new();
         // We want to generate only the locals not params so we skip
         // to after the params
@@ -341,26 +375,27 @@ impl CodeGenerator {
         }
     }
 
-    fn generate_wasm_type(
-        &self,
-        sbr_type: TypeId,
-        location: LocationRange,
-    ) -> Result<Option<ValType>> {
+    fn generate_wasm_type(&self, sbr_type: TypeId) -> Option<ValType> {
         match &self.type_arena[sbr_type] {
-            Type::Unit => Ok(None),
-            Type::Int | Type::Bool | Type::Char => Ok(Some(ValType::I32)),
-            Type::Float => Ok(Some(ValType::F32)),
+            Type::Unit => None,
+            Type::Int | Type::Bool | Type::Char => Some(ValType::I32),
+            Type::Float => Some(ValType::F32),
             Type::String
             | Type::Array(_)
             | Type::Arrow(_, _)
             | Type::Record(_, _)
             | Type::Tuple(_)
-            | Type::Var(_) => Ok(Some(ValType::I32)),
-            Type::Solved(type_id) => self.generate_wasm_type(*type_id, location),
+            | Type::Var(_) => Some(ValType::I32),
+            Type::Solved(type_id) => self.generate_wasm_type(*type_id),
         }
     }
 
-    fn generate_stmt(&mut self, fn_body: &mut InstrSeqBuilder, stmt: &Loc<StmtT>, is_last: bool) -> Result<Vec<OpCode>> {
+    fn generate_stmt(
+        &mut self,
+        fn_body: &mut InstrSeqBuilder,
+        stmt: &Loc<StmtT>,
+        is_last: bool,
+    ) -> Result<Vec<OpCode>> {
         match &stmt.inner {
             StmtT::Expr(expr) => {
                 let mut opcodes = self.generate_expr(expr)?;
@@ -371,17 +406,14 @@ impl CodeGenerator {
                 if is_last {
                     // If the return type is empty, we can safely return
                     if self.return_type.is_none() {
-
                     } else {
                         // But otherwise, we need to push on an unreachable to assure
                         // wasm that we're not going to just end without returning
                         // anything.
                         // TODO: Actually check if we're returning nothing
                         opcodes.push(OpCode::Unreachable);
-
                     }
                 } else {
-
                 }
             }
             StmtT::Return(expr) => {
@@ -390,7 +422,6 @@ impl CodeGenerator {
                 } else {
                     let mut opcodes = self.generate_expr(expr)?;
                     opcodes.push(OpCode::Return);
-
                 }
             }
             StmtT::Let(name, expr) => {
@@ -398,7 +429,6 @@ impl CodeGenerator {
                 let var_index = entry.var_index;
                 let mut opcodes = self.generate_expr(expr)?;
                 opcodes.push(OpCode::SetLocal(var_index.try_into().unwrap()));
-
             }
             StmtT::Break => Ok(vec![OpCode::Br(1)]),
             StmtT::Loop(block) => {
@@ -407,7 +437,6 @@ impl CodeGenerator {
                 // Break to loop
                 opcodes.push(OpCode::Br(0));
                 opcodes.push(OpCode::End);
-
             }
             StmtT::If {
                 cond,
@@ -423,7 +452,6 @@ impl CodeGenerator {
                     opcodes.append(&mut self.generate_expr(else_block)?);
                 }
                 opcodes.push(OpCode::End);
-
             }
             _ => todo!(),
         }
@@ -436,7 +464,6 @@ impl CodeGenerator {
                 for entry in entries {
                     opcodes.append(&mut self.generate_expr(entry)?)
                 }
-
             }
             _ => self.generate_expr(args),
         }
@@ -488,10 +515,10 @@ impl CodeGenerator {
             } => {
                 // NOTE: This is super brittle again, as if we add another runtime function,
                 // we'll need to change this comparison
-                let mut opcodes = if let Some(cf) = self.current_function {
+                if let Some(cf) = self.current_function {
                     if *callee <= PRINT_CHAR_INDEX.try_into().unwrap() {
                         Vec::new()
-                    } else if cf == *callee
+                    } else if cf.id == *callee
                     // Basically if we're in a recursive function situation
                     {
                         vec![OpCode::GetLocal(0)]
@@ -515,7 +542,7 @@ impl CodeGenerator {
                 let arg_types =
                     self.get_args_type(args.inner.get_type(), args.location, vec![ValType::I32])?;
 
-                let return_types = if let Some(ty) = self.generate_wasm_type(*type_, expr.location)? {
+                let return_types = if let Some(ty) = self.generate_wasm_type(*type_) {
                     vec![ty]
                 } else {
                     Vec::new()
@@ -532,11 +559,25 @@ impl CodeGenerator {
                 fn_body
                     .local_set(callee_id)
                     // Loading pointer to closure as first argument
-                    .load(self.memory_id, LoadKind::I32, MemArg { align: 2, offset: 8 });
+                    .load(
+                        self.memory_id,
+                        LoadKind::I32,
+                        MemArg {
+                            align: 2,
+                            offset: 8,
+                        },
+                    );
                 self.generate_expr(fn_builder, args)?;
                 // Loading function id as second argument
                 fn_body
-                    .load(self.memory_id, LoadKind::I32, MemArg { align: 2, offset: 4})
+                    .load(
+                        self.memory_id,
+                        LoadKind::I32,
+                        MemArg {
+                            align: 2,
+                            offset: 4,
+                        },
+                    )
                     .call_indirect(type_sig_id, self.function_table);
             }
 
@@ -556,28 +597,49 @@ impl CodeGenerator {
                 fn_body
                     .local_get(index_id)
                     .local_get(lhs_id)
-                    .load(self.memory_id, LoadKind::I32, MemArg { align: 2, offset: 4 })
+                    .load(
+                        self.memory_id,
+                        LoadKind::I32,
+                        MemArg {
+                            align: 2,
+                            offset: 4,
+                        },
+                    )
                     .binop(BinaryOp::I32LtU)
-                    .if_else(None.into(), |then_builder| {
-                        then_builder.local_get(index_id);
-                        if !matches!(self.type_arena[lhs.inner.get_type()], Type::String) {
-                            then_builder.i32_const(4).binop(BinaryOp::I32Mul);
-                        }
-                        then_builder.local_get(lhs_id).binop(BinaryOp::I32Add).local_set(lhs_id);
-                    }, |else_builder| {
-                        // TODO: Handle out of bounds error
-                        else_builder.unreachable();
-                    });
+                    .if_else(
+                        None.into(),
+                        |then_builder| {
+                            then_builder.local_get(index_id);
+                            if !matches!(self.type_arena[lhs.inner.get_type()], Type::String) {
+                                then_builder.i32_const(4).binop(BinaryOp::I32Mul);
+                            }
+                            then_builder
+                                .local_get(lhs_id)
+                                .binop(BinaryOp::I32Add)
+                                .local_set(lhs_id);
+                        },
+                        |else_builder| {
+                            // TODO: Handle out of bounds error
+                            else_builder.unreachable();
+                        },
+                    );
 
                 let load_kind = if matches!(self.type_arena[lhs.inner.get_type()], Type::String) {
-                    LoadKind::I32_8 { kind: ExtendedLoad::ZeroExtend }
+                    LoadKind::I32_8 {
+                        kind: ExtendedLoad::ZeroExtend,
+                    }
                 } else {
                     LoadKind::I32
                 };
 
-                fn_body
-                    .local_get(lhs_id)
-                    .load(self.memory_id, load_kind, MemArg { align: 2, offset: 0 });
+                fn_body.local_get(lhs_id).load(
+                    self.memory_id,
+                    load_kind,
+                    MemArg {
+                        align: 2,
+                        offset: 0,
+                    },
+                );
             }
             ExprT::Array {
                 entries,
@@ -586,7 +648,13 @@ impl CodeGenerator {
             } => self.generate_array(fn_body, entries, *entry_type, expr.location),
             ExprT::Tuple(elems, type_id) => {
                 if !elems.is_empty() {
-                    self.generate_tuple(fn_body, elems.iter(), elems.len(), *type_id, expr.location);
+                    self.generate_tuple(
+                        fn_body,
+                        elems.iter(),
+                        elems.len(),
+                        *type_id,
+                        expr.location,
+                    );
                 }
             }
             ExprT::Block {
@@ -615,14 +683,16 @@ impl CodeGenerator {
             ExprT::If(cond, then_block, else_block, type_) => {
                 // Start with the cond opcodes
                 self.generate_expr(fn_builder, cond)?;
-                let if_type = self.generate_wasm_type(*type_, expr.location)?;
-                func_body().if_else(if_type.into(), |then_builder| {
-                    self.generate_expr(then_builder, then_block).unwrap()
-                }, |else_builder| {
-                    if let Some(else_block) = else_block {
-                        self.generate_expr(else_builder, else_block).unwrap();
-                    }
-                });
+                let if_type = self.generate_wasm_type(*type_);
+                func_body().if_else(
+                    if_type.into(),
+                    |then_builder| self.generate_expr(then_builder, then_block).unwrap(),
+                    |else_builder| {
+                        if let Some(else_block) = else_block {
+                            self.generate_expr(else_builder, else_block).unwrap();
+                        }
+                    },
+                );
             }
             ExprT::BinOp {
                 op,
@@ -672,8 +742,7 @@ impl CodeGenerator {
         type_: &TypeId,
     ) -> Result<()> {
         self.generate_expr(fn_body, &*lhs)?;
-        let mut ty = self
-            .generate_wasm_type(*type_, lhs.location)?;
+        let mut ty = self.generate_wasm_type(*type_);
 
         // In the future we'll have tuples expand to more than one type
         if let Some(field_wasm_type) = ty {
@@ -688,7 +757,9 @@ impl CodeGenerator {
                 }
             };
 
-            fn_body.func_body().load(self.memory_id, load_kind, MemArg { offset, align: 2});
+            fn_body
+                .func_body()
+                .load(self.memory_id, load_kind, MemArg { offset, align: 2 });
         } else {
             fn_body.drop();
         }
@@ -738,18 +809,18 @@ impl CodeGenerator {
     }
 
     // Generate allocated expression for array or tuple
-    fn generate_allocated_expr(&mut self, fn_body: &mut InstrSeqBuilder, expr: &Loc<ExprT>, offset: u32) -> Result<()> {
+    fn generate_allocated_expr(
+        &mut self,
+        fn_body: &mut InstrSeqBuilder,
+        expr: &Loc<ExprT>,
+        offset: u32,
+    ) -> Result<()> {
         self.generate_expr(fn_body, expr)?;
 
-        let wasm_types = self
-            .generate_wasm_type(expr.inner.get_type(), expr.location)?;
-
-        for (idx, ty) in wasm_types.into_iter().enumerate() {
+        if let Some(ty) = self.generate_wasm_type(expr.inner.get_type()) {
             let store_kind = match ty {
                 // Alignment of 2, offset of 0
-                ValType::I32 => {
-                    StoreKind::I32
-                },
+                ValType::I32 => StoreKind::I32,
                 ValType::F32 => StoreKind::F32,
                 _ => {
                     return Err(GenerationError::NotImplemented {
@@ -758,7 +829,16 @@ impl CodeGenerator {
                 }
             };
 
-            fn_body.store(self.memory_id, store_kind, MemArg { align: 5, offset: (idx * 4) as u32 });
+            fn_body.store(
+                self.memory_id,
+                store_kind,
+                MemArg {
+                    align: 5,
+                    offset: (idx * 4) as u32,
+                },
+            );
+        } else {
+            fn_body.drop();
         }
 
         Ok(())
@@ -788,7 +868,10 @@ impl CodeGenerator {
 
         let block_ptr = self.module.locals.add(ValType::I32);
 
-        fn_body.i32_const(record_size).call(self.default_functions.alloc).local_set(block_ptr);
+        fn_body
+            .i32_const(record_size)
+            .call(self.default_functions.alloc)
+            .local_set(block_ptr);
 
         // TODO: Add proper error handling for too many types.
         let final_type_id = get_final_type(&self.type_arena, type_id);
@@ -816,10 +899,10 @@ impl CodeGenerator {
         match value {
             Value::Float(f) => {
                 fn_body.f32_const(*f);
-            },
+            }
             Value::Integer(i) => {
                 fn_body.i32_const(*i);
-            },
+            }
             Value::Bool(b) => {
                 fn_body.i32_const(*b as i32);
             }
@@ -847,14 +930,19 @@ impl CodeGenerator {
                 fn_body
                     .local_get(str_ptr)
                     .i32_const(self.builtin_types.string.index().try_into().unwrap())
-                    .store(self.memory_id, StoreKind::I32 { atomic: false }, MemArg { align: 5, offset });
+                    .store(
+                        self.memory_id,
+                        StoreKind::I32 { atomic: false },
+                        MemArg { align: 5, offset },
+                    );
 
                 offset += 4;
 
-                fn_body
-                    .local_get(str_ptr)
-                    .i32_const(raw_str_length)
-                    .store(self.memory_id, StoreKind::I32 { atomic: false }, MemArg { align: 5, offset });
+                fn_body.local_get(str_ptr).i32_const(raw_str_length).store(
+                    self.memory_id,
+                    StoreKind::I32 { atomic: false },
+                    MemArg { align: 5, offset },
+                );
 
                 for b in bytes.chunks_exact(4) {
                     offset += 4;
@@ -866,7 +954,11 @@ impl CodeGenerator {
                     fn_body
                         .local_get(str_ptr)
                         .i32_const(packed_bytes as i32)
-                        .store(self.memory_id, StoreKind::I32 { atomic: false }, MemArg { align: 5, offset });
+                        .store(
+                            self.memory_id,
+                            StoreKind::I32 { atomic: false },
+                            MemArg { align: 5, offset },
+                        );
                 }
             }
         }
@@ -874,7 +966,12 @@ impl CodeGenerator {
         Ok(())
     }
 
-    fn generate_operator(&self, fn_builder: &mut InstrSeqBuilder, op: &Op, input_type: TypeId) -> Result<()> {
+    fn generate_operator(
+        &self,
+        fn_builder: &mut InstrSeqBuilder,
+        op: &Op,
+        input_type: TypeId,
+    ) -> Result<()> {
         let op = match (op, &self.type_arena[input_type]) {
             (Op::Plus, Type::Int) => BinaryOp::I32Add,
             (Op::Minus, Type::Int) => BinaryOp::I32Sub,
@@ -891,13 +988,13 @@ impl CodeGenerator {
             (Op::EqualEqual, Type::String) => {
                 fn_builder.func_body().call(self.default_functions.streq);
                 return Ok(());
-            },
+            }
             (op, _) => {
                 return Err(GenerationError::InvalidOperator {
                     op: op.clone(),
                     input_type: type_to_string(&self.name_table, &self.type_arena, input_type),
                 })
-            },
+            }
         };
 
         fn_builder.func_body().binop(op);

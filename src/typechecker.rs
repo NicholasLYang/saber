@@ -397,23 +397,17 @@ impl TypeChecker {
                 }
             }
             Stmt::Function(func_name, params, _, body) => {
-                let sym_entry = if let Some(entry) = self.symbol_table.lookup_name(func_name) {
-                    entry
-                } else {
-                    return Err(loc!(
+                let sym_entry = self.symbol_table.lookup_name(func_name).ok_or_else(|| {
+                    loc!(
                         TypeError::VarNotDefined {
                             name: self.name_table.get_str(&func_name).to_string(),
                         },
                         location
-                    ));
-                };
-                let func_info = sym_entry.function_info.as_ref().unwrap();
-                let func_index = func_info.func_index;
+                    )
+                })?;
+
                 let (function, captures) = self.function(func_name, params, *body)?;
                 self.functions.insert(func_index, loc!(function, location));
-
-                // If we have a return type, we're inside a function and need to have a captures struct.
-                // Otherwise we're at the top level and can ignore it (for now)
                 if self.return_type.is_some() {
                     Ok(vec![Loc {
                         location,
@@ -763,7 +757,7 @@ impl TypeChecker {
         name: Name,
         params: Pat,
         body: Loc<Expr>,
-    ) -> Result<(Function, TypeId), Loc<TypeError>> {
+    ) -> Result<(Function, Loc<ExprT>), Loc<TypeError>> {
         let entry = self.symbol_table.lookup_name(name).unwrap();
         let func_index = entry.func_index.unwrap();
         let func_info = &self.symbol_table.functions[func_index];
