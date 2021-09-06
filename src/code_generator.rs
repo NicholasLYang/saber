@@ -18,7 +18,7 @@ use id_arena::Arena;
 use std::convert::TryInto;
 use thiserror::Error;
 use walrus::{ModuleConfig, Module, ValType, FunctionId, LocalFunction, FunctionBuilder, GlobalId, InitExpr, MemoryId, TableId, InstrSeqBuilder};
-use walrus::ir::{StoreKind, MemArg, LoadKind, BinaryOp};
+use walrus::ir::{StoreKind, MemArg, LoadKind, BinaryOp, ExtendedLoad};
 
 // Indicates value is an array of primitives
 pub static ARRAY_ID: i32 = -1;
@@ -537,52 +537,46 @@ impl CodeGenerator {
                 fn_body
                     .load(self.memory_id, LoadKind::I32, MemArg { align: 2, offset: 4})
                     .call_indirect(type_sig_id, self.function_table);
-
-                Ok(())
             }
+
             ExprT::Index {
                 lhs,
                 index,
                 type_: _,
             } => {
-                // Push global 1 on stack to save it
-                let mut opcodes = vec![OpCode::GetGlobal(1)];
-                opcodes.append(&mut self.generate_expr(lhs)?);
-                opcodes.push(OpCode::SetGlobal(1));
-                opcodes.append(&mut self.generate_expr(index)?);
-                // Save index in global 0
-                opcodes.push(OpCode::SetGlobal(0));
-                // Get index
-                opcodes.push(OpCode::GetGlobal(0));
-                // Get lhs
-                opcodes.push(OpCode::GetGlobal(1));
-                // Load size
-                opcodes.push(OpCode::I32Load(0, 4));
-                // Check if index < size
-                opcodes.push(OpCode::I32LessUnsigned);
-                opcodes.push(OpCode::If);
-                opcodes.push(OpCode::Type(WasmType::Empty));
-                // Push on index
-                opcodes.push(OpCode::GetGlobal(0));
-                if !matches!(self.type_arena[lhs.inner.get_type()], Type::String) {
-                    opcodes.push(OpCode::I32Const(4));
-                    opcodes.push(OpCode::I32Mul);
-                }
-                // Push on lhs
-                opcodes.push(OpCode::GetGlobal(1));
-                opcodes.push(OpCode::I32Add);
-                opcodes.push(OpCode::SetGlobal(0));
-                opcodes.push(OpCode::Else);
-                opcodes.push(OpCode::Unreachable);
-                opcodes.push(OpCode::End);
-                opcodes.push(OpCode::SetGlobal(1));
-                opcodes.push(OpCode::GetGlobal(0));
-                if matches!(self.type_arena[lhs.inner.get_type()], Type::String) {
-                    opcodes.push(OpCode::I32Load8U(0, 8));
+                let lhs_id = self.module.locals.add(ValType::I32);
+                let index_id = self.module.locals.add(ValType::I32);
+                self.generate_expr(fn_body, lhs)?;
+                fn_body.local_set(lhs_id);
+                self.generate_expr(fn_body, index)?;
+                fn_body.local_set(index_id);
+
+                // Bounds check
+                fn_body
+                    .local_get(index_id)
+                    .local_get(lhs_id)
+                    .load(self.memory_id, LoadKind::I32, MemArg { align: 2, offset: 4 })
+                    .binop(BinaryOp::I32LtU)
+                    .if_else(None.into(), |then_builder| {
+                        then_builder.local_get(index_id);
+                        if !matches!(self.type_arena[lhs.inner.get_type()], Type::String) {
+                            then_builder.i32_const(4).binop(BinaryOp::I32Mul);
+                        }
+                        then_builder.local_get(lhs_id).binop(BinaryOp::I32Add).local_set(lhs_id);
+                    }, |else_builder| {
+                        // TODO: Handle out of bounds error
+                        else_builder.unreachable();
+                    });
+
+                let load_kind = if matches!(self.type_arena[lhs.inner.get_type()], Type::String) {
+                    LoadKind::I32_8 { kind: ExtendedLoad::ZeroExtend }
                 } else {
-                    opcodes.push(OpCode::I32Load(0, 8));
-                }
-                Ok(opcodes)
+                    LoadKind::I32
+                };
+
+                fn_body
+                    .local_get(lhs_id)
+                    .load(self.memory_id, load_kind, MemArg { align: 2, offset: 0 });
             }
             ExprT::Array {
                 entries,
