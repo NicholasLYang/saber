@@ -45,7 +45,7 @@ pub enum TypeError {
         type_: String,
     },
     InvalidUnaryExpr,
-    CalleeNotFunction,
+    NotAFunction,
     TopLevelReturn,
     ShadowingFunction,
     TupleIndexOutOfBounds {
@@ -82,7 +82,7 @@ impl fmt::Display for TypeError {
             TypeError::NotATuple { type_ } => write!(f, "Type {} is not a tuple", type_),
             TypeError::NotAnArray { type_ } => write!(f, "Type {} is not an array", type_),
             TypeError::InvalidUnaryExpr => write!(f, "Cannot apply unary operator"),
-            TypeError::CalleeNotFunction => write!(f, "Callee is not a function"),
+            TypeError::NotAFunction => write!(f, "Callee is not a function"),
             TypeError::TopLevelReturn => write!(f, "Cannot return at top level"),
             TypeError::ShadowingFunction => write!(
                 f,
@@ -714,10 +714,11 @@ impl TypeChecker {
         } else {
             self.name_table.get_fresh_name()
         };
+
         if self
             .symbol_table
             .lookup_name(name)
-            .map(|entry| entry.function_info.as_ref())
+            .and_then(|entry| entry.func_index)
             .is_some()
         {
             return Err(loc!(TypeError::ShadowingFunction, location));
@@ -762,11 +763,11 @@ impl TypeChecker {
         name: Name,
         params: Pat,
         body: Loc<Expr>,
-        // TODO: Create a Closure struct
-    ) -> Result<(Function, Loc<ExprT>), Loc<TypeError>> {
-        let entry = self.symbol_table.lookup_name(name);
-        let entry = entry.as_ref().unwrap();
-        let func_info = entry.function_info.as_ref().unwrap();
+    ) -> Result<(Function, TypeId), Loc<TypeError>> {
+        let entry = self.symbol_table.lookup_name(name).unwrap();
+        let func_index = entry.func_index.unwrap();
+        let func_info = &self.symbol_table.functions[func_index];
+        let type_ = entry.var_type;
         let scope = func_info.func_scope;
         let return_type = func_info.return_type;
         self.symbol_table.swap_scope(scope);
@@ -1043,33 +1044,33 @@ impl TypeChecker {
                 let typed_callee = self.expr(*callee)?;
                 let typed_args = self.expr(*args)?;
                 if let ExprT::Var { name, type_: _ } = &typed_callee.inner {
-                    if let Some(entry) = self.symbol_table.lookup_name(*name) {
-                        if let Some(FunctionInfo {
-                            func_index,
-                            func_scope: _,
-                            params_type,
-                            return_type,
-                            is_top_level,
-                        }) = entry.function_info
-                        {
-                            let captures_var_index = if !is_top_level {
-                                Some(entry.var_index)
-                            } else {
-                                None
-                            };
-
-                            self.unify_or_err(params_type, typed_args.inner.get_type(), location)?;
-                            return Ok(Loc {
-                                location,
-                                inner: ExprT::DirectCall {
-                                    callee: func_index,
-                                    captures_var_index,
-                                    args: Box::new(typed_args),
-                                    type_: return_type,
-                                },
-                            });
-                        }
-                    }
+                    let entry = self.symbol_table.lookup_name(*name).ok_or_else(|| {
+                        loc!(
+                            TypeError::VarNotDefined {
+                                name: name.to_string()
+                            },
+                            location
+                        )
+                    })?;
+                    let func_index = entry
+                        .func_index
+                        .ok_or(loc!(TypeError::NotAFunction, location))?;
+                    let func_info = &self.symbol_table.functions[func_index];
+                    let captures_var_index = if !func_info.is_top_level {
+                        Some(entry.var_index)
+                    } else {
+                        None
+                    };
+                    self.unify_or_err(params_type, typed_args.inner.get_type(), location)?;
+                    return Ok(Loc {
+                        location,
+                        inner: ExprT::DirectCall {
+                            callee: func_index,
+                            captures_var_index,
+                            args: Box::new(typed_args),
+                            type_: return_type,
+                        },
+                    });
                 }
                 let callee_type = typed_callee.inner.get_type();
                 let (params_type, return_type) = match &self.type_arena[callee_type] {
@@ -1081,7 +1082,7 @@ impl TypeChecker {
                         self.type_arena[callee_type] = Type::Solved(new_id);
                         (params_type, return_type)
                     }
-                    _ => return Err(loc!(TypeError::CalleeNotFunction, location)),
+                    _ => return Err(loc!(TypeError::NotAFunction, location)),
                 };
                 let args_type = typed_args.inner.get_type();
                 self.unify_or_err(params_type, args_type, typed_args.location)?;

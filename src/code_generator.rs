@@ -53,6 +53,7 @@ pub enum GenerationError {
     NotAFunction { location: LocationRange },
 }
 
+#[derive(Copy, Clone)]
 struct CurrentFunctionContext {
     return_type: Option<ValType>,
     id: usize,
@@ -487,7 +488,7 @@ impl CodeGenerator {
             } => {
                 // NOTE: This is super brittle again, as if we add another runtime function,
                 // we'll need to change this comparison
-                let mut opcodes = if let Some(cf) = self.current_function_id {
+                let mut opcodes = if let Some(cf) = self.current_function {
                     if *callee <= PRINT_CHAR_INDEX.try_into().unwrap() {
                         Vec::new()
                     } else if cf == *callee

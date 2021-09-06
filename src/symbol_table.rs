@@ -25,13 +25,13 @@ pub enum ScopeType {
 pub struct SymbolEntry {
     pub var_index: usize,
     pub var_type: TypeId,
-    pub function_info: Option<FunctionInfo>,
+    pub func_index: Option<usize>,
 }
 
 #[derive(Debug)]
 pub struct SymbolTable {
     scopes: Vec<Scope>,
-    function_index: usize,
+    pub functions: Vec<FunctionInfo>,
     // As we collect variables, we insert
     // them into a vec, then when we finish
     // typechecking the function, we reset and spit out
@@ -42,8 +42,6 @@ pub struct SymbolTable {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct FunctionInfo {
-    // Index into function array
-    pub func_index: usize,
     pub func_scope: ScopeId,
     pub params_type: TypeId,
     pub return_type: TypeId,
@@ -55,8 +53,6 @@ pub enum VarIndex {
     Capture(usize),
 }
 
-pub static ALLOC_INDEX: u32 = 0;
-pub static DEALLOC_INDEX: u32 = 1;
 #[allow(dead_code)]
 pub static CLONE_INDEX: u32 = 2;
 pub static STREQ_INDEX: u32 = 3;
@@ -78,14 +74,10 @@ impl SymbolTable {
                 parent: None,
                 parent_func_scope: None,
             }],
-            function_index: 5,
+            functions: Vec::new(),
             var_types: Vec::new(),
             current_scope: 0,
         }
-    }
-
-    pub fn get_function_index(&self) -> usize {
-        self.function_index
     }
 
     pub fn reset_vars(&mut self) -> Vec<TypeId> {
@@ -113,7 +105,10 @@ impl SymbolTable {
         self.current_scope
     }
 
-    pub fn execute_in_scope<F, E: Error>(&mut self, scope: ScopeId, fun: F) -> Result<(), E> where F: Fn() -> Result<(), E> {
+    pub fn execute_in_scope<F, E: Error>(&mut self, scope: ScopeId, fun: F) -> Result<(), E>
+    where
+        F: Fn() -> Result<(), E>,
+    {
         let old_scope = self.current_scope;
         self.current_scope = scope;
         fun()?;
@@ -266,7 +261,7 @@ impl SymbolTable {
             SymbolEntry {
                 var_type,
                 var_index: self.var_types.len(),
-                function_info: None,
+                func_index: None,
             },
         );
         index
@@ -288,31 +283,35 @@ impl SymbolTable {
         self.var_types.push(type_);
         let func_scope = self.scopes.len();
         let is_top_level = self.scopes[self.current_scope].parent_func_scope.is_none();
+
+        self.functions.push(FunctionInfo {
+            func_scope,
+            params_type,
+            return_type,
+            is_top_level,
+        });
+
+        let func_index = self.functions.len() - 1;
+
         self.scopes[self.current_scope].symbols.insert(
             name,
             SymbolEntry {
                 var_index: self.var_types.len(),
                 var_type: type_,
-                function_info: Some(FunctionInfo {
-                    func_index: self.function_index,
-                    func_scope,
-                    params_type,
-                    return_type,
-                    is_top_level,
-                }),
+                func_index: Some(func_index),
             },
         );
+
         self.scopes.push(Scope {
             symbols: HashMap::new(),
             scope_type: ScopeType::Function {
-                func_index: self.function_index,
+                func_index,
                 captures: Vec::new(),
             },
             parent_func_scope: self.get_func_scope(self.current_scope),
             parent: Some(self.current_scope),
         });
-        let func_index = self.function_index;
-        self.function_index += 1;
+
         func_index
     }
 
