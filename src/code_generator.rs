@@ -198,7 +198,6 @@ impl CodeGenerator {
                     Function {
                         params,
                         local_variables,
-                        captures: _,
                         body,
                         scope_index,
                     },
@@ -776,8 +775,7 @@ impl CodeGenerator {
                     expr.location,
                 )?;
                 lhs_ops.append(&mut rhs_ops);
-                let opcode =
-                    self.generate_operator(op, &self.type_arena[*type_], promoted_type)?;
+                let opcode = self.generate_operator(op, &self.type_arena[*type_], promoted_type)?;
                 lhs_ops.push(opcode);
                 Ok(lhs_ops)
             }

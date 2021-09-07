@@ -3,6 +3,7 @@ use crate::parser::ParseError;
 use crate::typechecker::TypeError;
 use id_arena::{Arena, Id};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fmt;
 
 pub type Name = usize;
@@ -42,13 +43,6 @@ pub struct Program {
     pub errors: Vec<Loc<ParseError>>,
 }
 
-#[derive(Debug, PartialEq, Clone)]
-pub struct ProgramT {
-    pub stmts: Vec<Loc<StmtT>>,
-    pub named_types: Vec<(Name, TypeId)>,
-    pub errors: Vec<Loc<TypeError>>,
-}
-
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum Stmt {
     Let(Pat, Loc<Expr>),
@@ -57,27 +51,6 @@ pub enum Stmt {
     Loop(Loc<Expr>),
     Return(Loc<Expr>),
     Function(Name, Pat, Option<Loc<TypeSig>>, Box<Loc<Expr>>),
-    Export(Name),
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub enum StmtT {
-    Let(Name, Loc<ExprT>),
-    Break,
-    Expr(Loc<ExprT>),
-    Return(Loc<ExprT>),
-    Loop(Loc<ExprT>),
-    Function {
-        name: Name,
-        params_type: TypeId,
-        return_type: TypeId,
-        function: Function,
-    },
-    If {
-        cond: Box<Loc<ExprT>>,
-        then_block: Box<Loc<ExprT>>,
-        else_block: Option<Box<Loc<ExprT>>>,
-    },
     Export(Name),
 }
 
@@ -125,6 +98,29 @@ pub enum Expr {
     },
     Tuple(Vec<Loc<Expr>>),
     Array(Vec<Loc<Expr>>),
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct ProgramT {
+    pub functions: HashMap<Name, Function>,
+    pub stmts: Vec<Loc<StmtT>>,
+    pub named_types: Vec<(Name, TypeId)>,
+    pub errors: Vec<Loc<TypeError>>,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum StmtT {
+    Let(Name, Loc<ExprT>),
+    Break,
+    Expr(Loc<ExprT>),
+    Return(Loc<ExprT>),
+    Loop(Loc<ExprT>),
+    If {
+        cond: Box<Loc<ExprT>>,
+        then_block: Box<Loc<ExprT>>,
+        else_block: Option<Box<Loc<ExprT>>>,
+    },
+    Export(Name),
 }
 
 // Field or index accesses on a struct/array
@@ -180,14 +176,6 @@ pub enum ExprT {
         rhs: Box<Loc<ExprT>>,
         type_: TypeId,
     },
-    // Note: only used for anonymous functions. Functions that are
-    // bound with let are StmtT::Function
-    Function {
-        function: Function,
-        type_: TypeId,
-        name: Name,
-        table_index: usize,
-    },
     Record {
         name: Name,
         fields: Vec<(Name, Loc<ExprT>)>,
@@ -232,7 +220,6 @@ pub struct Function {
     pub body: Box<Loc<ExprT>>,
     pub local_variables: Vec<TypeId>,
     pub scope_index: usize,
-    pub captures: Option<Box<Loc<ExprT>>>,
 }
 
 impl fmt::Display for Value {
@@ -393,12 +380,6 @@ impl ExprT {
             ExprT::UnaryOp {
                 op: _,
                 rhs: _,
-                type_,
-            } => *type_,
-            ExprT::Function {
-                function: _,
-                name: _,
-                table_index: _,
                 type_,
             } => *type_,
             ExprT::Index {

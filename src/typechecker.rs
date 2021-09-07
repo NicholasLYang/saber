@@ -1,17 +1,18 @@
 use crate::ast::{
-    Accessor, BuiltInTypes, Expr, ExprT, Function, Loc, Name, Op, Pat, Program, ProgramT, Stmt,
-    StmtT, Target, Type, TypeDef, TypeId, TypeSig, UnaryOp, Value,
+    Accessor, BuiltInTypes, Expr, ExprT, Function, FunctionId, Loc, Name, Op, Pat, Program,
+    ProgramT, Stmt, StmtT, Target, Type, TypeDef, TypeId, TypeSig, UnaryOp, Value,
 };
 use crate::lexer::LocationRange;
 use crate::loc;
 use crate::printer::type_to_string;
 use crate::symbol_table::{FunctionInfo, SymbolTable};
-use crate::utils::{NameTable, get_final_type};
+use crate::utils::{get_final_type, NameTable};
 use id_arena::Arena;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt;
+use std::mem::take;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum TypeError {
@@ -101,6 +102,7 @@ impl fmt::Display for TypeError {
 
 pub struct TypeChecker {
     symbol_table: SymbolTable,
+    functions: HashMap<FunctionId, Function>,
     // Standard types like int, bool, etc.
     builtin_types: BuiltInTypes,
     // Type names. Right now just has the primitives like string,
@@ -185,6 +187,7 @@ impl TypeChecker {
             type_names,
             return_type: None,
             type_var_index: 0,
+            functions: HashMap::new(),
             type_arena,
             name_table,
             struct_types: Vec::new(),
@@ -280,8 +283,10 @@ impl TypeChecker {
         }
         let mut named_types = Vec::new();
         std::mem::swap(&mut named_types, &mut self.struct_types);
+
         ProgramT {
             stmts: typed_stmts,
+            functions: take(&mut self.functions),
             named_types,
             errors,
         }
@@ -377,9 +382,12 @@ impl TypeChecker {
         match stmt.inner {
             Stmt::Expr(expr) => {
                 if let Expr::If(cond, then_block, else_block) = expr.inner {
-                    Ok(vec![
-                        self.if_expr_stmt(location, *cond, *then_block, else_block)?
-                    ])
+                    Ok(vec![self.if_expr_stmt(
+                        location,
+                        *cond,
+                        *then_block,
+                        else_block,
+                    )?])
                 } else {
                     let typed_expr = self.expr(expr)?;
                     Ok(vec![Loc {
@@ -400,17 +408,12 @@ impl TypeChecker {
                     ));
                 };
                 let func_info = sym_entry.function_info.as_ref().unwrap();
-                let params_type = func_info.params_type;
-                let return_type = func_info.return_type;
-                let (function, _) = self.function(func_name, params, *body)?;
+                let (function, captures, _) = self.function(func_name, params, *body)?;
+                self.functions.insert(func_info.func_index, function);
+
                 Ok(vec![Loc {
                     location,
-                    inner: StmtT::Function {
-                        name: func_name,
-                        params_type,
-                        return_type,
-                        function,
-                    },
+                    inner: StmtT::Let(func_name, captures),
                 }])
             }
             Stmt::Let(pat, rhs) => Ok(self.let_binding(pat, rhs, location)?),
@@ -724,10 +727,10 @@ impl TypeChecker {
         Ok(bindings)
     }
 
-    fn create_captures_tuple(&mut self, location: LocationRange) -> Option<Loc<ExprT>> {
+    fn create_captures_tuple(&mut self, location: LocationRange) -> Loc<ExprT> {
         let captures = self.symbol_table.get_captures().unwrap();
         if captures.is_empty() {
-            return None;
+            return loc!(ExprT::Tuple(Vec::new(), self.builtin_types.unit), location);
         }
         let mut fields = Vec::new();
         let mut types = Vec::new();
@@ -744,7 +747,7 @@ impl TypeChecker {
         let type_id = self.type_arena.alloc(Type::Tuple(types));
         let name = self.name_table.get_fresh_name();
         self.struct_types.push((name, type_id));
-        Some(loc!(ExprT::Tuple(fields, type_id), location))
+        loc!(ExprT::Tuple(fields, type_id), location)
     }
 
     fn function(
@@ -752,7 +755,8 @@ impl TypeChecker {
         name: Name,
         params: Pat,
         body: Loc<Expr>,
-    ) -> Result<(Function, TypeId), Loc<TypeError>> {
+        // TODO: Create a Closure struct
+    ) -> Result<(Function, Loc<ExprT>, TypeId), Loc<TypeError>> {
         let entry = self.symbol_table.lookup_name(name);
         let entry = entry.as_ref().unwrap();
         let func_info = entry.function_info.as_ref().unwrap();
@@ -796,8 +800,8 @@ impl TypeChecker {
                 body: Box::new(body),
                 local_variables,
                 scope_index,
-                captures: captures.map(Box::new),
             },
+            captures,
             type_,
         ))
     }
@@ -979,41 +983,32 @@ impl TypeChecker {
                     self.get_fresh_type_var()
                 };
                 let type_ = self.type_arena.alloc(Type::Arrow(params_type, return_type));
-                self.symbol_table
-                    .insert_function(name, params_type, return_type, type_);
+                let func_index =
+                    self.symbol_table
+                        .insert_function(name, params_type, return_type, type_);
 
-                let (function, type_) = self.function(name, params, *body)?;
-                let mut function = function;
+                let (function, captures, type_) = self.function(name, params, *body)?;
+
+                self.functions.insert(func_index, function);
                 let table_index = self.expr_func_index;
-                let table_index_expr = ExprT::Primary {
-                    value: Value::Integer(table_index.try_into().unwrap()),
-                    type_: self.builtin_types.int,
-                };
-                let mut capture_struct_fields = vec![loc!(table_index_expr, expr.location)];
-                let mut capture_struct_type = vec![self.builtin_types.int];
-                if let Some(captures) = function.captures {
-                    let captures_type = captures.inner.get_type();
-                    capture_struct_type.push(captures_type);
-                    capture_struct_fields.push(*captures);
-                }
-                let type_id = self.type_arena.alloc(Type::Tuple(capture_struct_type));
-                self.struct_types
-                    .push((self.name_table.get_fresh_name(), type_id));
-                function.captures = Some(Box::new(loc!(
-                    ExprT::Tuple(capture_struct_fields, type_id),
-                    expr.location
-                )));
-                self.expr_func_index += 1;
-                let func = Loc {
-                    location,
-                    inner: ExprT::Function {
-                        function,
-                        type_,
-                        name,
-                        table_index,
+                let table_index_expr = loc!(
+                    ExprT::Primary {
+                        value: Value::Integer(table_index.try_into().unwrap()),
+                        type_: self.builtin_types.int,
                     },
-                };
-                Ok(func)
+                    location
+                );
+
+                let closure_tuple_type = self.type_arena.alloc(Type::Tuple(vec![
+                    captures.inner.get_type(),
+                    self.builtin_types.int,
+                ]));
+
+                self.expr_func_index += 1;
+                Ok(loc!(
+                    ExprT::Tuple(vec![table_index_expr, captures], closure_tuple_type),
+                    location
+                ))
             }
             Expr::UnaryOp { op, rhs } => {
                 let typed_rhs = self.expr(*rhs)?;
@@ -1293,9 +1288,13 @@ impl TypeChecker {
                 let lhs_type = get_final_type(&self.type_arena, lhs_type);
                 let rhs_type = get_final_type(&self.type_arena, rhs_type);
 
-                if self.is_unifiable(lhs_type, self.builtin_types.int) && self.is_unifiable(rhs_type, self.builtin_types.int) {
+                if self.is_unifiable(lhs_type, self.builtin_types.int)
+                    && self.is_unifiable(rhs_type, self.builtin_types.int)
+                {
                     Some(self.builtin_types.int)
-                } else if self.is_unifiable(lhs_type, self.builtin_types.float) || self.is_unifiable(rhs_type, self.builtin_types.float) {
+                } else if self.is_unifiable(lhs_type, self.builtin_types.float)
+                    || self.is_unifiable(rhs_type, self.builtin_types.float)
+                {
                     Some(self.builtin_types.float)
                 } else {
                     None
