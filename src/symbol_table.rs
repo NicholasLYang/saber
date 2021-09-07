@@ -16,6 +16,7 @@ pub struct Scope {
 pub enum ScopeType {
     Function {
         func_index: usize,
+        local_variables: Vec<TypeId>,
         captures: Vec<(Name, ScopeId, TypeId)>,
     },
     Regular,
@@ -23,7 +24,6 @@ pub enum ScopeType {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct SymbolEntry {
-    pub var_index: usize,
     pub var_type: TypeId,
     pub func_index: Option<usize>,
 }
@@ -32,19 +32,14 @@ pub struct SymbolEntry {
 pub struct SymbolTable {
     scopes: Vec<Scope>,
     pub functions: Vec<FunctionInfo>,
-    // As we collect variables, we insert
-    // them into a vec, then when we finish
-    // typechecking the function, we reset and spit out
-    // the variable types
-    pub var_types: Vec<TypeId>,
     pub current_scope: ScopeId,
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct FunctionInfo {
     pub func_scope: ScopeId,
-    pub params_type: TypeId,
-    pub return_type: TypeId,
+    pub param_types: Vec<TypeId>,
+    pub return_types: Vec<TypeId>,
     pub is_top_level: bool,
 }
 
@@ -75,21 +70,8 @@ impl SymbolTable {
                 parent_func_scope: None,
             }],
             functions: Vec::new(),
-            var_types: Vec::new(),
             current_scope: 0,
         }
-    }
-
-    pub fn reset_vars(&mut self) -> Vec<TypeId> {
-        let mut var_types = Vec::new();
-        std::mem::swap(&mut var_types, &mut self.var_types);
-        var_types
-    }
-
-    pub fn restore_vars(&mut self, var_types: Vec<TypeId>) -> Vec<TypeId> {
-        let mut var_types = var_types;
-        std::mem::swap(&mut self.var_types, &mut var_types);
-        var_types
     }
 
     pub fn push_scope(&mut self) -> usize {
@@ -129,6 +111,7 @@ impl SymbolTable {
         // If we're finished checking a function scope...
         if let ScopeType::Function {
             captures,
+            local_variables: _,
             func_index: _,
         } = &self.scopes[scope].scope_type
         {
@@ -146,6 +129,7 @@ impl SymbolTable {
         if let Some(parent_func_scope) = self.scopes[scope].parent_func_scope {
             if let ScopeType::Function {
                 captures,
+                local_variables: _,
                 func_index: _,
             } = &mut self.scopes[parent_func_scope].scope_type
             {
@@ -169,6 +153,7 @@ impl SymbolTable {
         match &self.scopes[scope].scope_type {
             ScopeType::Function {
                 captures,
+                local_variables: _,
                 func_index: _,
             } => Some(captures),
             ScopeType::Regular => None,
@@ -196,6 +181,7 @@ impl SymbolTable {
                         if let Some(usage_func_scope) = usage_func_scope {
                             if let ScopeType::Function {
                                 captures,
+                                local_variables,
                                 func_index: _,
                             } = &mut self.scopes[usage_func_scope].scope_type
                             {
@@ -213,35 +199,11 @@ impl SymbolTable {
         None
     }
 
-    // Looks up name for code gen and returns index and whether the var is captured
-    // or just local.
-    // Only goes up to the next function barrier
-    pub fn codegen_lookup(&self, name: usize) -> Option<VarIndex> {
-        let mut index = Some(self.current_scope);
-        while let Some(i) = index {
-            if let Some(entry) = self.scopes[i].symbols.get(&name) {
-                let index = entry.var_index;
-                return Some(VarIndex::Local(index));
-            }
-            if let ScopeType::Function {
-                captures,
-                func_index: _,
-            } = &self.scopes[i].scope_type
-            {
-                return captures
-                    .iter()
-                    .position(|(n, _, _)| name == *n)
-                    .map(VarIndex::Capture);
-            }
-            index = self.scopes[i].parent;
-        }
-        None
-    }
-
     fn get_func_scope(&self, scope: ScopeId) -> Option<ScopeId> {
         match self.scopes[scope].scope_type {
             ScopeType::Function {
                 captures: _,
+                local_variables: _,
                 func_index: _,
             } => Some(scope),
             ScopeType::Regular => self.scopes[scope].parent_func_scope,
@@ -254,13 +216,10 @@ impl SymbolTable {
     }
 
     pub fn insert_var(&mut self, name: Name, var_type: TypeId) -> usize {
-        self.var_types.push(var_type);
-        let index = self.var_types.len();
         self.scopes[self.current_scope].symbols.insert(
             name,
             SymbolEntry {
                 var_type,
-                var_index: self.var_types.len(),
                 func_index: None,
             },
         );
@@ -276,18 +235,17 @@ impl SymbolTable {
     pub fn insert_function(
         &mut self,
         name: Name,
-        params_type: TypeId,
-        return_type: TypeId,
+        param_types: Vec<TypeId>,
+        return_types: Vec<TypeId>,
         type_: TypeId,
     ) -> usize {
-        self.var_types.push(type_);
         let func_scope = self.scopes.len();
         let is_top_level = self.scopes[self.current_scope].parent_func_scope.is_none();
 
         self.functions.push(FunctionInfo {
             func_scope,
-            params_type,
-            return_type,
+            param_types,
+            return_types,
             is_top_level,
         });
 
@@ -296,7 +254,6 @@ impl SymbolTable {
         self.scopes[self.current_scope].symbols.insert(
             name,
             SymbolEntry {
-                var_index: self.var_types.len(),
                 var_type: type_,
                 func_index: Some(func_index),
             },
@@ -306,6 +263,7 @@ impl SymbolTable {
             symbols: HashMap::new(),
             scope_type: ScopeType::Function {
                 func_index,
+                local_variables: Vec::new(),
                 captures: Vec::new(),
             },
             parent_func_scope: self.get_func_scope(self.current_scope),

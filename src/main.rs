@@ -19,7 +19,6 @@ use wabt::wasm2wat;
 
 mod ast;
 mod code_generator;
-mod cps;
 mod emitter;
 mod lexer;
 mod parser;

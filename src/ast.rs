@@ -43,6 +43,14 @@ pub struct Program {
     pub errors: Vec<Loc<ParseError>>,
 }
 
+#[derive(Debug, PartialEq, Clone)]
+pub struct ProgramT {
+    pub functions: Vec<Function>,
+    pub stmts: Vec<Loc<StmtT>>,
+    pub named_types: Vec<(Name, TypeId)>,
+    pub errors: Vec<Loc<TypeError>>,
+}
+
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum Stmt {
     Let(Pat, Loc<Expr>),
@@ -98,14 +106,6 @@ pub enum Expr {
     },
     Tuple(Vec<Loc<Expr>>),
     Array(Vec<Loc<Expr>>),
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub struct ProgramT {
-    pub functions: HashMap<FunctionId, Loc<Function>>,
-    pub stmts: Vec<Loc<StmtT>>,
-    pub named_types: Vec<(Name, TypeId)>,
-    pub errors: Vec<Loc<TypeError>>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -188,7 +188,7 @@ pub enum ExprT {
     },
     TupleField(Box<Loc<ExprT>>, u32, TypeId),
     DirectCall {
-        callee: FunctionId,
+        func_id: FunctionId,
         captures_var_index: Option<usize>,
         args: Box<Loc<ExprT>>,
         type_: TypeId,
@@ -390,7 +390,7 @@ impl ExprT {
             } => *type_,
             ExprT::TupleField(_, _, type_) => *type_,
             ExprT::DirectCall {
-                callee: _,
+                func_id: _,
                 captures_var_index: _,
                 args: _,
                 type_,

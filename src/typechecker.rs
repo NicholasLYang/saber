@@ -153,29 +153,29 @@ impl TypeChecker {
 
         symbol_table.insert_function(
             print_int_id,
-            builtin_types.int,
-            builtin_types.unit,
+            vec![builtin_types.int],
+            Vec::new(),
             type_arena.alloc(Type::Arrow(builtin_types.int, builtin_types.unit)),
         );
         let print_float_id = name_table.insert("printFloat".into());
         symbol_table.insert_function(
             print_float_id,
-            builtin_types.float,
-            builtin_types.unit,
+            vec![builtin_types.float],
+            Vec::new(),
             type_arena.alloc(Type::Arrow(builtin_types.float, builtin_types.unit)),
         );
         let print_string_id = name_table.insert("printString".into());
         symbol_table.insert_function(
             print_string_id,
-            builtin_types.string,
-            builtin_types.unit,
+            vec![builtin_types.string],
+            Vec::new(),
             type_arena.alloc(Type::Arrow(builtin_types.string, builtin_types.unit)),
         );
         let print_char_id = name_table.insert("printChar".into());
         symbol_table.insert_function(
             print_char_id,
-            builtin_types.char,
-            builtin_types.unit,
+            vec![builtin_types.char],
+            Vec::new(),
             type_arena.alloc(Type::Arrow(builtin_types.char, builtin_types.unit)),
         );
 
@@ -296,15 +296,15 @@ impl TypeChecker {
     fn hoist_functions(&mut self, stmts: &[Loc<Stmt>]) -> Result<(), Loc<TypeError>> {
         for stmt in stmts {
             if let Stmt::Function(func_name, params, return_type_sig, _) = &stmt.inner {
-                let params_type = self.pat(params)?;
-                let return_type = if let Some(type_sig) = return_type_sig {
+                let param_types = self.pat(params)?;
+                let return_types = vec![if let Some(type_sig) = return_type_sig {
                     self.lookup_type_sig(type_sig)?
                 } else {
                     self.get_fresh_type_var()
-                };
+                }];
                 let type_ = self.type_arena.alloc(Type::Arrow(params_type, return_type));
                 self.symbol_table
-                    .insert_function(*func_name, params_type, return_type, type_);
+                    .insert_function(*func_name, param_types, return_types, type_);
             }
         }
         Ok(())
@@ -484,6 +484,7 @@ impl TypeChecker {
         }
     }
 
+    // TODO: When tuple type sigs are implemented, change to return vector of type ids
     fn lookup_type_sig(&mut self, sig: &Loc<TypeSig>) -> Result<TypeId, Loc<TypeError>> {
         match &sig.inner {
             TypeSig::Array(sig) => {
@@ -518,35 +519,28 @@ impl TypeChecker {
         }
     }
 
-    fn pat(&mut self, pat: &Pat) -> Result<TypeId, Loc<TypeError>> {
+    fn pat(&mut self, pat: &Pat) -> Result<Vec<TypeId>, Loc<TypeError>> {
         match pat {
             Pat::Id(_, Some(type_sig), _) => {
                 let type_ = self.lookup_type_sig(type_sig)?;
-                Ok(type_)
+                Ok(vec![type_])
             }
             Pat::Id(_, None, _) => {
                 let type_ = self.get_fresh_type_var();
-                Ok(type_)
+                Ok(vec![type_])
             }
-            Pat::Tuple(pats, _) => {
-                let types: Result<Vec<_>, _> = pats.iter().map(|pat| self.pat(pat)).collect();
-                Ok(self.type_arena.alloc(Type::Tuple(types?)))
+            Pat::Tuple(elems, _) => {
+                let mut elem_types = Vec::new();
+                for pat in elems {
+                    elem_types.append(&mut self.pat(pat)?);
+                }
+
+                Ok(elem_types)
             }
             Pat::Record(pats, type_sig, _) => {
-                // In the future I should unify these two if they both exist.
-                if let Some(type_sig) = type_sig {
-                    self.lookup_type_sig(type_sig)
-                } else {
-                    let types: Result<Vec<_>, _> = pats
-                        .iter()
-                        .map(|name| Ok((*name, self.get_fresh_type_var())))
-                        .collect();
-                    Ok(self
-                        .type_arena
-                        .alloc(Type::Record(self.name_table.get_fresh_name(), types?)))
-                }
+                todo!()
             }
-            Pat::Empty(_) => Ok(self.builtin_types.unit),
+            Pat::Empty(_) => Ok(Vec::new()),
         }
     }
 
@@ -763,9 +757,7 @@ impl TypeChecker {
         let func_info = &self.symbol_table.functions[func_index];
         let type_ = entry.var_type;
         let scope = func_info.func_scope;
-        let return_type = func_info.return_type;
         self.symbol_table.swap_scope(scope);
-        let old_var_types = self.symbol_table.reset_vars();
         let func_params = self.get_func_params(&params)?;
         // Save the current return type
         let mut old_return_type = self.return_type;
@@ -793,7 +785,6 @@ impl TypeChecker {
 
         let captures = self.create_captures_tuple(body.location);
 
-        let local_variables = self.symbol_table.restore_vars(old_var_types);
         let scope_index = self.symbol_table.restore_scope();
         Ok((
             Function {
@@ -977,8 +968,8 @@ impl TypeChecker {
                 return_type: return_type_sig,
             } => {
                 let name = self.name_table.get_fresh_name();
-                let params_type = self.pat(&params)?;
-                let return_type = if let Some(type_sig) = return_type_sig {
+                let param_types = self.pat(&params)?;
+                let return_types = if let Some(type_sig) = return_type_sig {
                     self.lookup_type_sig(&type_sig)?
                 } else {
                     self.get_fresh_type_var()
@@ -1037,8 +1028,8 @@ impl TypeChecker {
             Expr::Call { callee, args } => {
                 let typed_callee = self.expr(*callee)?;
                 let typed_args = self.expr(*args)?;
-                if let ExprT::Var { name, type_: _ } = &typed_callee.inner {
-                    let entry = self.symbol_table.lookup_name(*name).ok_or_else(|| {
+                if let ExprT::Var { name, type_ } = typed_callee.inner {
+                    let entry = self.symbol_table.lookup_name(name).ok_or_else(|| {
                         loc!(
                             TypeError::VarNotDefined {
                                 name: name.to_string()
@@ -1055,17 +1046,19 @@ impl TypeChecker {
                     } else {
                         None
                     };
+
                     self.unify_or_err(params_type, typed_args.inner.get_type(), location)?;
                     return Ok(Loc {
                         location,
                         inner: ExprT::DirectCall {
-                            callee: func_index,
                             captures_var_index,
+                            func_id: func_index,
                             args: Box::new(typed_args),
                             type_: return_type,
                         },
                     });
                 }
+
                 let callee_type = typed_callee.inner.get_type();
                 let (params_type, return_type) = match &self.type_arena[callee_type] {
                     Type::Arrow(params_type, return_type) => (*params_type, *return_type),

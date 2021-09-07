@@ -8,6 +8,7 @@ use crate::symbol_table::{
     FunctionInfo, SymbolTable, VarIndex, ALLOC_INDEX, DEALLOC_INDEX, PRINT_CHAR_INDEX,
     PRINT_HEAP_INDEX, STREQ_INDEX,
 };
+
 use crate::typechecker::TypeChecker;
 use crate::utils::{get_final_type, NameTable};
 use crate::wasm::{
@@ -61,6 +62,7 @@ pub enum GenerationError {
 #[derive(Clone)]
 struct CurrentFunctionContext {
     params: HashMap<Name, LocalId>,
+    env_pointer: LocalId,
     return_type: Option<ValType>,
     id: usize,
 }
@@ -72,12 +74,10 @@ pub struct CodeGenerator {
     type_arena: Arena<Type>,
     module: Module,
     memory_id: MemoryId,
+    functions: Vec<FunctionId>,
     current_function: Option<CurrentFunctionContext>,
-    // All the generated code
-    program_data: ProgramData,
-    current_function_id: Option<usize>,
-    default_functions: DefaultFunctions,
     function_table: TableId,
+    default_functions: DefaultFunctions,
     global_variables: GlobalVariables,
 }
 
@@ -168,9 +168,8 @@ type Result<T> = std::result::Result<T, GenerationError>;
 
 impl CodeGenerator {
     pub fn new(typechecker: TypeChecker) -> Self {
-        let expr_func_count = typechecker.get_expr_func_index();
+        //let expr_func_count = typechecker.get_expr_func_index();
         let (symbol_table, name_table, type_table, builtin_types) = typechecker.get_tables();
-        let func_count = symbol_table.get_function_index();
         let config = ModuleConfig::new();
         let mut module = Module::with_config(config);
         let memory_id = module.memories.add_local(false, 1, None);
@@ -188,11 +187,10 @@ impl CodeGenerator {
             default_functions,
             current_function: None,
             global_variables: GlobalVariables::new(&mut module),
-            program_data: ProgramData::new(func_count, expr_func_count),
         }
     }
 
-    pub fn generate_program(mut self, mut program: ProgramT) -> Result<ProgramData> {
+    pub fn generate_program(mut self, mut program: ProgramT) -> Result<Module> {
         for local_func_index in 0..program.functions.len() {
             let func_index = (1 + PRINT_CHAR_INDEX as usize) + local_func_index;
             let function = program.functions.remove(&func_index).unwrap();
@@ -203,7 +201,7 @@ impl CodeGenerator {
             self.generate_top_level_stmt(&stmt)?;
         }
         self.generate_default_imports()?;
-        Ok(self.program_data)
+        Ok(self.module)
     }
 
     fn generate_top_level_stmt(&mut self, stmt: &Loc<StmtT>) -> Result<()> {
@@ -216,25 +214,7 @@ impl CodeGenerator {
                         name: name_str.to_string(),
                     },
                 )?;
-
-                if let Some(FunctionInfo {
-                    func_index,
-                    func_scope: _,
-                    params_type: _,
-                    return_type: _,
-                    is_top_level: _,
-                }) = &sym_entry.function_info
-                {
-                    let entry = ExportEntry {
-                        field_str: name_str.as_bytes().to_vec(),
-                        kind: ExternalKind::Function,
-                        index: (*func_index).try_into().unwrap(),
-                    };
-                    self.program_data.exports_section.push(entry);
-                    Ok(())
-                } else {
-                    Err(GenerationError::ExportValue)
-                }
+                self.module.exports.add(name_str)
             }
             stmt => {
                 println!("{:?}", stmt);
@@ -259,6 +239,7 @@ impl CodeGenerator {
         self.current_function = Some(CurrentFunctionContext {
             id,
             params,
+            env_pointer: self.module.locals.add(ValType::I32),
             return_type: self.generate_wasm_type(self.symbol_table.functions[id].return_type),
         });
         let old_scope = self.symbol_table.swap_scope(function.scope_index);
@@ -276,6 +257,7 @@ impl CodeGenerator {
 
         self.program_data.code_section[local_func_index] = Some(function_body);
         self.program_data.function_section[local_func_index] = Some(type_index);
+
         self.symbol_table.swap_scope(old_scope);
         self.current_function = old_func;
 
@@ -293,6 +275,21 @@ impl CodeGenerator {
 
         wasm_params
     }
+
+    // pub fn generate_function(
+    //     &mut self,
+    //     return_type: TypeId,
+    //     params: &[(Name, TypeId)],
+    //     local_variables: &[TypeId],
+    //     body: &Loc<ExprT>,
+    //     location: LocationRange,
+    // ) -> Result<()> {
+    //     let return_type = self.generate_wasm_type(return_type, location)?;
+    //     let function_builder =
+    //         self.generate_function_builder(&vec![return_type], params, location)?;
+    //     self.generate_function_body(function_builder, body, local_variables, params.len())?;
+    //     Ok(())
+    // }
 
     fn generate_function_builder(
         &mut self,
@@ -324,14 +321,14 @@ impl CodeGenerator {
         local_variables: &[TypeId],
         param_count: usize,
     ) -> Result<FunctionBody> {
-        self.generate_expr(fn_builder, body)?;
+        self.generate_expr(fn_builder.func_body(), body)?;
 
         let mut local_entries = Vec::new();
         // We want to generate only the locals not params so we skip
         // to after the params
         for local_type in &local_variables[param_count..] {
             let wasm_type = self
-                .generate_wasm_type(*local_type, body.location)?
+                .generate_wasm_type(*local_type)
                 .ok_or(GenerationError::EmptyType)?;
             local_entries.push(LocalEntry {
                 count: 1,
@@ -457,15 +454,19 @@ impl CodeGenerator {
         }
     }
 
-    fn generate_func_args(&mut self, args: &Loc<ExprT>) -> Result<Vec<OpCode>> {
+    fn generate_func_args(
+        &mut self,
+        fn_body: &mut InstrSeqBuilder,
+        args: &Loc<ExprT>,
+    ) -> Result<()> {
         match &args.inner {
             ExprT::Tuple(entries, _) => {
                 let mut opcodes = Vec::new();
                 for entry in entries {
-                    opcodes.append(&mut self.generate_expr(entry)?)
+                    opcodes.append(&mut self.generate_expr(fn_body, entry)?)
                 }
             }
-            _ => self.generate_expr(args),
+            _ => self.generate_expr(fn_body, args),
         }
     }
 
@@ -508,31 +509,28 @@ impl CodeGenerator {
                 Ok(opcodes)
             }
             ExprT::DirectCall {
-                callee,
                 captures_var_index,
+                func_id,
                 args,
                 type_: _,
             } => {
                 // NOTE: This is super brittle again, as if we add another runtime function,
                 // we'll need to change this comparison
-                if let Some(cf) = self.current_function {
-                    if *callee <= PRINT_CHAR_INDEX.try_into().unwrap() {
-                        Vec::new()
-                    } else if cf.id == *callee
+                if let Some(cf) = &self.current_function {
+                    if cf.id == *func_id
                     // Basically if we're in a recursive function situation
                     {
                         vec![OpCode::GetLocal(0)]
                     } else if let Some(var_index) = captures_var_index {
-                        vec![OpCode::GetLocal(*var_index as u32)]
+                        fn_body.local_get(cf.env_pointer);
                     } else {
-                        vec![OpCode::I32Const(0)]
+                        fn_body.i32_const(0);
                     }
                 } else {
                     Vec::new()
                 };
-                opcodes.append(&mut self.generate_func_args(args)?);
-                opcodes.push(OpCode::Call((*callee).try_into().unwrap()));
-                Ok(opcodes)
+                self.generate_func_args(fn_body, args)?;
+                fn_body.call(self.functions[*func_id]);
             }
             ExprT::IndirectCall {
                 callee,
@@ -561,7 +559,7 @@ impl CodeGenerator {
                     // Loading pointer to closure as first argument
                     .load(
                         self.memory_id,
-                        LoadKind::I32,
+                        LoadKind::I32 { atomic: false },
                         MemArg {
                             align: 2,
                             offset: 8,
@@ -572,7 +570,7 @@ impl CodeGenerator {
                 fn_body
                     .load(
                         self.memory_id,
-                        LoadKind::I32,
+                        LoadKind::I32 { atomic: false },
                         MemArg {
                             align: 2,
                             offset: 4,
@@ -580,7 +578,6 @@ impl CodeGenerator {
                     )
                     .call_indirect(type_sig_id, self.function_table);
             }
-
             ExprT::Index {
                 lhs,
                 index,
@@ -629,7 +626,7 @@ impl CodeGenerator {
                         kind: ExtendedLoad::ZeroExtend,
                     }
                 } else {
-                    LoadKind::I32
+                    LoadKind::I32 { atomic: false }
                 };
 
                 fn_body.local_get(lhs_id).load(
@@ -682,7 +679,7 @@ impl CodeGenerator {
             }
             ExprT::If(cond, then_block, else_block, type_) => {
                 // Start with the cond opcodes
-                self.generate_expr(fn_builder, cond)?;
+                self.generate_expr(fn_body, cond)?;
                 let if_type = self.generate_wasm_type(*type_);
                 func_body().if_else(
                     if_type.into(),
@@ -820,7 +817,7 @@ impl CodeGenerator {
         if let Some(ty) = self.generate_wasm_type(expr.inner.get_type()) {
             let store_kind = match ty {
                 // Alignment of 2, offset of 0
-                ValType::I32 => StoreKind::I32,
+                ValType::I32 => StoreKind::I32 { atomic: false },
                 ValType::F32 => StoreKind::F32,
                 _ => {
                     return Err(GenerationError::NotImplemented {
@@ -834,7 +831,7 @@ impl CodeGenerator {
                 store_kind,
                 MemArg {
                     align: 5,
-                    offset: (idx * 4) as u32,
+                    offset: (offset * 4) as u32,
                 },
             );
         } else {
@@ -878,7 +875,11 @@ impl CodeGenerator {
 
         fn_body
             .i32_const(final_type_id.index().try_into().unwrap())
-            .store(self.memory_id, StoreKind::I32, MemArg { align: 2, offset });
+            .store(
+                self.memory_id,
+                StoreKind::I32 { atomic: false },
+                MemArg { align: 2, offset },
+            );
 
         offset += 4;
         // We need to write the struct to memory. This consists of
