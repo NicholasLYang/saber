@@ -1,5 +1,6 @@
 use crate::ast::{
-    BuiltInTypes, ExprT, Function, Loc, Name, Op, ProgramT, StmtT, Type, TypeId, UnaryOp, Value,
+    BuiltInTypes, ExprT, Function, FunctionId, Loc, Name, Op, ProgramT, StmtT, Type, TypeId,
+    UnaryOp, Value,
 };
 use crate::lexer::LocationRange;
 use crate::printer::type_to_string;
@@ -23,10 +24,10 @@ pub static BOX_ARRAY_ID: i32 = -2;
 
 #[derive(Debug, Error, PartialEq)]
 pub enum GenerationError {
-    #[error("Operator '{op}' for type {input_type} does not exist")]
-    InvalidOperator { op: Op, input_type: String },
     #[error("Function '{name}' not defined")]
     FunctionNotDefined { name: String },
+    #[error("Operator '{op}' for type {input_type} does not exist")]
+    InvalidOperator { op: Op, input_type: String },
     #[error("Cannot have () as type")]
     EmptyType,
     #[error("Code Generator: Not implemented yet! {reason}")]
@@ -180,39 +181,25 @@ impl CodeGenerator {
         Ok(())
     }
 
-    pub fn generate_program(mut self, program: ProgramT) -> Result<ProgramData> {
-        for stmt in program.stmts {
-            (&mut self).generate_top_level_stmt(&stmt)?;
+    pub fn generate_program(mut self, mut program: ProgramT) -> Result<ProgramData> {
+        for local_func_index in 0..program.functions.len() {
+            let func_index = (1 + PRINT_CHAR_INDEX as usize) + local_func_index;
+            let function = program.functions.remove(&func_index).unwrap();
+            self.generate_function(func_index, function.inner, function.location)?;
         }
+
+        for stmt in program.stmts {
+            self.generate_top_level_stmt(&stmt)?;
+        }
+
         self.generate_default_imports()?;
+
+        println!("{:#?}", self.program_data);
         Ok(self.program_data)
     }
 
     fn generate_top_level_stmt(&mut self, stmt: &Loc<StmtT>) -> Result<()> {
         match &stmt.inner {
-            StmtT::Function {
-                name,
-                params_type: _,
-                return_type,
-                function:
-                    Function {
-                        params,
-                        local_variables,
-                        body,
-                        scope_index,
-                    },
-            } => {
-                self.generate_function_binding(
-                    *name,
-                    *scope_index,
-                    params,
-                    *return_type,
-                    local_variables,
-                    body,
-                    stmt.location,
-                )?;
-                Ok(())
-            }
             StmtT::Return(_) => Err(GenerationError::TopLevelReturn),
             StmtT::Export(func_name) => {
                 let name_str = self.name_table.get_str(func_name);
@@ -221,6 +208,7 @@ impl CodeGenerator {
                         name: name_str.to_string(),
                     },
                 )?;
+
                 if let Some(FunctionInfo {
                     func_index,
                     func_scope: _,
@@ -240,55 +228,44 @@ impl CodeGenerator {
                     Err(GenerationError::ExportValue)
                 }
             }
-            _ => Err(GenerationError::NotImplemented {
-                reason: "Top level statements aren't done yet",
-            }),
-        }
-    }
+            stmt => {
+                println!("{:?}", stmt);
 
-    // Generates a Stmt::Function
-    fn generate_function_binding(
-        &mut self,
-        name: Name,
-        scope: usize,
-        params: &[(Name, TypeId)],
-        return_type: TypeId,
-        local_variables: &[TypeId],
-        body: &Loc<ExprT>,
-        location: LocationRange,
-    ) -> Result<usize> {
-        let entry = self.symbol_table.lookup_name_in_scope(name, scope).unwrap();
-        let index = entry
-            .function_info
-            .as_ref()
-            .ok_or(GenerationError::NotReachable)?
-            .func_index;
-        let old_func = self.current_function;
-        self.current_function = Some(index);
-        let old_scope = self.symbol_table.swap_scope(scope);
-        let (type_, body) =
-            self.generate_function(return_type, params, local_variables, body, location)?;
-        let type_index = self.program_data.insert_type(type_);
-        self.program_data.code_section[index] = Some(body);
-        self.program_data.function_section[index] = Some(type_index);
-        self.symbol_table.swap_scope(old_scope);
-        self.current_function = old_func;
-        Ok(index)
+                Err(GenerationError::NotImplemented {
+                    reason: "Top level statements aren't done yet",
+                })
+            }
+        }
     }
 
     pub fn generate_function(
         &mut self,
-        return_type: TypeId,
-        params: &[(Name, TypeId)],
-        local_variables: &[TypeId],
-        body: &Loc<ExprT>,
+        func_index: FunctionId,
+        function: Function,
         location: LocationRange,
-    ) -> Result<(FunctionType, FunctionBody)> {
-        let return_type = self.generate_wasm_type(return_type, location)?;
+    ) -> Result<()> {
+        let old_func = self.current_function;
+        self.current_function = Some(func_index);
+        let old_scope = self.symbol_table.swap_scope(function.scope_index);
+        let return_type = self.generate_wasm_type(function.return_type, location)?;
         self.return_type = return_type;
-        let function_type = self.generate_function_type(&return_type, params, location)?;
-        let function_body = self.generate_function_body(body, local_variables, params.len())?;
-        Ok((function_type, function_body))
+        let function_type =
+            self.generate_function_type(&return_type, &function.params, location)?;
+        let function_body = self.generate_function_body(
+            &function.body,
+            &function.local_variables,
+            function.params.len(),
+        )?;
+
+        let type_index = self.program_data.insert_type(function_type);
+        let local_func_index = func_index - (PRINT_CHAR_INDEX as usize + 1);
+
+        self.program_data.code_section[local_func_index] = Some(function_body);
+        self.program_data.function_section[local_func_index] = Some(type_index);
+        self.symbol_table.swap_scope(old_scope);
+        self.current_function = old_func;
+
+        Ok(())
     }
 
     fn generate_function_type(
@@ -380,40 +357,6 @@ impl CodeGenerator {
 
     fn generate_stmt(&mut self, stmt: &Loc<StmtT>, is_last: bool) -> Result<Vec<OpCode>> {
         match &stmt.inner {
-            StmtT::Function {
-                name,
-                params_type: _,
-                return_type,
-                function:
-                    Function {
-                        params,
-                        local_variables,
-                        captures,
-                        body,
-                        scope_index,
-                    },
-            } => {
-                let var_index = self.symbol_table.lookup_name(*name).unwrap().var_index;
-                let opcodes = if let Some(captures) = captures.as_ref() {
-                    let mut opcodes = self.generate_expr(captures)?;
-                    opcodes.push(OpCode::SetLocal(var_index.try_into().unwrap()));
-                    opcodes
-                } else {
-                    Vec::new()
-                };
-                let old_scope = self.symbol_table.swap_scope(*scope_index);
-                self.generate_function_binding(
-                    *name,
-                    *scope_index,
-                    params,
-                    *return_type,
-                    local_variables,
-                    body,
-                    stmt.location,
-                )?;
-                self.symbol_table.swap_scope(old_scope);
-                Ok(opcodes)
-            }
             StmtT::Expr(expr) => {
                 let mut opcodes = self.generate_expr(expr)?;
                 match &self.type_arena[expr.inner.get_type()] {
@@ -624,41 +567,6 @@ impl CodeGenerator {
                 opcodes.push(OpCode::CallIndirect(type_sig_index.try_into().unwrap()));
                 opcodes.push(OpCode::SetGlobal(1));
                 Ok(opcodes)
-            }
-            ExprT::Function {
-                name,
-                type_,
-                table_index,
-                function:
-                    Function {
-                        params,
-                        body,
-                        captures,
-                        local_variables,
-                        scope_index,
-                    },
-            } => {
-                self.symbol_table.swap_scope(*scope_index);
-                let (_, return_type) =
-                    if let Type::Arrow(params_type, return_type) = &self.type_arena[*type_] {
-                        (*params_type, *return_type)
-                    } else {
-                        return Err(GenerationError::NotAFunction {
-                            location: expr.location,
-                        });
-                    };
-                let func_index = self.generate_function_binding(
-                    *name,
-                    *scope_index,
-                    params,
-                    return_type,
-                    local_variables,
-                    body,
-                    expr.location,
-                )?;
-                self.program_data.elements_section.elems[*table_index] = Some(func_index);
-                let captures = captures.as_ref().unwrap();
-                self.generate_expr(captures)
             }
             ExprT::Index {
                 lhs,

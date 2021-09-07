@@ -102,7 +102,7 @@ pub enum Expr {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct ProgramT {
-    pub functions: HashMap<Name, Function>,
+    pub functions: HashMap<FunctionId, Loc<Function>>,
     pub stmts: Vec<Loc<StmtT>>,
     pub named_types: Vec<(Name, TypeId)>,
     pub errors: Vec<Loc<TypeError>>,
@@ -217,6 +217,7 @@ pub enum Value {
 #[derive(Debug, PartialEq, Clone)]
 pub struct Function {
     pub params: Vec<(Name, TypeId)>,
+    pub return_type: TypeId,
     pub body: Box<Loc<ExprT>>,
     pub local_variables: Vec<TypeId>,
     pub scope_index: usize,

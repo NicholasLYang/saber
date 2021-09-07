@@ -102,7 +102,7 @@ impl fmt::Display for TypeError {
 
 pub struct TypeChecker {
     symbol_table: SymbolTable,
-    functions: HashMap<FunctionId, Function>,
+    functions: HashMap<FunctionId, Loc<Function>>,
     // Standard types like int, bool, etc.
     builtin_types: BuiltInTypes,
     // Type names. Right now just has the primitives like string,
@@ -408,13 +408,20 @@ impl TypeChecker {
                     ));
                 };
                 let func_info = sym_entry.function_info.as_ref().unwrap();
-                let (function, captures, _) = self.function(func_name, params, *body)?;
-                self.functions.insert(func_info.func_index, function);
+                let func_index = func_info.func_index;
+                let (function, captures) = self.function(func_name, params, *body)?;
+                self.functions.insert(func_index, loc!(function, location));
 
-                Ok(vec![Loc {
-                    location,
-                    inner: StmtT::Let(func_name, captures),
-                }])
+                // If we have a return type, we're inside a function and need to have a captures struct.
+                // Otherwise we're at the top level and can ignore it (for now)
+                if self.return_type.is_some() {
+                    Ok(vec![Loc {
+                        location,
+                        inner: StmtT::Let(func_name, captures),
+                    }])
+                } else {
+                    Ok(Vec::new())
+                }
             }
             Stmt::Let(pat, rhs) => Ok(self.let_binding(pat, rhs, location)?),
             Stmt::Break => {
@@ -756,11 +763,10 @@ impl TypeChecker {
         params: Pat,
         body: Loc<Expr>,
         // TODO: Create a Closure struct
-    ) -> Result<(Function, Loc<ExprT>, TypeId), Loc<TypeError>> {
+    ) -> Result<(Function, Loc<ExprT>), Loc<TypeError>> {
         let entry = self.symbol_table.lookup_name(name);
         let entry = entry.as_ref().unwrap();
         let func_info = entry.function_info.as_ref().unwrap();
-        let type_ = entry.var_type;
         let scope = func_info.func_scope;
         let return_type = func_info.return_type;
         self.symbol_table.swap_scope(scope);
@@ -800,9 +806,9 @@ impl TypeChecker {
                 body: Box::new(body),
                 local_variables,
                 scope_index,
+                return_type,
             },
             captures,
-            type_,
         ))
     }
 
@@ -987,9 +993,9 @@ impl TypeChecker {
                     self.symbol_table
                         .insert_function(name, params_type, return_type, type_);
 
-                let (function, captures, type_) = self.function(name, params, *body)?;
+                let (function, captures) = self.function(name, params, *body)?;
 
-                self.functions.insert(func_index, function);
+                self.functions.insert(func_index, loc!(function, location));
                 let table_index = self.expr_func_index;
                 let table_index_expr = loc!(
                     ExprT::Primary {

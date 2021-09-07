@@ -1,3 +1,4 @@
+use crate::symbol_table::PRINT_CHAR_INDEX;
 use std::fmt;
 
 #[derive(Clone, Debug)]
@@ -157,12 +158,11 @@ pub struct ProgramData {
 
 impl ProgramData {
     pub fn new(func_count: usize, expr_func_count: usize) -> Self {
-        // Add one for start function
-        let func_count = func_count + 1;
+        let local_func_count = func_count - (1 + PRINT_CHAR_INDEX as usize);
         ProgramData {
             type_section: Vec::new(),
             import_section: Vec::new(),
-            function_section: vec![None; func_count],
+            function_section: vec![None; local_func_count],
             global_section: vec![
                 (
                     GlobalType {
@@ -188,7 +188,7 @@ impl ProgramData {
                 offset: vec![OpCode::I32Const(0), OpCode::End],
                 elems: vec![None; expr_func_count],
             },
-            code_section: vec![None; func_count],
+            code_section: vec![None; local_func_count],
             data_section: Vec::new(),
         }
     }
