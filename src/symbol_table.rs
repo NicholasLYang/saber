@@ -16,7 +16,6 @@ pub struct Scope {
 pub enum ScopeType {
     Function {
         func_index: usize,
-        local_variables: Vec<TypeId>,
         captures: Vec<(Name, ScopeId, TypeId)>,
     },
     Regular,
@@ -25,6 +24,7 @@ pub enum ScopeType {
 #[derive(Debug, PartialEq, Clone)]
 pub struct SymbolEntry {
     pub var_type: TypeId,
+    pub var_index: usize,
     pub func_index: Option<usize>,
 }
 
@@ -33,11 +33,13 @@ pub struct SymbolTable {
     scopes: Vec<Scope>,
     pub functions: Vec<FunctionInfo>,
     pub current_scope: ScopeId,
+    pub current_function_idx: Option<usize>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct FunctionInfo {
     pub func_scope: ScopeId,
+    pub local_variables: Vec<TypeId>,
     pub param_types: Vec<TypeId>,
     pub return_types: Vec<TypeId>,
     pub is_top_level: bool,
@@ -71,6 +73,7 @@ impl SymbolTable {
             }],
             functions: Vec::new(),
             current_scope: 0,
+            current_function_idx: None,
         }
     }
 
@@ -111,7 +114,6 @@ impl SymbolTable {
         // If we're finished checking a function scope...
         if let ScopeType::Function {
             captures,
-            local_variables: _,
             func_index: _,
         } = &self.scopes[scope].scope_type
         {
@@ -129,7 +131,6 @@ impl SymbolTable {
         if let Some(parent_func_scope) = self.scopes[scope].parent_func_scope {
             if let ScopeType::Function {
                 captures,
-                local_variables: _,
                 func_index: _,
             } = &mut self.scopes[parent_func_scope].scope_type
             {
@@ -153,7 +154,6 @@ impl SymbolTable {
         match &self.scopes[scope].scope_type {
             ScopeType::Function {
                 captures,
-                local_variables: _,
                 func_index: _,
             } => Some(captures),
             ScopeType::Regular => None,
@@ -181,7 +181,6 @@ impl SymbolTable {
                         if let Some(usage_func_scope) = usage_func_scope {
                             if let ScopeType::Function {
                                 captures,
-                                local_variables,
                                 func_index: _,
                             } = &mut self.scopes[usage_func_scope].scope_type
                             {
@@ -203,7 +202,6 @@ impl SymbolTable {
         match self.scopes[scope].scope_type {
             ScopeType::Function {
                 captures: _,
-                local_variables: _,
                 func_index: _,
             } => Some(scope),
             ScopeType::Regular => self.scopes[scope].parent_func_scope,
@@ -216,14 +214,20 @@ impl SymbolTable {
     }
 
     pub fn insert_var(&mut self, name: Name, var_type: TypeId) -> usize {
+        let func_scope = self.current_function_idx.expect("TODO: Handle global case");
+        self.functions[func_scope].local_variables.push(var_type);
+        let var_index = self.functions[func_scope].local_variables.len() - 1;
+
         self.scopes[self.current_scope].symbols.insert(
             name,
             SymbolEntry {
                 var_type,
+                var_index,
                 func_index: None,
             },
         );
-        index
+
+        var_index
     }
 
     // There's a lot of bookkeeping here
@@ -232,6 +236,7 @@ impl SymbolTable {
     // Then we add the function scope
     // Why do this all at once?
     // We need to link all of these together
+    // Returns the var index
     pub fn insert_function(
         &mut self,
         name: Name,
@@ -239,38 +244,44 @@ impl SymbolTable {
         return_types: Vec<TypeId>,
         type_: TypeId,
     ) -> usize {
-        let func_scope = self.scopes.len();
         let is_top_level = self.scopes[self.current_scope].parent_func_scope.is_none();
 
         self.functions.push(FunctionInfo {
             func_scope,
+            local_variables: Vec::new(),
             param_types,
             return_types,
             is_top_level,
         });
-
         let func_index = self.functions.len() - 1;
+
+        // Adding function as a variable
+        let outer_func_scope = self.current_function_idx.expect("TODO: Handle global case");
+        self.functions[outer_func_scope].local_variables.push(type_);
+        let var_index = self.functions[func_scope].local_variables.len() - 1;
 
         self.scopes[self.current_scope].symbols.insert(
             name,
             SymbolEntry {
-                var_type: type_,
+                var_type,
+                var_index,
                 func_index: Some(func_index),
             },
         );
 
+        self.current_function_idx = Some(func_index);
+        // Add the function scope
         self.scopes.push(Scope {
             symbols: HashMap::new(),
             scope_type: ScopeType::Function {
                 func_index,
-                local_variables: Vec::new(),
                 captures: Vec::new(),
             },
             parent_func_scope: self.get_func_scope(self.current_scope),
             parent: Some(self.current_scope),
         });
 
-        func_index
+        var_index
     }
 
     #[allow(dead_code)]

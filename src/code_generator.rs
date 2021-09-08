@@ -1,6 +1,5 @@
 use crate::ast::{
-    BuiltInTypes, ExprT, Function, FunctionId, Loc, Name, Op, ProgramT, StmtT, Type, TypeId,
-    UnaryOp, Value,
+    BuiltInTypes, ExprT, Function, Loc, Name, Op, ProgramT, StmtT, Type, TypeId, UnaryOp, Value,
 };
 use crate::lexer::LocationRange;
 use crate::printer::type_to_string;
@@ -20,8 +19,8 @@ use std::convert::TryInto;
 use thiserror::Error;
 use walrus::ir::{BinaryOp, ExtendedLoad, LoadKind, MemArg, StoreKind};
 use walrus::{
-    FunctionBuilder, GlobalId, InitExpr, InstrSeqBuilder, LocalFunction, LocalId, MemoryId, Module,
-    ModuleConfig, TableId, ValType,
+    FunctionBuilder, FunctionId, GlobalId, InitExpr, InstrSeqBuilder, LocalFunction, LocalId,
+    MemoryId, Module, ModuleConfig, TableId, ValType,
 };
 use wasmtime::Val;
 
@@ -519,6 +518,7 @@ impl CodeGenerator {
                     if cf.id == *func_id
                     // Basically if we're in a recursive function situation
                     {
+                        fn_body.local_get()
                         vec![OpCode::GetLocal(0)]
                     } else if let Some(var_index) = captures_var_index {
                         fn_body.local_get(cf.env_pointer);

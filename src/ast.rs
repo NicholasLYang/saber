@@ -45,7 +45,7 @@ pub struct Program {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct ProgramT {
-    pub functions: Vec<Function>,
+    pub functions: HashMap<Name, Loc<Function>>,
     pub stmts: Vec<Loc<StmtT>>,
     pub named_types: Vec<(Name, TypeId)>,
     pub errors: Vec<Loc<TypeError>>,
