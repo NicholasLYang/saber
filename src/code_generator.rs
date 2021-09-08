@@ -5,8 +5,7 @@ use crate::ast::{
 use crate::lexer::LocationRange;
 use crate::printer::type_to_string;
 use crate::symbol_table::{
-    FunctionInfo, SymbolTable, VarIndex, ALLOC_INDEX, DEALLOC_INDEX, PRINT_CHAR_INDEX,
-    PRINT_HEAP_INDEX, STREQ_INDEX,
+    FunctionInfo, SymbolTable, VarIndex, PRINT_CHAR_INDEX, PRINT_HEAP_INDEX, STREQ_INDEX,
 };
 
 use crate::typechecker::TypeChecker;
@@ -21,8 +20,8 @@ use std::convert::TryInto;
 use thiserror::Error;
 use walrus::ir::{BinaryOp, ExtendedLoad, LoadKind, MemArg, StoreKind};
 use walrus::{
-    FunctionBuilder, FunctionId, GlobalId, InitExpr, InstrSeqBuilder, LocalFunction, LocalId,
-    MemoryId, Module, ModuleConfig, TableId, ValType,
+    FunctionBuilder, GlobalId, InitExpr, InstrSeqBuilder, LocalFunction, LocalId, MemoryId, Module,
+    ModuleConfig, TableId, ValType,
 };
 use wasmtime::Val;
 
@@ -747,7 +746,7 @@ impl CodeGenerator {
             let field_loc = index + 1;
             let offset = 4 * field_loc;
             let load_kind = match field_wasm_type {
-                ValType::I32 => LoadKind::I32,
+                ValType::I32 => LoadKind::I32 { atomic: false },
                 ValType::F32 => LoadKind::F32,
                 _ => {
                     return Err(GenerationError::NotReachable);
