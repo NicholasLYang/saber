@@ -62,7 +62,8 @@ fn main() -> Result<()> {
     };
     if let Some(build_matches) = matches.subcommand_matches("build") {
         let file = build_matches.value_of("file").unwrap();
-        compile_saber_file(file, debug_file)?;
+        let saber_program = compile_saber_file(file, debug_file)?;
+        fs::write("out.wasm", saber_program.wasm_bytes)?;
     } else if let Some(run_matches) = matches.subcommand_matches("run") {
         let file = run_matches.value_of("file").unwrap();
         let saber_program = compile_saber_file(file, debug_file)?;

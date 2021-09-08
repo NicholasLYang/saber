@@ -5,7 +5,8 @@ use crate::ast::{
 use crate::lexer::LocationRange;
 use crate::printer::type_to_string;
 use crate::symbol_table::{
-    FunctionInfo, SymbolTable, VarIndex, ALLOC_INDEX, DEALLOC_INDEX, PRINT_CHAR_INDEX, STREQ_INDEX,
+    FunctionInfo, SymbolTable, VarIndex, ALLOC_INDEX, DEALLOC_INDEX, PRINT_CHAR_INDEX,
+    PRINT_HEAP_INDEX, STREQ_INDEX,
 };
 use crate::typechecker::TypeChecker;
 use crate::utils::{get_final_type, NameTable};
@@ -194,7 +195,6 @@ impl CodeGenerator {
 
         self.generate_default_imports()?;
 
-        println!("{:#?}", self.program_data);
         Ok(self.program_data)
     }
 
@@ -293,7 +293,7 @@ impl CodeGenerator {
         local_variables: &[TypeId],
         param_count: usize,
     ) -> Result<FunctionBody> {
-        let code = self.generate_expr(body)?;
+        let mut code = self.generate_expr(body)?;
         let mut local_entries = Vec::new();
         // We want to generate only the locals not params so we skip
         // to after the params
@@ -306,6 +306,13 @@ impl CodeGenerator {
                 type_: wasm_type,
             })
         }
+
+        // In the future we gotta do control flow checking to ensure a function evaluates
+        // to a value
+        if self.return_type.is_some() && body.inner.get_type() == self.builtin_types.unit {
+            code.push(OpCode::Unreachable);
+        }
+
         Ok(FunctionBody {
             locals: local_entries,
             code,
@@ -592,7 +599,7 @@ impl CodeGenerator {
                 opcodes.push(OpCode::Type(WasmType::Empty));
                 // Push on index
                 opcodes.push(OpCode::GetGlobal(0));
-                if matches!(self.type_arena[lhs.inner.get_type()], Type::String) {
+                if !matches!(self.type_arena[lhs.inner.get_type()], Type::String) {
                     opcodes.push(OpCode::I32Const(4));
                     opcodes.push(OpCode::I32Mul);
                 }
