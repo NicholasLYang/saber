@@ -520,7 +520,7 @@ impl CodeGenerator {
             }
             ExprT::DirectCall {
                 callee,
-                captures_index,
+                captures_var_index,
                 args,
                 type_: _,
             } => {
@@ -533,8 +533,8 @@ impl CodeGenerator {
                     // Basically if we're in a recursive function situation
                     {
                         vec![OpCode::GetLocal(0)]
-                    } else if let Some(ci) = *captures_index {
-                        vec![OpCode::GetLocal((ci).try_into().unwrap())]
+                    } else if let Some(var_index) = captures_var_index {
+                        vec![OpCode::GetLocal(*var_index as u32)]
                     } else {
                         vec![OpCode::I32Const(0)]
                     }

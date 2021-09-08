@@ -278,6 +278,7 @@ impl SymbolTable {
     ) -> usize {
         self.var_types.push(type_);
         let func_scope = self.scopes.len();
+        let is_top_level = self.scopes[self.current_scope].parent_func_scope.is_none();
         self.scopes[self.current_scope].symbols.insert(
             name,
             SymbolEntry {
@@ -288,7 +289,7 @@ impl SymbolTable {
                     func_scope,
                     params_type,
                     return_type,
-                    is_top_level: self.function_index == 0,
+                    is_top_level,
                 }),
             },
         );

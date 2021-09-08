@@ -1052,17 +1052,18 @@ impl TypeChecker {
                             is_top_level,
                         }) = entry.function_info
                         {
-                            let captures_index = if is_top_level {
+                            let captures_var_index = if !is_top_level {
                                 Some(entry.var_index)
                             } else {
                                 None
                             };
+
                             self.unify_or_err(params_type, typed_args.inner.get_type(), location)?;
                             return Ok(Loc {
                                 location,
                                 inner: ExprT::DirectCall {
                                     callee: func_index,
-                                    captures_index,
+                                    captures_var_index,
                                     args: Box::new(typed_args),
                                     type_: return_type,
                                 },

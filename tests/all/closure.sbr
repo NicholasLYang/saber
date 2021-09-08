@@ -1,0 +1,13 @@
+let foo = () => {
+  let name = "Wong Kar Wai";
+  let bar = () => {
+    printString(name);
+  }
+  bar();
+}
+
+let main = () => {
+  foo();
+}
+
+export main;

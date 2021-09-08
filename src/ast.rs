@@ -189,7 +189,7 @@ pub enum ExprT {
     TupleField(Box<Loc<ExprT>>, u32, TypeId),
     DirectCall {
         callee: FunctionId,
-        captures_index: Option<usize>,
+        captures_var_index: Option<usize>,
         args: Box<Loc<ExprT>>,
         type_: TypeId,
     },
@@ -391,7 +391,7 @@ impl ExprT {
             ExprT::TupleField(_, _, type_) => *type_,
             ExprT::DirectCall {
                 callee: _,
-                captures_index: _,
+                captures_var_index: _,
                 args: _,
                 type_,
             } => *type_,
