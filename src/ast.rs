@@ -37,6 +37,45 @@ impl<T: fmt::Display> fmt::Display for Loc<T> {
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum Op {
+    Plus,
+    Minus,
+    Times,
+    Div,
+    BangEqual,
+    EqualEqual,
+    Greater,
+    GreaterEqual,
+    Less,
+    LessEqual,
+    LogicalAnd,
+    LogicalOr,
+}
+
+impl fmt::Display for Op {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Op::Plus => "+",
+                Op::Minus => "-",
+                Op::Times => "*",
+                Op::Div => "/",
+                Op::BangEqual => "!=",
+                Op::EqualEqual => "==",
+                Op::Greater => ">",
+                Op::GreaterEqual => ">=",
+                Op::Less => "<",
+                Op::LessEqual => "<=",
+                Op::LogicalAnd => "&&",
+                Op::LogicalOr => "||",
+            }
+        )
+    }
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct Program {
     pub stmts: Vec<Loc<Stmt>>,
     pub type_defs: Vec<Loc<TypeDef>>,
@@ -138,6 +177,73 @@ pub struct Target {
     pub accessors: Vec<Loc<Accessor>>,
 }
 
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum OpT {
+    I32Add,
+    I32Sub,
+    I32Mul,
+    I32Div,
+    I32NotEqual,
+    I32Equal,
+    I32Greater,
+    I32GreaterEqual,
+    I32Less,
+    I32LessEqual,
+    I32And,
+    I32Or,
+    F32Add,
+    F32Sub,
+    F32Mul,
+    F32Div,
+    F32NotEqual,
+    F32Equal,
+    F32Greater,
+    F32GreaterEqual,
+    F32Less,
+    F32LessEqual,
+    BoolAnd,
+    BoolOr,
+    StringEqual,
+    StringConcat,
+}
+
+impl fmt::Display for OpT {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                OpT::I32Add => "i32.add",
+                OpT::I32Sub => "i32.sub",
+                OpT::I32Mul => "i32.mul",
+                OpT::I32Div => "i32.div",
+                OpT::I32NotEqual => "i32.not_eq",
+                OpT::I32Equal => "i32.eq",
+                OpT::I32Greater => "i32.greater",
+                OpT::I32GreaterEqual => "i32.greater_eq",
+                OpT::I32Less => "i32.less",
+                OpT::I32LessEqual => "i32.less_eq",
+                OpT::I32And => "i32.and",
+                OpT::I32Or => "i32.or",
+                OpT::F32Add => "f32.add",
+                OpT::F32Sub => "f32.sub",
+                OpT::F32Mul => "f32.mul",
+                OpT::F32Div => "f32.div",
+                OpT::F32NotEqual => "f32.not_eq",
+                OpT::F32Equal => "f32.equal",
+                OpT::F32Greater => "f32.greater",
+                OpT::F32GreaterEqual => "f32.greater_eq",
+                OpT::F32Less => "f32.less",
+                OpT::F32LessEqual => "f32.less_eq",
+                OpT::BoolAnd => "bool.and",
+                OpT::BoolOr => "bool.or",
+                OpT::StringEqual => "str.eq",
+                OpT::StringConcat => "str.concat",
+            }
+        )
+    }
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub enum ExprT {
     Asgn {
@@ -166,7 +272,7 @@ pub enum ExprT {
         type_: TypeId,
     },
     BinOp {
-        op: Op,
+        op: OpT,
         lhs: Box<Loc<ExprT>>,
         rhs: Box<Loc<ExprT>>,
         type_: TypeId,
@@ -243,45 +349,6 @@ impl fmt::Display for Value {
 pub enum UnaryOp {
     Minus,
     Not,
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum Op {
-    Plus,
-    Minus,
-    Times,
-    Div,
-    BangEqual,
-    EqualEqual,
-    Greater,
-    GreaterEqual,
-    Less,
-    LessEqual,
-    LogicalAnd,
-    LogicalOr,
-}
-
-impl fmt::Display for Op {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                Op::Plus => "+",
-                Op::Minus => "-",
-                Op::Times => "*",
-                Op::Div => "/",
-                Op::BangEqual => "!=",
-                Op::EqualEqual => "==",
-                Op::Greater => ">",
-                Op::GreaterEqual => ">=",
-                Op::Less => "<",
-                Op::LessEqual => "<=",
-                Op::LogicalAnd => "&&",
-                Op::LogicalOr => "||",
-            }
-        )
-    }
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]

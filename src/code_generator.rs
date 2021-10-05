@@ -1,5 +1,5 @@
 use crate::ast::{
-    BuiltInTypes, ExprT, Function, FunctionId, Loc, Name, Op, ProgramT, StmtT, Type, TypeId,
+    BuiltInTypes, ExprT, Function, FunctionId, Loc, Name, Op, OpT, ProgramT, StmtT, Type, TypeId,
     UnaryOp, Value,
 };
 use crate::lexer::LocationRange;
@@ -678,19 +678,10 @@ impl CodeGenerator {
                 type_,
             } => {
                 let mut lhs_ops = self.generate_expr(lhs)?;
-                let lhs_type = lhs.inner.get_type();
                 let mut rhs_ops = self.generate_expr(rhs)?;
-                let rhs_type = rhs.inner.get_type();
 
-                let promoted_type = self.promote_types(
-                    lhs_type,
-                    rhs_type,
-                    &mut lhs_ops,
-                    &mut rhs_ops,
-                    expr.location,
-                )?;
                 lhs_ops.append(&mut rhs_ops);
-                let opcode = self.generate_operator(op, &self.type_arena[*type_], promoted_type)?;
+                let opcode = self.generate_operator(op)?;
                 lhs_ops.push(opcode);
                 Ok(lhs_ops)
             }
@@ -924,25 +915,7 @@ impl CodeGenerator {
         }
     }
 
-    fn generate_operator(&self, op: &Op, result_type: &Type, input_type: TypeId) -> Result<OpCode> {
-        match (op, &self.type_arena[input_type], result_type) {
-            (Op::Plus, Type::Int, Type::Int) => Ok(OpCode::I32Add),
-            (Op::Minus, Type::Int, Type::Int) => Ok(OpCode::I32Sub),
-            (Op::Plus, Type::Float, Type::Float) => Ok(OpCode::F32Add),
-            (Op::Minus, Type::Float, Type::Float) => Ok(OpCode::F32Sub),
-            (Op::Times, Type::Int, Type::Int) => Ok(OpCode::I32Mul),
-            (Op::Div, Type::Int, Type::Int) => Ok(OpCode::I32Div),
-            (Op::Times, Type::Float, Type::Float) => Ok(OpCode::F32Mul),
-            (Op::Div, Type::Float, Type::Float) => Ok(OpCode::F32Div),
-            (Op::Less, Type::Int, Type::Bool) => Ok(OpCode::I32LessSigned),
-            (Op::Greater, Type::Int, Type::Bool) => Ok(OpCode::I32GreaterSigned),
-            (Op::GreaterEqual, Type::Int, Type::Bool) => Ok(OpCode::I32GreaterEqSigned),
-            (Op::EqualEqual, Type::Int, Type::Bool) => Ok(OpCode::I32Eq),
-            (Op::EqualEqual, Type::String, Type::Bool) => Ok(OpCode::Call(STREQ_INDEX)),
-            (op, _, _) => Err(GenerationError::InvalidOperator {
-                op: op.clone(),
-                input_type: type_to_string(&self.name_table, &self.type_arena, input_type),
-            }),
-        }
+    fn generate_operator(&self, op: &OpT) -> Result<OpCode> {
+        todo!()
     }
 }

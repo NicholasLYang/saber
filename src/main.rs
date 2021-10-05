@@ -22,6 +22,7 @@ mod code_generator;
 mod cps;
 mod emitter;
 mod lexer;
+mod mir;
 mod parser;
 mod printer;
 mod runtime;

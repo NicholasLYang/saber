@@ -1,5 +1,5 @@
 use crate::ast::{
-    Accessor, BuiltInTypes, Expr, ExprT, Function, FunctionId, Loc, Name, Op, Pat, Program,
+    Accessor, BuiltInTypes, Expr, ExprT, Function, FunctionId, Loc, Name, Op, OpT, Pat, Program,
     ProgramT, Stmt, StmtT, Target, Type, TypeDef, TypeId, TypeSig, UnaryOp, Value,
 };
 use crate::lexer::LocationRange;
@@ -907,13 +907,13 @@ impl TypeChecker {
                 let lhs_type = typed_lhs.inner.get_type();
                 let rhs_type = typed_rhs.inner.get_type();
                 match self.op(&op, lhs_type, rhs_type) {
-                    Some(op_type) => Ok(Loc {
+                    Some((op, type_)) => Ok(Loc {
                         location,
                         inner: ExprT::BinOp {
                             op,
                             lhs: Box::new(typed_lhs),
                             rhs: Box::new(typed_rhs),
-                            type_: op_type,
+                            type_,
                         },
                     }),
                     None => {
@@ -1289,51 +1289,54 @@ impl TypeChecker {
         }
     }
 
-    fn op(&mut self, op: &Op, lhs_type: TypeId, rhs_type: TypeId) -> Option<TypeId> {
-        match op {
-            Op::Plus | Op::Minus | Op::Times | Op::Div => {
-                let lhs_type = get_final_type(&self.type_arena, lhs_type);
-                let rhs_type = get_final_type(&self.type_arena, rhs_type);
+    fn op(&mut self, op: &Op, lhs_type: TypeId, rhs_type: TypeId) -> Option<(OpT, TypeId)> {
+        let lhs_type = get_final_type(&self.type_arena, lhs_type);
+        let rhs_type = get_final_type(&self.type_arena, rhs_type);
 
-                if self.is_unifiable(lhs_type, self.builtin_types.int)
-                    && self.is_unifiable(rhs_type, self.builtin_types.int)
-                {
-                    Some(self.builtin_types.int)
-                } else if self.is_unifiable(lhs_type, self.builtin_types.float)
-                    || self.is_unifiable(rhs_type, self.builtin_types.float)
-                {
-                    Some(self.builtin_types.float)
-                } else {
-                    None
-                }
+        if self.is_unifiable(lhs_type, self.builtin_types.int)
+            && self.is_unifiable(rhs_type, self.builtin_types.int)
+        {
+            match op {
+                Op::Plus => Some((OpT::I32Add, self.builtin_types.int)),
+                Op::Minus => Some((OpT::I32Sub, self.builtin_types.int)),
+                Op::Times => Some((OpT::I32Mul, self.builtin_types.int)),
+                Op::Div => Some((OpT::I32Div, self.builtin_types.int)),
+                Op::BangEqual => Some((OpT::I32NotEqual, self.builtin_types.bool)),
+                Op::EqualEqual => Some((OpT::I32Equal, self.builtin_types.bool)),
+                Op::Greater => Some((OpT::I32Greater, self.builtin_types.bool)),
+                Op::GreaterEqual => Some((OpT::I32GreaterEqual, self.builtin_types.bool)),
+                Op::Less => Some((OpT::I32Less, self.builtin_types.bool)),
+                Op::LessEqual => Some((OpT::I32LessEqual, self.builtin_types.bool)),
+                Op::LogicalAnd => Some((OpT::I32And, self.builtin_types.int)),
+                Op::LogicalOr => Some((OpT::I32Or, self.builtin_types.int)),
+                _ => None,
             }
-            Op::BangEqual | Op::EqualEqual => {
-                if self.is_unifiable(lhs_type, rhs_type) {
-                    Some(self.builtin_types.bool)
-                } else {
-                    None
-                }
+        } else if self.is_unifiable(lhs_type, self.builtin_types.float)
+            || self.is_unifiable(rhs_type, self.builtin_types.float)
+        {
+            match op {
+                Op::Plus => Some((OpT::F32Add, self.builtin_types.float)),
+                Op::Minus => Some((OpT::F32Sub, self.builtin_types.float)),
+                Op::Times => Some((OpT::F32Mul, self.builtin_types.float)),
+                Op::Div => Some((OpT::F32Div, self.builtin_types.float)),
+                Op::BangEqual => Some((OpT::F32NotEqual, self.builtin_types.bool)),
+                Op::EqualEqual => Some((OpT::F32Equal, self.builtin_types.bool)),
+                Op::Greater => Some((OpT::F32Greater, self.builtin_types.bool)),
+                Op::GreaterEqual => Some((OpT::F32GreaterEqual, self.builtin_types.bool)),
+                Op::Less => Some((OpT::F32Less, self.builtin_types.bool)),
+                Op::LessEqual => Some((OpT::F32LessEqual, self.builtin_types.bool)),
+                _ => None,
             }
-            Op::GreaterEqual | Op::Greater | Op::Less | Op::LessEqual => {
-                if (self.is_unifiable(lhs_type, self.builtin_types.int)
-                    && self.is_unifiable(rhs_type, self.builtin_types.int))
-                    || (self.is_unifiable(lhs_type, self.builtin_types.float)
-                        && self.is_unifiable(rhs_type, self.builtin_types.float))
-                {
-                    Some(self.builtin_types.bool)
-                } else {
-                    None
-                }
+        } else if self.is_unifiable(lhs_type, self.builtin_types.string)
+            && self.is_unifiable(rhs_type, self.builtin_types.string)
+        {
+            match op {
+                Op::EqualEqual => Some((OpT::StringEqual, self.builtin_types.bool)),
+                Op::Plus => Some((OpT::StringConcat, self.builtin_types.string)),
+                _ => None,
             }
-            Op::LogicalAnd | Op::LogicalOr => {
-                if self.is_unifiable(lhs_type, self.builtin_types.bool)
-                    && self.is_unifiable(rhs_type, self.builtin_types.bool)
-                {
-                    Some(self.builtin_types.bool)
-                } else {
-                    None
-                }
-            }
+        } else {
+            None
         }
     }
 
