@@ -350,7 +350,7 @@ impl CodeGenerator {
     ) -> Result<Option<WasmType>> {
         match &self.type_arena[sbr_type] {
             Type::Unit => Ok(None),
-            Type::Int | Type::Bool | Type::Char => Ok(Some(WasmType::i32)),
+            Type::Integer | Type::Bool | Type::Char => Ok(Some(WasmType::i32)),
             Type::Float => Ok(Some(WasmType::f32)),
             Type::String
             | Type::Array(_)
@@ -443,11 +443,11 @@ impl CodeGenerator {
             return Ok(type1);
         }
         match (&self.type_arena[type1], &self.type_arena[type2]) {
-            (Type::Int, Type::Float) => {
+            (Type::Integer, Type::Float) => {
                 ops1.push(OpCode::F32ConvertI32);
                 Ok(self.builtin_types.float)
             }
-            (Type::Float, Type::Int) => {
+            (Type::Float, Type::Integer) => {
                 ops2.push(OpCode::F32ConvertI32);
                 Ok(self.builtin_types.float)
             }
@@ -664,10 +664,9 @@ impl CodeGenerator {
                         .unwrap_or(WasmType::Empty),
                 ));
                 opcodes.append(&mut self.generate_expr(then_block)?);
-                if let Some(else_block) = else_block {
-                    opcodes.push(OpCode::Else);
-                    opcodes.append(&mut self.generate_expr(else_block)?);
-                }
+                opcodes.push(OpCode::Else);
+                opcodes.append(&mut self.generate_expr(else_block)?);
+
                 opcodes.push(OpCode::End);
                 Ok(opcodes)
             }

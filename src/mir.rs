@@ -5,10 +5,13 @@ no nested scope.
 
 use crate::ast::{ExprT, Loc, OpT, Value};
 use crate::symbol_table::SymbolTable;
+use std::mem::replace;
 
 pub type Name = usize;
 #[derive(Debug, Clone, PartialEq)]
 pub struct InstrId(usize);
+#[derive(Debug, Clone, PartialEq)]
+pub struct BlockId(usize);
 
 enum Type {
     Int,
@@ -23,12 +26,20 @@ struct Function {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct Block(Vec<Instruction>);
+
+#[derive(Debug, Clone, PartialEq)]
 enum Instruction {
+    // This could be too specific. I might want
+    // blocks to have outgoing edges and have a
+    // break with index as the instruction
+    If(InstrId, BlockId, BlockId),
     // Probably shouldn't reuse this from typed_ast pass
     // but I don't see why I should make another op enum
     Binary(OpT, InstrId, InstrId),
     Unary(UnaryOp, InstrId),
     Primary(Primary),
+    Return(InstrId),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -48,7 +59,8 @@ struct MirCompiler {
     string_literals: Vec<String>,
     parameters: Vec<Type>,
     symbol_table: SymbolTable,
-    instructions: Vec<Instruction>,
+    blocks: Vec<Block>,
+    current_block: Vec<Instruction>,
 }
 
 impl MirCompiler {
@@ -56,7 +68,8 @@ impl MirCompiler {
         MirCompiler {
             string_literals: Vec::new(),
             parameters: Vec::new(),
-            instructions: Vec::new(),
+            blocks: Vec::new(),
+            current_block: Vec::new(),
             symbol_table,
         }
     }
@@ -71,16 +84,39 @@ impl MirCompiler {
             } => {
                 let lhs_id = self.compile_expr(*lhs);
                 let rhs_id = self.compile_expr(*rhs);
-                self.instructions
+                self.current_block
                     .push(Instruction::Binary(op, lhs_id, rhs_id));
 
-                InstrId(self.instructions.len() - 1)
+                InstrId(self.current_block.len() - 1)
+            }
+            ExprT::If(cond, then_expr, else_expr, type_) => {
+                let mut current_block = replace(&mut self.current_block, Vec::new());
+
+                self.compile_expr(*then_expr);
+                let then_block = replace(&mut self.current_block, Vec::new());
+                self.blocks.push(Block(then_block));
+                let then_block_id = self.blocks.len() - 1;
+
+                self.compile_expr(*else_expr);
+                let else_block = replace(&mut self.current_block, current_block);
+                self.blocks.push(Block(else_block));
+                let else_block_id = self.blocks.len() - 1;
+
+                let cond_id = self.compile_expr(*cond);
+
+                self.current_block.push(Instruction::If(
+                    cond_id,
+                    BlockId(then_block_id),
+                    BlockId(else_block_id),
+                ));
+
+                InstrId(self.current_block.len() - 1)
             }
             ExprT::Primary { value, type_: _ } => {
                 let instr = Instruction::Primary(self.compile_value(value));
-                self.instructions.push(instr);
+                self.current_block.push(instr);
 
-                InstrId(self.instructions.len() - 1)
+                InstrId(self.current_block.len() - 1)
             }
             _ => todo!(),
         }
@@ -101,13 +137,25 @@ impl MirCompiler {
     fn compile_var(&self, name: Name) {
         todo!()
     }
+
+    fn get_current_block(&self) -> &Vec<Instruction> {
+        &self.current_block
+    }
+
+    fn get_blocks(&self) -> &Vec<Block> {
+        &self.blocks
+    }
 }
 
 #[cfg(test)]
 mod test {
-    use crate::mir::Value;
+    use crate::ast::{ExprT, Loc, OpT, Type};
+    use crate::lexer::LocationRange;
+    use crate::loc;
+    use crate::mir::{Block, BlockId, InstrId, Instruction, Value};
     use crate::mir::{MirCompiler, Primary};
     use crate::symbol_table::SymbolTable;
+    use id_arena::Arena;
 
     #[test]
     fn test_compile_value() {
@@ -128,5 +176,98 @@ mod test {
         assert_eq!(compiler.compile_value(Value::Bool(false)), Primary::I32(0));
 
         assert_eq!(compiler.compile_value(Value::Float(2.3)), Primary::F32(2.3));
+    }
+
+    #[test]
+    fn test_compile_bin_op() {
+        let mut compiler = MirCompiler::new(SymbolTable::new());
+        let mut type_arena: Arena<Type> = Arena::new();
+        let int_id = type_arena.alloc(Type::Integer);
+
+        compiler.compile_expr(loc!(
+            ExprT::BinOp {
+                op: OpT::I32Add,
+                lhs: Box::new(loc!(
+                    ExprT::Primary {
+                        value: Value::Integer(20),
+                        type_: int_id
+                    },
+                    LocationRange(0, 4)
+                )),
+                rhs: Box::new(loc!(
+                    ExprT::Primary {
+                        value: Value::Integer(40),
+                        type_: int_id
+                    },
+                    LocationRange(0, 6)
+                )),
+                type_: int_id
+            },
+            LocationRange(0, 2)
+        ));
+
+        let instructions = compiler.get_current_block();
+        assert_eq!(
+            instructions,
+            &vec![
+                Instruction::Primary(Primary::I32(20)),
+                Instruction::Primary(Primary::I32(40)),
+                Instruction::Binary(OpT::I32Add, InstrId(0), InstrId(1))
+            ]
+        );
+    }
+
+    #[test]
+    fn test_compile_if_expr() {
+        let mut compiler = MirCompiler::new(SymbolTable::new());
+        let mut type_arena: Arena<Type> = Arena::new();
+        let int_id = type_arena.alloc(Type::Integer);
+        let bool_id = type_arena.alloc(Type::Bool);
+
+        compiler.compile_expr(loc!(
+            ExprT::If(
+                Box::new(loc!(
+                    ExprT::Primary {
+                        value: Value::Bool(true),
+                        type_: bool_id
+                    },
+                    LocationRange(0, 6)
+                )),
+                Box::new(loc!(
+                    ExprT::Primary {
+                        value: Value::Integer(20),
+                        type_: int_id
+                    },
+                    LocationRange(0, 4)
+                )),
+                Box::new(loc!(
+                    ExprT::Primary {
+                        value: Value::Integer(40),
+                        type_: int_id
+                    },
+                    LocationRange(0, 6)
+                )),
+                int_id
+            ),
+            LocationRange(0, 2)
+        ));
+
+        let blocks = compiler.get_blocks();
+        assert_eq!(
+            blocks,
+            &vec![
+                Block(vec![Instruction::Primary(Primary::I32(20))]),
+                Block(vec![Instruction::Primary(Primary::I32(40))]),
+            ]
+        );
+
+        let instructions = compiler.get_current_block();
+        assert_eq!(
+            instructions,
+            &vec![
+                Instruction::Primary(Primary::I32(1)),
+                Instruction::If(InstrId(0), BlockId(0), BlockId(1))
+            ]
+        );
     }
 }

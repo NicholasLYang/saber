@@ -257,12 +257,7 @@ pub enum ExprT {
         scope_index: usize,
         type_: TypeId,
     },
-    If(
-        Box<Loc<ExprT>>,
-        Box<Loc<ExprT>>,
-        Option<Box<Loc<ExprT>>>,
-        TypeId,
-    ),
+    If(Box<Loc<ExprT>>, Box<Loc<ExprT>>, Box<Loc<ExprT>>, TypeId),
     Primary {
         value: Value,
         type_: TypeId,
@@ -355,7 +350,7 @@ pub enum UnaryOp {
 pub enum Type {
     Unit,
     Float,
-    Int,
+    Integer,
     Bool,
     Char,
     String,
@@ -373,7 +368,7 @@ impl Type {
     pub fn is_ref_type(&self) -> bool {
         matches!(
             self,
-            Type::Int | Type::Bool | Type::Unit | Type::Char | Type::Float
+            Type::Integer | Type::Bool | Type::Unit | Type::Char | Type::Float
         )
     }
 }
@@ -393,7 +388,7 @@ impl BuiltInTypes {
         BuiltInTypes {
             unit: type_arena.alloc(Type::Unit),
             float: type_arena.alloc(Type::Float),
-            int: type_arena.alloc(Type::Int),
+            int: type_arena.alloc(Type::Integer),
             bool: type_arena.alloc(Type::Bool),
             char: type_arena.alloc(Type::Char),
             string: type_arena.alloc(Type::String),

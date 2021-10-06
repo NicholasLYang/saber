@@ -54,6 +54,7 @@ pub enum TypeError {
     },
     InvalidAsgnTarget,
     NoLoopBreak,
+    NoElseInIfExpr,
 }
 
 impl fmt::Display for TypeError {
@@ -96,6 +97,10 @@ impl fmt::Display for TypeError {
             ),
             TypeError::InvalidAsgnTarget => write!(f, "Invalid left hand side of an assignment"),
             TypeError::NoLoopBreak => write!(f, "Cannot break when not in loop"),
+            // TODO: Make this intelligible to normal human beings
+            TypeError::NoElseInIfExpr => {
+                write!(f, "No else branch in if expression, means that type is (). How about you use it as a statement?")
+            }
         }
     }
 }
@@ -1122,31 +1127,20 @@ impl TypeChecker {
                 let typed_cond = self.expr(*cond)?;
                 let typed_then_block = self.expr(*then_block)?;
                 let then_type = typed_then_block.inner.get_type();
-                if let Some(else_block) = else_block {
-                    let typed_else_block = self.expr(*else_block)?;
-                    let else_type = typed_else_block.inner.get_type();
-                    self.unify_or_err(then_type, else_type, location)?;
-                    Ok(Loc {
-                        location,
-                        inner: ExprT::If(
-                            Box::new(typed_cond),
-                            Box::new(typed_then_block),
-                            Some(Box::new(typed_else_block)),
-                            then_type,
-                        ),
-                    })
-                } else {
-                    self.unify_or_err(self.builtin_types.unit, then_type, location)?;
-                    Ok(Loc {
-                        location,
-                        inner: ExprT::If(
-                            Box::new(typed_cond),
-                            Box::new(typed_then_block),
-                            None,
-                            self.builtin_types.unit,
-                        ),
-                    })
-                }
+                let else_block = else_block.ok_or(loc!(TypeError::NoElseInIfExpr, location))?;
+                let typed_else_block = self.expr(*else_block)?;
+                let else_type = typed_else_block.inner.get_type();
+                self.unify_or_err(then_type, else_type, location)?;
+
+                Ok(Loc {
+                    location,
+                    inner: ExprT::If(
+                        Box::new(typed_cond),
+                        Box::new(typed_then_block),
+                        Box::new(typed_else_block),
+                        then_type,
+                    ),
+                })
             }
             Expr::Record { name, fields } => {
                 let type_id = if let Some(id) = self.type_names.get(&name) {
@@ -1428,9 +1422,9 @@ impl TypeChecker {
                     _ => None,
                 }
             }
-            (Type::Int, Type::Int) => Some(self.builtin_types.int),
-            (Type::Int, Type::Bool) => Some(type_id1),
-            (Type::Bool, Type::Int) => Some(type_id2),
+            (Type::Integer, Type::Integer) => Some(self.builtin_types.int),
+            (Type::Integer, Type::Bool) => Some(type_id1),
+            (Type::Bool, Type::Integer) => Some(type_id2),
             (Type::Var(_), _) => {
                 self.type_arena[type_id1] = Type::Solved(type_id2);
                 Some(type_id2)
