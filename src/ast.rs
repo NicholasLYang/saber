@@ -274,12 +274,13 @@ pub enum ExprT {
         rhs: Box<Loc<ExprT>>,
         type_: TypeId,
     },
-    Function {
-        func_index: usize,
-    },
     UnaryOp {
         op: UnaryOp,
         rhs: Box<Loc<ExprT>>,
+        type_: TypeId,
+    },
+    Function {
+        func_index: usize,
         type_: TypeId,
     },
     Record {
@@ -293,9 +294,12 @@ pub enum ExprT {
         type_: TypeId,
     },
     TupleField(Box<Loc<ExprT>>, u32, TypeId),
+    Print {
+        args: Box<Loc<ExprT>>,
+        type_: TypeId,
+    },
     DirectCall {
         callee: FunctionId,
-        captures_var_index: Option<usize>,
         args: Box<Loc<ExprT>>,
         type_: TypeId,
     },
@@ -449,15 +453,19 @@ impl ExprT {
                 rhs: _,
                 type_,
             } => *type_,
+            ExprT::Function {
+                func_index: _,
+                type_,
+            } => *type_,
             ExprT::Index {
                 lhs: _,
                 index: _,
                 type_,
             } => *type_,
             ExprT::TupleField(_, _, type_) => *type_,
+            ExprT::Print { args: _, type_ } => *type_,
             ExprT::DirectCall {
                 callee: _,
-                captures_var_index: _,
                 args: _,
                 type_,
             } => *type_,

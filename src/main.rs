@@ -2,6 +2,7 @@
 extern crate strum_macros;
 
 use crate::emitter::Emitter;
+use crate::mir::MirCompiler;
 use crate::parser::Parser;
 use crate::runtime::run_code;
 use crate::typechecker::TypeChecker;
@@ -99,6 +100,10 @@ fn compile_saber_file<T: Write>(file_name: &str, debug_output: Option<T>) -> Res
         term::emit(&mut writer.lock(), &config, &file, &diagnostic).unwrap();
     }
 
+    let (symbol_table, name_table, type_arena, builtin_types) = typechecker.get_tables();
+    let mut mir_compiler = MirCompiler::new(symbol_table, type_arena);
+    mir_compiler.compile_program(program_t);
+    mir_compiler.print_instructions();
     todo!()
     // let code_generator = CodeGenerator::new(typechecker);
     // let program = code_generator.generate_program(program_t)?;

@@ -1,5 +1,3 @@
-let main = () => {
-  printString("hello world!");
-}
+let main = () => (10 + 11)
 
 export main;

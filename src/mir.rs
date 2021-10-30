@@ -129,7 +129,7 @@ impl From<crate::ast::OpT> for BinaryOp {
     }
 }
 
-struct MirCompiler {
+pub struct MirCompiler {
     string_literals: Vec<String>,
     parameters: Vec<Type>,
     symbol_table: SymbolTable,
@@ -137,7 +137,6 @@ struct MirCompiler {
     current_block: Vec<Instruction>,
     type_arena: Arena<ast::Type>,
     function_captures: Vec<IndexSet<Name>>,
-    function_local_variables: Vec<Vec<Type>>,
 }
 
 impl MirCompiler {
@@ -150,8 +149,38 @@ impl MirCompiler {
             symbol_table,
             type_arena,
             function_captures: Vec::new(),
-            function_local_variables: Vec::new(),
         }
+    }
+
+    #[allow(dead_code)]
+    pub fn print_instructions(&self) {
+        for block in &self.blocks {
+            println!("-----------------");
+            for instr in &block.0 {
+                println!("{:?}", instr);
+            }
+            println!("-----------------");
+        }
+        println!("-----------------");
+        for instr in &self.current_block {
+            println!("{:?}", instr);
+        }
+        println!("-----------------");
+    }
+
+    pub fn compile_program(&mut self, program: ProgramT) {
+        for function in program.functions {
+            self.compile_function(function.inner);
+        }
+    }
+
+    fn add_instruction(&mut self, instruction: Instruction) -> InstrId {
+        self.current_block.push(instruction);
+        InstrId(self.current_block.len() - 1)
+    }
+
+    fn compile_function(&mut self, function: ast::Function) {
+        self.compile_expr(function.body.inner);
     }
 
     fn ast_type_to_mir_type(&self, type_id: ast::TypeId) -> Option<Type> {
@@ -174,8 +203,8 @@ impl MirCompiler {
         todo!()
     }
 
-    pub fn compile_expr(&mut self, expr: Loc<ExprT>) -> InstrId {
-        match expr.inner {
+    pub fn compile_expr(&mut self, expr: ExprT) -> InstrId {
+        match expr {
             ExprT::Asgn { lhs, rhs, type_ } => {
                 if !lhs.inner.accessors.is_empty() {
                     todo!();
@@ -184,7 +213,7 @@ impl MirCompiler {
                 // need to either do a store or a set
                 // depending on target
                 let lhs_id = self.compile_target(lhs);
-                let rhs_id = self.compile_expr(*rhs);
+                let rhs_id = self.compile_expr(rhs.inner);
                 let op = match self
                     .ast_type_to_mir_type(type_)
                     .expect("Should be assignable type here")
@@ -194,42 +223,41 @@ impl MirCompiler {
                     Type::Pointer => BinaryOp::PointerSet,
                 };
 
-                self.current_block
-                    .push(Instruction::Binary(op, lhs_id, rhs_id));
+                self.add_instruction(Instruction::Binary(op, lhs_id, rhs_id))
             }
             ExprT::Var { name, type_ } => {
                 let (entry, functions) = self
                     .symbol_table
                     .lookup_name_with_function_hierarchy(name)
                     .unwrap();
-                if functions.is_empty() {
-                    self.current_block
-                        .push(Instruction::Primary(Primary::Var(entry.var_index)))
-                } else {
-                    self.current_block
-                        .push(Instruction::Primary(Primary::Var(0)));
 
-                    let mut env_ptr = InstrId(self.current_block.len() - 1);
+                if functions.is_empty() {
+                    let var_index = entry.var_index;
+                    self.add_instruction(Instruction::Primary(Primary::Var(var_index)))
+                } else {
+                    let mut env_ptr = self.add_instruction(Instruction::Primary(Primary::Var(0)));
+
                     for (idx, func_index) in functions.into_iter().enumerate() {
                         if idx == 0 {
                             let (captures_index, _) =
                                 self.function_captures[func_index].insert_full(name);
-                            self.current_block
-                                .push(Instruction::Primary(Primary::USize(captures_index * 4)));
-                            let offset = InstrId(self.current_block.len() - 1);
-                            self.current_block.push(Instruction::Binary(
+
+                            let offset = self.add_instruction(Instruction::Primary(
+                                Primary::USize(captures_index * 4),
+                            ));
+
+                            env_ptr = self.add_instruction(Instruction::Binary(
                                 BinaryOp::PointerAdd,
                                 env_ptr,
                                 offset,
                             ));
-
-                            env_ptr = InstrId(self.current_block.len() - 1);
                         } else {
-                            self.current_block
-                                .push(Instruction::Unary(UnaryOp::PointerLoad, env_ptr));
-                            env_ptr = InstrId(self.current_block.len() - 1)
+                            env_ptr = self
+                                .add_instruction(Instruction::Unary(UnaryOp::PointerLoad, env_ptr));
                         }
                     }
+
+                    env_ptr
                 }
             }
             ExprT::BinOp {
@@ -238,40 +266,37 @@ impl MirCompiler {
                 rhs,
                 type_: _,
             } => {
-                let lhs_id = self.compile_expr(*lhs);
-                let rhs_id = self.compile_expr(*rhs);
-                self.current_block
-                    .push(Instruction::Binary(op.into(), lhs_id, rhs_id));
+                let lhs_id = self.compile_expr(lhs.inner);
+                let rhs_id = self.compile_expr(rhs.inner);
+                self.add_instruction(Instruction::Binary(op.into(), lhs_id, rhs_id))
             }
             ExprT::If(cond, then_expr, else_expr, type_) => {
                 let current_block = replace(&mut self.current_block, Vec::new());
 
-                self.compile_expr(*then_expr);
+                self.compile_expr(then_expr.inner);
                 let then_block = replace(&mut self.current_block, Vec::new());
                 self.blocks.push(Block(then_block));
                 let then_block_id = self.blocks.len() - 1;
 
-                self.compile_expr(*else_expr);
+                self.compile_expr(else_expr.inner);
                 let else_block = replace(&mut self.current_block, current_block);
                 self.blocks.push(Block(else_block));
                 let else_block_id = self.blocks.len() - 1;
 
-                let cond_id = self.compile_expr(*cond);
+                let cond_id = self.compile_expr(cond.inner);
 
-                self.current_block.push(Instruction::If(
+                self.add_instruction(Instruction::If(
                     cond_id,
                     BlockId(then_block_id),
                     BlockId(else_block_id),
-                ));
+                ))
             }
             ExprT::Primary { value, type_: _ } => {
-                let instr = Instruction::Primary(self.compile_value(value));
-                self.current_block.push(instr);
+                let instruction = Instruction::Primary(self.compile_value(value));
+                self.add_instruction(instruction)
             }
             _ => todo!(),
         }
-
-        InstrId(self.current_block.len() - 1)
     }
 
     fn compile_value(&mut self, value: Value) -> Primary {
@@ -286,10 +311,6 @@ impl MirCompiler {
         }
     }
 
-    fn compile_var(&self, name: Name) {
-        todo!()
-    }
-
     fn get_current_block(&self) -> &Vec<Instruction> {
         &self.current_block
     }
@@ -301,7 +322,7 @@ impl MirCompiler {
 
 #[cfg(test)]
 mod test {
-    use crate::ast::{ExprT, Loc, Type};
+    use crate::ast::{ExprT, Loc, OpT, Type};
     use crate::lexer::LocationRange;
     use crate::loc;
     use crate::mir::{BinaryOp, Block, BlockId, InstrId, Instruction, Value};
@@ -336,27 +357,24 @@ mod test {
         let mut type_arena: Arena<Type> = Arena::new();
         let int_id = type_arena.alloc(Type::Integer);
 
-        compiler.compile_expr(loc!(
-            ExprT::BinOp {
-                op: BinaryOp::I32Add,
-                lhs: Box::new(loc!(
-                    ExprT::Primary {
-                        value: Value::Integer(20),
-                        type_: int_id
-                    },
-                    LocationRange(0, 4)
-                )),
-                rhs: Box::new(loc!(
-                    ExprT::Primary {
-                        value: Value::Integer(40),
-                        type_: int_id
-                    },
-                    LocationRange(0, 6)
-                )),
-                type_: int_id
-            },
-            LocationRange(0, 2)
-        ));
+        compiler.compile_expr(ExprT::BinOp {
+            op: OpT::I32Add,
+            lhs: Box::new(loc!(
+                ExprT::Primary {
+                    value: Value::Integer(20),
+                    type_: int_id
+                },
+                LocationRange(0, 4)
+            )),
+            rhs: Box::new(loc!(
+                ExprT::Primary {
+                    value: Value::Integer(40),
+                    type_: int_id
+                },
+                LocationRange(0, 6)
+            )),
+            type_: int_id,
+        });
 
         let instructions = compiler.get_current_block();
         assert_eq!(
@@ -371,37 +389,34 @@ mod test {
 
     #[test]
     fn test_compile_if_expr() {
-        let mut compiler = MirCompiler::new(SymbolTable::new());
         let mut type_arena: Arena<Type> = Arena::new();
         let int_id = type_arena.alloc(Type::Integer);
         let bool_id = type_arena.alloc(Type::Bool);
+        let mut compiler = MirCompiler::new(SymbolTable::new(), type_arena);
 
-        compiler.compile_expr(loc!(
-            ExprT::If(
-                Box::new(loc!(
-                    ExprT::Primary {
-                        value: Value::Bool(true),
-                        type_: bool_id
-                    },
-                    LocationRange(0, 6)
-                )),
-                Box::new(loc!(
-                    ExprT::Primary {
-                        value: Value::Integer(20),
-                        type_: int_id
-                    },
-                    LocationRange(0, 4)
-                )),
-                Box::new(loc!(
-                    ExprT::Primary {
-                        value: Value::Integer(40),
-                        type_: int_id
-                    },
-                    LocationRange(0, 6)
-                )),
-                int_id
-            ),
-            LocationRange(0, 2)
+        compiler.compile_expr(ExprT::If(
+            Box::new(loc!(
+                ExprT::Primary {
+                    value: Value::Bool(true),
+                    type_: bool_id
+                },
+                LocationRange(0, 6)
+            )),
+            Box::new(loc!(
+                ExprT::Primary {
+                    value: Value::Integer(20),
+                    type_: int_id
+                },
+                LocationRange(0, 4)
+            )),
+            Box::new(loc!(
+                ExprT::Primary {
+                    value: Value::Integer(40),
+                    type_: int_id
+                },
+                LocationRange(0, 6)
+            )),
+            int_id,
         ));
 
         let blocks = compiler.get_blocks();

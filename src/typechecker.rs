@@ -153,37 +153,7 @@ impl TypeChecker {
     pub fn new(mut name_table: NameTable) -> TypeChecker {
         let mut symbol_table = SymbolTable::new();
         let mut type_arena = Arena::<Type>::new();
-        let print_int_id = name_table.insert("printInt".into());
         let builtin_types = BuiltInTypes::new(&mut type_arena);
-
-        symbol_table.insert_function(
-            print_int_id,
-            builtin_types.int,
-            builtin_types.unit,
-            type_arena.alloc(Type::Arrow(builtin_types.int, builtin_types.unit)),
-        );
-        let print_float_id = name_table.insert("printFloat".into());
-        symbol_table.insert_function(
-            print_float_id,
-            builtin_types.float,
-            builtin_types.unit,
-            type_arena.alloc(Type::Arrow(builtin_types.float, builtin_types.unit)),
-        );
-        let print_string_id = name_table.insert("printString".into());
-        symbol_table.insert_function(
-            print_string_id,
-            builtin_types.string,
-            builtin_types.unit,
-            type_arena.alloc(Type::Arrow(builtin_types.string, builtin_types.unit)),
-        );
-        let print_char_id = name_table.insert("printChar".into());
-        symbol_table.insert_function(
-            print_char_id,
-            builtin_types.char,
-            builtin_types.unit,
-            type_arena.alloc(Type::Arrow(builtin_types.char, builtin_types.unit)),
-        );
-
         let type_names = build_type_names(&mut name_table, &builtin_types);
 
         TypeChecker {
@@ -971,7 +941,7 @@ impl TypeChecker {
                 self.functions.insert(func_index, loc!(function, location));
 
                 self.expr_func_index += 1;
-                Ok(loc!(ExprT::Function { func_index }, location))
+                Ok(loc!(ExprT::Function { func_index, type_ }, location))
             }
             Expr::UnaryOp { op, rhs } => {
                 let typed_rhs = self.expr(*rhs)?;
@@ -997,30 +967,31 @@ impl TypeChecker {
                 }
             }
             Expr::Call { callee, args } => {
-                let typed_callee = self.expr(*callee)?;
                 let typed_args = self.expr(*args)?;
-                if let ExprT::Var { name, type_: _ } = &typed_callee.inner {
-                    if let Some(entry) = self.symbol_table.lookup_name(*name) {
+
+                if let Expr::Var { name } = &callee.inner {
+                    if self.name_table.get_str(name) == "print" {
+                        return Ok(loc!(
+                            ExprT::Print {
+                                args: Box::new(typed_args),
+                                type_: self.builtin_types.unit
+                            },
+                            location
+                        ));
+                    } else if let Some(entry) = self.symbol_table.lookup_name(*name) {
                         if let Some(FunctionInfo {
                             func_index,
                             func_scope: _,
                             params_type,
                             return_type,
-                            is_top_level,
+                            is_top_level: _,
                         }) = entry.function_info
                         {
-                            let captures_var_index = if !is_top_level {
-                                Some(entry.var_index)
-                            } else {
-                                None
-                            };
-
                             self.unify_or_err(params_type, typed_args.inner.get_type(), location)?;
                             return Ok(Loc {
                                 location,
                                 inner: ExprT::DirectCall {
                                     callee: func_index,
-                                    captures_var_index,
                                     args: Box::new(typed_args),
                                     type_: return_type,
                                 },
@@ -1028,6 +999,8 @@ impl TypeChecker {
                         }
                     }
                 }
+
+                let typed_callee = self.expr(*callee)?;
                 let callee_type = typed_callee.inner.get_type();
                 let (params_type, return_type) = match &self.type_arena[callee_type] {
                     Type::Arrow(params_type, return_type) => (*params_type, *return_type),

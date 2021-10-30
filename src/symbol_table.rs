@@ -51,20 +51,6 @@ pub enum VarIndex {
     Capture(usize),
 }
 
-pub static ALLOC_INDEX: u32 = 0;
-pub static DEALLOC_INDEX: u32 = 1;
-#[allow(dead_code)]
-pub static CLONE_INDEX: u32 = 2;
-pub static STREQ_INDEX: u32 = 3;
-pub static PRINT_HEAP_INDEX: u32 = 4;
-#[allow(dead_code)]
-pub static PRINT_INT_INDEX: u32 = 5;
-#[allow(dead_code)]
-pub static PRINT_FLOAT_INDEX: u32 = 6;
-#[allow(dead_code)]
-pub static PRINT_STRING_INDEX: u32 = 7;
-pub static PRINT_CHAR_INDEX: u32 = 8;
-
 impl SymbolTable {
     pub fn new() -> Self {
         SymbolTable {
@@ -74,7 +60,7 @@ impl SymbolTable {
                 parent: None,
                 parent_func_scope: None,
             }],
-            function_index: 5,
+            function_index: 0,
             current_func_scope: None,
             current_scope: 0,
             global_var_index: 0,

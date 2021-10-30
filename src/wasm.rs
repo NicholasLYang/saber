@@ -1,4 +1,3 @@
-use crate::symbol_table::PRINT_CHAR_INDEX;
 use std::fmt;
 
 #[derive(Clone, Debug)]
@@ -155,6 +154,9 @@ pub struct ProgramData {
     pub code_section: Vec<Option<FunctionBody>>,
     pub data_section: Vec<DataSegment>,
 }
+
+// TODO: Remove
+static PRINT_CHAR_INDEX: u32 = 1;
 
 impl ProgramData {
     pub fn new(func_count: usize, expr_func_count: usize) -> Self {
