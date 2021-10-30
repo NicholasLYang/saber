@@ -1,3 +1,5 @@
+
+
 ## WASM Notes
 
 Locals are stored in local entries in the code section, and params are
@@ -80,3 +82,61 @@ Solution: Make them actual variables and have them store data.
 ## Build System
 Too many things to do right now. Should have one simple compile script that runs
 
+## Make Saber an OCaml with good tooling
+- Query based compiler
+  - Have editing be mutation queries
+  - After mutation query, update watching queries
+- Language server
+- Packages (ooh interop with Rust?)
+  - Can send values to Saber by wrapping in `Rc` (or `Arc`?)
+  ```rust
+    use saber::foo;
+    let v = vec![10, 12, 34];
+    foo(Rc::new(v));
+  ```
+  - Does it need to be `Pin`?
+  - Or we use Rust's move semantics. Ooh have a SaberSerialize trait. Or use serde?
+  - Have a serde target that is just Saber's underlying memory model. `to_writer`
+
+## Closure conversion
+
+```js
+let foo = () => {
+  let a = 10;
+  let bar = () => {
+    printInt(a);
+  }
+}
+```
+```ts
+let foo = (env: (ptr)) => {
+  let a: int = 10;
+  let bar = (env: [ptr, int]) => {
+    printInt(env[1]);
+  }
+}
+```
+
+```js
+let foo = () => {
+  let a = 10;
+  let bar = () => {
+    let baz = () => {
+        printInt(a);
+    }
+  }
+}
+```
+```ts
+let foo = (env: []) => {
+  let a: int = 10;
+  let bar = (env: [ptr, int]) => {
+    let baz = (env: (ptr)) => {
+      printInt(env[0][1]);      
+    }
+  }
+}
+```
+
+Tell the function that initially captures the value to add it to its environment struct.
+Then build field chain and rewrite var to be a field access

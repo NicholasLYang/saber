@@ -8,7 +8,7 @@ use crate::typechecker::TypeChecker;
 use crate::utils::SaberProgram;
 use anyhow::Result;
 use clap::{App, AppSettings, Arg};
-use code_generator::CodeGenerator;
+//use code_generator::CodeGenerator;
 use codespan_reporting::diagnostic::Diagnostic;
 use codespan_reporting::files::SimpleFile;
 use codespan_reporting::term;
@@ -18,7 +18,7 @@ use std::io::Write;
 use wabt::wasm2wat;
 
 mod ast;
-mod code_generator;
+//mod code_generator;
 mod cps;
 mod emitter;
 mod lexer;
@@ -99,17 +99,18 @@ fn compile_saber_file<T: Write>(file_name: &str, debug_output: Option<T>) -> Res
         term::emit(&mut writer.lock(), &config, &file, &diagnostic).unwrap();
     }
 
-    let code_generator = CodeGenerator::new(typechecker);
-    let program = code_generator.generate_program(program_t)?;
-    let mut emitter = Emitter::new();
-    emitter.emit_program(program)?;
-    if let Some(debug_output) = debug_output {
-        emitter.output(debug_output)?;
-    }
-    let mut wasm_bytes = Vec::new();
-    emitter.output(&mut wasm_bytes)?;
-    Ok(SaberProgram {
-        wasm_bytes,
-        runtime_types,
-    })
+    todo!()
+    // let code_generator = CodeGenerator::new(typechecker);
+    // let program = code_generator.generate_program(program_t)?;
+    // let mut emitter = Emitter::new();
+    // emitter.emit_program(program)?;
+    // if let Some(debug_output) = debug_output {
+    //     emitter.output(debug_output)?;
+    // }
+    // let mut wasm_bytes = Vec::new();
+    // emitter.output(&mut wasm_bytes)?;
+    // Ok(SaberProgram {
+    //     wasm_bytes,
+    //     runtime_types,
+    // })
 }

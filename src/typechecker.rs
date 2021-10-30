@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt;
-use std::mem::take;
+use std::mem::{replace, take};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum TypeError {
@@ -210,10 +210,6 @@ impl TypeChecker {
         )
     }
 
-    pub fn get_expr_func_index(&self) -> usize {
-        self.expr_func_index
-    }
-
     #[allow(dead_code)]
     pub fn get_name_table(&self) -> &NameTable {
         &self.name_table
@@ -288,10 +284,16 @@ impl TypeChecker {
         }
         let mut named_types = Vec::new();
         std::mem::swap(&mut named_types, &mut self.struct_types);
+        let mut functions = vec![None; self.symbol_table.get_function_index()];
+
+        let functions_map = replace(&mut self.functions, HashMap::new());
+        for (func_index, function) in functions_map {
+            functions[func_index] = Some(function);
+        }
 
         ProgramT {
             stmts: typed_stmts,
-            functions: take(&mut self.functions),
+            functions: functions.into_iter().map(|f| f.unwrap()).collect(),
             named_types,
             errors,
         }
@@ -414,7 +416,7 @@ impl TypeChecker {
                 };
                 let func_info = sym_entry.function_info.as_ref().unwrap();
                 let func_index = func_info.func_index;
-                let (function, captures) = self.function(func_name, params, *body)?;
+                let function = self.function(func_name, params, *body)?;
                 self.functions.insert(func_index, loc!(function, location));
 
                 // If we have a return type, we're inside a function and need to have a captures struct.
@@ -422,7 +424,7 @@ impl TypeChecker {
                 if self.return_type.is_some() {
                     Ok(vec![Loc {
                         location,
-                        inner: StmtT::Let(func_name, captures),
+                        inner: StmtT::Function { func_index },
                     }])
                 } else {
                     Ok(Vec::new())
@@ -739,43 +741,19 @@ impl TypeChecker {
         Ok(bindings)
     }
 
-    fn create_captures_tuple(&mut self, location: LocationRange) -> Loc<ExprT> {
-        let captures = self.symbol_table.get_captures().unwrap();
-        if captures.is_empty() {
-            return loc!(ExprT::Tuple(Vec::new(), self.builtin_types.unit), location);
-        }
-        let mut fields = Vec::new();
-        let mut types = Vec::new();
-        for (name, _, type_) in captures {
-            fields.push(Loc {
-                location,
-                inner: ExprT::Var {
-                    name: *name,
-                    type_: *type_,
-                },
-            });
-            types.push(*type_);
-        }
-        let type_id = self.type_arena.alloc(Type::Tuple(types));
-        let name = self.name_table.get_fresh_name();
-        self.struct_types.push((name, type_id));
-        loc!(ExprT::Tuple(fields, type_id), location)
-    }
-
     fn function(
         &mut self,
         name: Name,
         params: Pat,
         body: Loc<Expr>,
-        // TODO: Create a Closure struct
-    ) -> Result<(Function, Loc<ExprT>), Loc<TypeError>> {
+    ) -> Result<Function, Loc<TypeError>> {
         let entry = self.symbol_table.lookup_name(name);
         let entry = entry.as_ref().unwrap();
         let func_info = entry.function_info.as_ref().unwrap();
         let scope = func_info.func_scope;
         let return_type = func_info.return_type;
+
         self.symbol_table.swap_scope(scope);
-        let old_var_types = self.symbol_table.reset_vars();
         let func_params = self.get_func_params(&params)?;
         // Save the current return type
         let mut old_return_type = self.return_type;
@@ -796,25 +774,14 @@ impl TypeChecker {
             old_return_type.unwrap()
         };
 
-        // If return type is a type var, we just set it be unit
-        if matches!(self.type_arena[return_type], Type::Var(..)) {
-            self.type_arena[return_type] = Type::Unit;
-        };
-
-        let captures = self.create_captures_tuple(body.location);
-
-        let local_variables = self.symbol_table.restore_vars(old_var_types);
         let scope_index = self.symbol_table.restore_scope();
-        Ok((
-            Function {
-                params: func_params,
-                body: Box::new(body),
-                local_variables,
-                scope_index,
-                return_type,
-            },
-            captures,
-        ))
+
+        Ok(Function {
+            params: func_params,
+            body: Box::new(body),
+            scope_index,
+            return_type,
+        })
     }
 
     fn asgn_lhs(&mut self, lhs: Loc<Expr>) -> Result<(Loc<Target>, TypeId), Loc<TypeError>> {
@@ -827,6 +794,7 @@ impl TypeChecker {
                     },
                     location
                 ))?;
+
                 Ok((
                     loc!(
                         Target {
@@ -998,28 +966,12 @@ impl TypeChecker {
                     self.symbol_table
                         .insert_function(name, params_type, return_type, type_);
 
-                let (function, captures) = self.function(name, params, *body)?;
+                let function = self.function(name, params, *body)?;
 
                 self.functions.insert(func_index, loc!(function, location));
-                let table_index = self.expr_func_index;
-                let table_index_expr = loc!(
-                    ExprT::Primary {
-                        value: Value::Integer(table_index.try_into().unwrap()),
-                        type_: self.builtin_types.int,
-                    },
-                    location
-                );
-
-                let closure_tuple_type = self.type_arena.alloc(Type::Tuple(vec![
-                    captures.inner.get_type(),
-                    self.builtin_types.int,
-                ]));
 
                 self.expr_func_index += 1;
-                Ok(loc!(
-                    ExprT::Tuple(vec![table_index_expr, captures], closure_tuple_type),
-                    location
-                ))
+                Ok(loc!(ExprT::Function { func_index }, location))
             }
             Expr::UnaryOp { op, rhs } => {
                 let typed_rhs = self.expr(*rhs)?;

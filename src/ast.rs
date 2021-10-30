@@ -3,7 +3,6 @@ use crate::parser::ParseError;
 use crate::typechecker::TypeError;
 use id_arena::{Arena, Id};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::fmt;
 
 pub type Name = usize;
@@ -141,7 +140,7 @@ pub enum Expr {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct ProgramT {
-    pub functions: HashMap<FunctionId, Loc<Function>>,
+    pub functions: Vec<Loc<Function>>,
     pub stmts: Vec<Loc<StmtT>>,
     pub named_types: Vec<(Name, TypeId)>,
     pub errors: Vec<Loc<TypeError>>,
@@ -154,6 +153,9 @@ pub enum StmtT {
     Expr(Loc<ExprT>),
     Return(Loc<ExprT>),
     Loop(Loc<ExprT>),
+    Function {
+        func_index: usize,
+    },
     If {
         cond: Box<Loc<ExprT>>,
         then_block: Box<Loc<ExprT>>,
@@ -272,6 +274,9 @@ pub enum ExprT {
         rhs: Box<Loc<ExprT>>,
         type_: TypeId,
     },
+    Function {
+        func_index: usize,
+    },
     UnaryOp {
         op: UnaryOp,
         rhs: Box<Loc<ExprT>>,
@@ -320,7 +325,6 @@ pub struct Function {
     pub params: Vec<(Name, TypeId)>,
     pub return_type: TypeId,
     pub body: Box<Loc<ExprT>>,
-    pub local_variables: Vec<TypeId>,
     pub scope_index: usize,
 }
 

@@ -1,4 +1,5 @@
-use crate::code_generator::BOX_ARRAY_ID;
+//use crate::code_generator::BOX_ARRAY_ID;
+static BOX_ARRAY_ID: i32 = 0;
 use crate::utils::SaberProgram;
 use anyhow::Result;
 use byteorder::{LittleEndian, WriteBytesExt};
