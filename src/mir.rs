@@ -4,7 +4,7 @@ no nested scope.
 */
 
 use crate::ast;
-use crate::ast::{ExprT, Loc, OpT, ProgramT, Target, Value};
+use crate::ast::{ExprT, Loc, OpT, ProgramT, StmtT, Target, Value};
 use crate::symbol_table::SymbolTable;
 use id_arena::Arena;
 use indexmap::set::IndexSet;
@@ -40,12 +40,13 @@ enum Instruction {
     Binary(BinaryOp, InstrId, InstrId),
     Unary(UnaryOp, InstrId),
     Primary(Primary),
+    VarSet(usize),
+    VarGet(usize),
     Return(InstrId),
 }
 
 #[derive(Debug, Clone, PartialEq)]
 enum Primary {
-    Var(usize),
     I32(i32),
     // TODO: Make this into a general purpose pointer type
     //  that indexes into a vec of heap allocated values
@@ -68,7 +69,7 @@ enum BinaryOp {
     I32LessEqual,
     I32And,
     I32Or,
-    I32Set,
+    I32Store,
     I32Tee,
     F32Add,
     F32Sub,
@@ -80,12 +81,12 @@ enum BinaryOp {
     F32GreaterEqual,
     F32Less,
     F32LessEqual,
-    F32Set,
+    F32Store,
     BoolAnd,
     BoolOr,
     StringEqual,
     StringConcat,
-    PointerSet,
+    PointerStore,
     PointerAdd,
     PointerMul,
 }
@@ -93,7 +94,9 @@ enum BinaryOp {
 #[derive(Debug, Clone, PartialEq)]
 enum UnaryOp {
     PointerLoad,
+    F32Load,
     I32Load,
+    Drop,
 }
 
 impl From<crate::ast::OpT> for BinaryOp {
@@ -199,8 +202,39 @@ impl MirCompiler {
         }
     }
 
-    fn compile_target(&self, target: Loc<Target>) -> InstrId {
-        todo!()
+    // Compiles enclosed variable by going up scope chain
+    fn compile_enclosed_var(&mut self, var_name: Name, function_scopes: Vec<usize>) -> InstrId {
+        let mut env_ptr = self.add_instruction(Instruction::VarGet(0));
+
+        for (idx, func_index) in function_scopes.into_iter().enumerate() {
+            // If we're at the last function scope, we need to get the specific field
+            if idx == 0 {
+                let (captures_index, _) = self.function_captures[func_index].insert_full(var_name);
+
+                let offset =
+                    self.add_instruction(Instruction::Primary(Primary::USize(captures_index * 4)));
+
+                env_ptr = self.add_instruction(Instruction::Binary(
+                    BinaryOp::PointerAdd,
+                    env_ptr,
+                    offset,
+                ));
+            } else {
+                env_ptr = self.add_instruction(Instruction::Unary(UnaryOp::PointerLoad, env_ptr));
+            }
+        }
+
+        env_ptr
+    }
+
+    pub fn compile_stmt(&mut self, stmt: StmtT) -> InstrId {
+        match stmt {
+            StmtT::Expr(expr) => {
+                let id = self.compile_expr(expr.inner);
+                self.add_instruction(Instruction::Unary(UnaryOp::Drop, id))
+            }
+            s => todo!("{:?}", s),
+        }
     }
 
     pub fn compile_expr(&mut self, expr: ExprT) -> InstrId {
@@ -209,55 +243,50 @@ impl MirCompiler {
                 if !lhs.inner.accessors.is_empty() {
                     todo!();
                 }
-                // Uhh this probably doesn't work
-                // need to either do a store or a set
-                // depending on target
-                let lhs_id = self.compile_target(lhs);
-                let rhs_id = self.compile_expr(rhs.inner);
-                let op = match self
-                    .ast_type_to_mir_type(type_)
-                    .expect("Should be assignable type here")
-                {
-                    Type::I32 => BinaryOp::I32Set,
-                    Type::F32 => BinaryOp::F32Set,
-                    Type::Pointer => BinaryOp::PointerSet,
-                };
 
-                self.add_instruction(Instruction::Binary(op, lhs_id, rhs_id))
+                let rhs_id = self.compile_expr(rhs.inner);
+
+                let (entry, function_scopes) = self
+                    .symbol_table
+                    .lookup_name_with_function_hierarchy(lhs.inner.ident)
+                    .unwrap();
+
+                if function_scopes.is_empty() {
+                    let var_index = entry.var_index;
+                    self.add_instruction(Instruction::VarSet(var_index))
+                } else {
+                    let var_ptr = self.compile_enclosed_var(lhs.inner.ident, function_scopes);
+                    let op = match self
+                        .ast_type_to_mir_type(type_)
+                        .expect("Should be assignable type here")
+                    {
+                        Type::I32 => BinaryOp::I32Store,
+                        Type::F32 => BinaryOp::F32Store,
+                        Type::Pointer => BinaryOp::PointerStore,
+                    };
+                    self.add_instruction(Instruction::Binary(op, var_ptr, rhs_id))
+                }
             }
             ExprT::Var { name, type_ } => {
-                let (entry, functions) = self
+                let (entry, function_scopes) = self
                     .symbol_table
                     .lookup_name_with_function_hierarchy(name)
                     .unwrap();
 
-                if functions.is_empty() {
+                if function_scopes.is_empty() {
                     let var_index = entry.var_index;
-                    self.add_instruction(Instruction::Primary(Primary::Var(var_index)))
+                    self.add_instruction(Instruction::VarGet(var_index))
                 } else {
-                    let mut env_ptr = self.add_instruction(Instruction::Primary(Primary::Var(0)));
-
-                    for (idx, func_index) in functions.into_iter().enumerate() {
-                        if idx == 0 {
-                            let (captures_index, _) =
-                                self.function_captures[func_index].insert_full(name);
-
-                            let offset = self.add_instruction(Instruction::Primary(
-                                Primary::USize(captures_index * 4),
-                            ));
-
-                            env_ptr = self.add_instruction(Instruction::Binary(
-                                BinaryOp::PointerAdd,
-                                env_ptr,
-                                offset,
-                            ));
-                        } else {
-                            env_ptr = self
-                                .add_instruction(Instruction::Unary(UnaryOp::PointerLoad, env_ptr));
-                        }
-                    }
-
-                    env_ptr
+                    let var_ptr = self.compile_enclosed_var(name, function_scopes);
+                    let op = match self
+                        .ast_type_to_mir_type(type_)
+                        .expect("Should be assignable type here")
+                    {
+                        Type::I32 => UnaryOp::I32Load,
+                        Type::F32 => UnaryOp::F32Load,
+                        Type::Pointer => UnaryOp::PointerLoad,
+                    };
+                    self.add_instruction(Instruction::Unary(op, var_ptr))
                 }
             }
             ExprT::BinOp {
@@ -295,7 +324,28 @@ impl MirCompiler {
                 let instruction = Instruction::Primary(self.compile_value(value));
                 self.add_instruction(instruction)
             }
-            _ => todo!(),
+            ExprT::Block {
+                mut stmts,
+                end_expr,
+                scope_index,
+                type_,
+            } => {
+                let old_scope = self.symbol_table.swap_scope(scope_index);
+
+                let mut instr_id = None;
+                for stmt in stmts {
+                    instr_id = Some(self.compile_stmt(stmt.inner));
+                }
+
+                if let Some(end_expr) = end_expr {
+                    instr_id = Some(self.compile_expr(end_expr.inner));
+                }
+
+                self.symbol_table.swap_scope(old_scope);
+
+                instr_id.unwrap()
+            }
+            e => todo!("{:?}", e),
         }
     }
 
