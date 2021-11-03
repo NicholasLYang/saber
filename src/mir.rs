@@ -4,7 +4,7 @@ no nested scope.
 */
 
 use crate::ast;
-use crate::ast::{ExprT, Loc, OpT, ProgramT, StmtT, Target, Value};
+use crate::ast::{BinaryOpT, ExprT, Loc, ProgramT, StmtT, Target, Value};
 use crate::symbol_table::SymbolTable;
 use id_arena::Arena;
 use indexmap::set::IndexSet;
@@ -36,7 +36,7 @@ enum Instruction {
     // This could be too specific. I might want
     // blocks to have outgoing edges and have a
     // break with index as the instruction
-    If(InstrId, BlockId, BlockId),
+    If(InstrId, (BlockId, InstrId), (BlockId, InstrId)),
     Binary(BinaryOp, InstrId, InstrId),
     Unary(UnaryOp, InstrId),
     Primary(Primary),
@@ -96,38 +96,51 @@ enum UnaryOp {
     PointerLoad,
     F32Load,
     I32Load,
+    F32Negate,
+    I32Negate,
+    BoolNegate,
     Drop,
 }
 
-impl From<crate::ast::OpT> for BinaryOp {
-    fn from(op: OpT) -> Self {
+impl From<ast::UnaryOpT> for UnaryOp {
+    fn from(op: ast::UnaryOpT) -> Self {
         match op {
-            OpT::I32Add => BinaryOp::I32Add,
-            OpT::I32Sub => BinaryOp::I32Sub,
-            OpT::I32Mul => BinaryOp::I32Mul,
-            OpT::I32Div => BinaryOp::I32Div,
-            OpT::I32NotEqual => BinaryOp::I32NotEqual,
-            OpT::I32Equal => BinaryOp::I32Equal,
-            OpT::I32Greater => BinaryOp::I32Greater,
-            OpT::I32GreaterEqual => BinaryOp::I32GreaterEqual,
-            OpT::I32Less => BinaryOp::I32Less,
-            OpT::I32LessEqual => BinaryOp::I32LessEqual,
-            OpT::I32And => BinaryOp::I32And,
-            OpT::I32Or => BinaryOp::I32Or,
-            OpT::F32Add => BinaryOp::F32Add,
-            OpT::F32Sub => BinaryOp::F32Sub,
-            OpT::F32Mul => BinaryOp::F32Mul,
-            OpT::F32Div => BinaryOp::F32Div,
-            OpT::F32NotEqual => BinaryOp::F32NotEqual,
-            OpT::F32Equal => BinaryOp::F32Equal,
-            OpT::F32Greater => BinaryOp::F32Greater,
-            OpT::F32GreaterEqual => BinaryOp::F32GreaterEqual,
-            OpT::F32Less => BinaryOp::F32Less,
-            OpT::F32LessEqual => BinaryOp::F32LessEqual,
-            OpT::BoolAnd => BinaryOp::BoolAnd,
-            OpT::BoolOr => BinaryOp::BoolOr,
-            OpT::StringEqual => BinaryOp::StringEqual,
-            OpT::StringConcat => BinaryOp::StringConcat,
+            ast::UnaryOpT::I32Minus => UnaryOp::I32Negate,
+            ast::UnaryOpT::F32Minus => UnaryOp::F32Negate,
+            ast::UnaryOpT::BoolNot => UnaryOp::BoolNegate,
+        }
+    }
+}
+
+impl From<BinaryOpT> for BinaryOp {
+    fn from(op: BinaryOpT) -> Self {
+        match op {
+            BinaryOpT::I32Add => BinaryOp::I32Add,
+            BinaryOpT::I32Sub => BinaryOp::I32Sub,
+            BinaryOpT::I32Mul => BinaryOp::I32Mul,
+            BinaryOpT::I32Div => BinaryOp::I32Div,
+            BinaryOpT::I32NotEqual => BinaryOp::I32NotEqual,
+            BinaryOpT::I32Equal => BinaryOp::I32Equal,
+            BinaryOpT::I32Greater => BinaryOp::I32Greater,
+            BinaryOpT::I32GreaterEqual => BinaryOp::I32GreaterEqual,
+            BinaryOpT::I32Less => BinaryOp::I32Less,
+            BinaryOpT::I32LessEqual => BinaryOp::I32LessEqual,
+            BinaryOpT::I32And => BinaryOp::I32And,
+            BinaryOpT::I32Or => BinaryOp::I32Or,
+            BinaryOpT::F32Add => BinaryOp::F32Add,
+            BinaryOpT::F32Sub => BinaryOp::F32Sub,
+            BinaryOpT::F32Mul => BinaryOp::F32Mul,
+            BinaryOpT::F32Div => BinaryOp::F32Div,
+            BinaryOpT::F32NotEqual => BinaryOp::F32NotEqual,
+            BinaryOpT::F32Equal => BinaryOp::F32Equal,
+            BinaryOpT::F32Greater => BinaryOp::F32Greater,
+            BinaryOpT::F32GreaterEqual => BinaryOp::F32GreaterEqual,
+            BinaryOpT::F32Less => BinaryOp::F32Less,
+            BinaryOpT::F32LessEqual => BinaryOp::F32LessEqual,
+            BinaryOpT::BoolAnd => BinaryOp::BoolAnd,
+            BinaryOpT::BoolOr => BinaryOp::BoolOr,
+            BinaryOpT::StringEqual => BinaryOp::StringEqual,
+            BinaryOpT::StringConcat => BinaryOp::StringConcat,
         }
     }
 }
@@ -233,6 +246,10 @@ impl MirCompiler {
                 let id = self.compile_expr(expr.inner);
                 self.add_instruction(Instruction::Unary(UnaryOp::Drop, id))
             }
+            StmtT::Return(expr) => {
+                let id = self.compile_expr(expr.inner);
+                self.add_instruction(Instruction::Return(id))
+            }
             s => todo!("{:?}", s),
         }
     }
@@ -267,6 +284,27 @@ impl MirCompiler {
                     self.add_instruction(Instruction::Binary(op, var_ptr, rhs_id))
                 }
             }
+            ExprT::If(cond, then_expr, else_expr, type_) => {
+                let current_block = replace(&mut self.current_block, Vec::new());
+
+                let then_instr_id = self.compile_expr(then_expr.inner);
+                let then_block = replace(&mut self.current_block, Vec::new());
+                self.blocks.push(Block(then_block));
+                let then_block_id = self.blocks.len() - 1;
+
+                let else_instr_id = self.compile_expr(else_expr.inner);
+                let else_block = replace(&mut self.current_block, current_block);
+                self.blocks.push(Block(else_block));
+                let else_block_id = self.blocks.len() - 1;
+
+                let cond_id = self.compile_expr(cond.inner);
+
+                self.add_instruction(Instruction::If(
+                    cond_id,
+                    (BlockId(then_block_id), then_instr_id),
+                    (BlockId(else_block_id), else_instr_id),
+                ))
+            }
             ExprT::Var { name, type_ } => {
                 let (entry, function_scopes) = self
                     .symbol_table
@@ -299,26 +337,10 @@ impl MirCompiler {
                 let rhs_id = self.compile_expr(rhs.inner);
                 self.add_instruction(Instruction::Binary(op.into(), lhs_id, rhs_id))
             }
-            ExprT::If(cond, then_expr, else_expr, type_) => {
-                let current_block = replace(&mut self.current_block, Vec::new());
+            ExprT::UnaryOp { op, rhs, type_: _ } => {
+                let rhs_id = self.compile_expr(rhs.inner);
 
-                self.compile_expr(then_expr.inner);
-                let then_block = replace(&mut self.current_block, Vec::new());
-                self.blocks.push(Block(then_block));
-                let then_block_id = self.blocks.len() - 1;
-
-                self.compile_expr(else_expr.inner);
-                let else_block = replace(&mut self.current_block, current_block);
-                self.blocks.push(Block(else_block));
-                let else_block_id = self.blocks.len() - 1;
-
-                let cond_id = self.compile_expr(cond.inner);
-
-                self.add_instruction(Instruction::If(
-                    cond_id,
-                    BlockId(then_block_id),
-                    BlockId(else_block_id),
-                ))
+                self.add_instruction(Instruction::Unary(op.into(), rhs_id))
             }
             ExprT::Primary { value, type_: _ } => {
                 let instruction = Instruction::Primary(self.compile_value(value));
@@ -343,7 +365,7 @@ impl MirCompiler {
 
                 self.symbol_table.swap_scope(old_scope);
 
-                instr_id.unwrap()
+                instr_id.unwrap() // If instr_id is None, we've messed up in the type checker
             }
             e => todo!("{:?}", e),
         }
@@ -372,7 +394,7 @@ impl MirCompiler {
 
 #[cfg(test)]
 mod test {
-    use crate::ast::{ExprT, Loc, OpT, Type};
+    use crate::ast::{BinaryOpT, ExprT, Loc, Type};
     use crate::lexer::LocationRange;
     use crate::loc;
     use crate::mir::{BinaryOp, Block, BlockId, InstrId, Instruction, Value};
@@ -408,7 +430,7 @@ mod test {
         let int_id = type_arena.alloc(Type::Integer);
 
         compiler.compile_expr(ExprT::BinOp {
-            op: OpT::I32Add,
+            op: BinaryOpT::I32Add,
             lhs: Box::new(loc!(
                 ExprT::Primary {
                     value: Value::Integer(20),

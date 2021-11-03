@@ -180,7 +180,14 @@ pub struct Target {
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum OpT {
+pub enum UnaryOpT {
+    F32Minus,
+    I32Minus,
+    BoolNot,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum BinaryOpT {
     I32Add,
     I32Sub,
     I32Mul,
@@ -209,38 +216,38 @@ pub enum OpT {
     StringConcat,
 }
 
-impl fmt::Display for OpT {
+impl fmt::Display for BinaryOpT {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
             "{}",
             match self {
-                OpT::I32Add => "i32.add",
-                OpT::I32Sub => "i32.sub",
-                OpT::I32Mul => "i32.mul",
-                OpT::I32Div => "i32.div",
-                OpT::I32NotEqual => "i32.not_eq",
-                OpT::I32Equal => "i32.eq",
-                OpT::I32Greater => "i32.greater",
-                OpT::I32GreaterEqual => "i32.greater_eq",
-                OpT::I32Less => "i32.less",
-                OpT::I32LessEqual => "i32.less_eq",
-                OpT::I32And => "i32.and",
-                OpT::I32Or => "i32.or",
-                OpT::F32Add => "f32.add",
-                OpT::F32Sub => "f32.sub",
-                OpT::F32Mul => "f32.mul",
-                OpT::F32Div => "f32.div",
-                OpT::F32NotEqual => "f32.not_eq",
-                OpT::F32Equal => "f32.equal",
-                OpT::F32Greater => "f32.greater",
-                OpT::F32GreaterEqual => "f32.greater_eq",
-                OpT::F32Less => "f32.less",
-                OpT::F32LessEqual => "f32.less_eq",
-                OpT::BoolAnd => "bool.and",
-                OpT::BoolOr => "bool.or",
-                OpT::StringEqual => "str.eq",
-                OpT::StringConcat => "str.concat",
+                BinaryOpT::I32Add => "i32.add",
+                BinaryOpT::I32Sub => "i32.sub",
+                BinaryOpT::I32Mul => "i32.mul",
+                BinaryOpT::I32Div => "i32.div",
+                BinaryOpT::I32NotEqual => "i32.not_eq",
+                BinaryOpT::I32Equal => "i32.eq",
+                BinaryOpT::I32Greater => "i32.greater",
+                BinaryOpT::I32GreaterEqual => "i32.greater_eq",
+                BinaryOpT::I32Less => "i32.less",
+                BinaryOpT::I32LessEqual => "i32.less_eq",
+                BinaryOpT::I32And => "i32.and",
+                BinaryOpT::I32Or => "i32.or",
+                BinaryOpT::F32Add => "f32.add",
+                BinaryOpT::F32Sub => "f32.sub",
+                BinaryOpT::F32Mul => "f32.mul",
+                BinaryOpT::F32Div => "f32.div",
+                BinaryOpT::F32NotEqual => "f32.not_eq",
+                BinaryOpT::F32Equal => "f32.equal",
+                BinaryOpT::F32Greater => "f32.greater",
+                BinaryOpT::F32GreaterEqual => "f32.greater_eq",
+                BinaryOpT::F32Less => "f32.less",
+                BinaryOpT::F32LessEqual => "f32.less_eq",
+                BinaryOpT::BoolAnd => "bool.and",
+                BinaryOpT::BoolOr => "bool.or",
+                BinaryOpT::StringEqual => "str.eq",
+                BinaryOpT::StringConcat => "str.concat",
             }
         )
     }
@@ -269,13 +276,13 @@ pub enum ExprT {
         type_: TypeId,
     },
     BinOp {
-        op: OpT,
+        op: BinaryOpT,
         lhs: Box<Loc<ExprT>>,
         rhs: Box<Loc<ExprT>>,
         type_: TypeId,
     },
     UnaryOp {
-        op: UnaryOp,
+        op: UnaryOpT,
         rhs: Box<Loc<ExprT>>,
         type_: TypeId,
     },
