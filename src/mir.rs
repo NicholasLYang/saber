@@ -19,7 +19,7 @@ pub struct BlockId(usize);
 #[derive(Debug, Copy, Clone, PartialEq)]
 struct FunctionId(usize);
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum Type {
     I32,
     F32,
@@ -40,7 +40,13 @@ pub struct Function {
 pub struct Block(pub Vec<Instruction>);
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Instruction {
+pub struct Instruction {
+    pub kind: InstructionKind,
+    pub ty: Option<Type>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum InstructionKind {
     // This could be too specific. I might want
     // blocks to have outgoing edges and have a
     // break with index as the instruction
@@ -52,6 +58,7 @@ pub enum Instruction {
     VarGet(usize),
     Return(InstrId),
     Call(FunctionId, Vec<InstrId>),
+    Noop,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -61,7 +68,6 @@ pub enum Primary {
     //  that indexes into a vec of heap allocated values
     String(usize),
     F32(f32),
-    USize(usize),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -220,8 +226,8 @@ impl MirCompiler {
         }
     }
 
-    fn add_instruction(&mut self, instruction: Instruction) -> InstrId {
-        self.current_block.push(instruction);
+    fn add_instruction(&mut self, kind: InstructionKind, ty: Option<Type>) -> InstrId {
+        self.current_block.push(Instruction { kind, ty });
         InstrId(self.current_block.len() - 1)
     }
 
@@ -263,24 +269,33 @@ impl MirCompiler {
     }
 
     // Compiles enclosed variable by going up scope chain
-    fn compile_enclosed_var(&mut self, var_name: Name, function_scopes: Vec<usize>) -> InstrId {
-        let mut env_ptr = self.add_instruction(Instruction::VarGet(0));
+    fn compile_enclosed_var(
+        &mut self,
+        var_name: Name,
+        var_type: Type,
+        function_scopes: Vec<usize>,
+    ) -> InstrId {
+        let mut env_ptr = self.add_instruction(InstructionKind::VarGet(0), Some(Type::Pointer));
         let len = function_scopes.len();
         for (idx, func_index) in function_scopes.into_iter().enumerate() {
             // If we're at the last function scope, we need to get the specific field
             if idx == len - 1 {
                 let (captures_index, _) = self.function_captures[func_index].insert_full(var_name);
 
-                let offset =
-                    self.add_instruction(Instruction::Primary(Primary::USize(captures_index * 4)));
+                let offset = self.add_instruction(
+                    InstructionKind::Primary(Primary::I32((captures_index * 4) as i32)),
+                    Some(Type::I32),
+                );
 
-                env_ptr = self.add_instruction(Instruction::Binary(
-                    BinaryOp::PointerAdd,
-                    env_ptr,
-                    offset,
-                ));
+                env_ptr = self.add_instruction(
+                    InstructionKind::Binary(BinaryOp::PointerAdd, env_ptr, offset),
+                    Some(Type::Pointer),
+                );
             } else {
-                env_ptr = self.add_instruction(Instruction::Unary(UnaryOp::PointerLoad, env_ptr));
+                env_ptr = self.add_instruction(
+                    InstructionKind::Unary(UnaryOp::PointerLoad, env_ptr),
+                    Some(var_type),
+                );
             }
         }
 
@@ -291,17 +306,19 @@ impl MirCompiler {
         match stmt {
             StmtT::Expr(expr) => {
                 let id = self.compile_expr(expr.inner);
-                self.add_instruction(Instruction::Unary(UnaryOp::Drop, id))
+                self.add_instruction(InstructionKind::Unary(UnaryOp::Drop, id), None)
             }
             StmtT::Return(expr) => {
                 let id = self.compile_expr(expr.inner);
-                self.add_instruction(Instruction::Return(id))
+                self.add_instruction(InstructionKind::Return(id), None)
             }
             s => todo!("{:?}", s),
         }
     }
 
     pub fn compile_expr(&mut self, expr: ExprT) -> InstrId {
+        let ty = self.ast_type_to_mir_type(expr.get_type());
+
         match expr {
             ExprT::Asgn { lhs, rhs, type_ } => {
                 if !lhs.inner.accessors.is_empty() {
@@ -317,18 +334,16 @@ impl MirCompiler {
 
                 if function_scopes.is_empty() {
                     let var_index = entry.var_index;
-                    self.add_instruction(Instruction::VarSet(var_index))
+                    self.add_instruction(InstructionKind::VarSet(var_index), None)
                 } else {
-                    let var_ptr = self.compile_enclosed_var(lhs.inner.ident, function_scopes);
-                    let op = match self
-                        .ast_type_to_mir_type(type_)
-                        .expect("Should be assignable type here")
-                    {
+                    let ty = ty.expect("Must be assignable");
+                    let var_ptr = self.compile_enclosed_var(lhs.inner.ident, ty, function_scopes);
+                    let op = match ty {
                         Type::I32 => BinaryOp::I32Store,
                         Type::F32 => BinaryOp::F32Store,
                         Type::Pointer => BinaryOp::PointerStore,
                     };
-                    self.add_instruction(Instruction::Binary(op, var_ptr, rhs_id))
+                    self.add_instruction(InstructionKind::Binary(op, var_ptr, rhs_id), None)
                 }
             }
             ExprT::If(cond, then_expr, else_expr, type_) => {
@@ -346,11 +361,14 @@ impl MirCompiler {
 
                 let cond_id = self.compile_expr(cond.inner);
 
-                self.add_instruction(Instruction::If(
-                    cond_id,
-                    (BlockId(then_block_id), then_instr_id),
-                    (BlockId(else_block_id), else_instr_id),
-                ))
+                self.add_instruction(
+                    InstructionKind::If(
+                        cond_id,
+                        (BlockId(then_block_id), then_instr_id),
+                        (BlockId(else_block_id), else_instr_id),
+                    ),
+                    ty,
+                )
             }
             ExprT::Var { name, type_ } => {
                 let (entry, function_scopes) = self
@@ -360,42 +378,44 @@ impl MirCompiler {
 
                 if function_scopes.is_empty() {
                     let var_index = entry.var_index;
-                    self.add_instruction(Instruction::VarGet(var_index))
+                    self.add_instruction(InstructionKind::VarGet(var_index), ty)
                 } else {
-                    let var_ptr = self.compile_enclosed_var(name, function_scopes);
-                    let op = match self
-                        .ast_type_to_mir_type(type_)
-                        .expect("Should be assignable type here")
-                    {
-                        Type::I32 => UnaryOp::I32Load,
-                        Type::F32 => UnaryOp::F32Load,
-                        Type::Pointer => UnaryOp::PointerLoad,
-                    };
-                    self.add_instruction(Instruction::Unary(op, var_ptr))
+                    if let Some(ty) = ty {
+                        let var_ptr = self.compile_enclosed_var(name, ty, function_scopes);
+                        let op = match ty {
+                            Type::I32 => UnaryOp::I32Load,
+                            Type::F32 => UnaryOp::F32Load,
+                            Type::Pointer => UnaryOp::PointerLoad,
+                        };
+                        self.add_instruction(InstructionKind::Unary(op, var_ptr), Some(ty))
+                    } else {
+                        self.add_instruction(InstructionKind::Noop, None)
+                    }
                 }
             }
             ExprT::BinOp {
                 op,
                 lhs,
                 rhs,
-                type_: _,
+                type_,
             } => {
                 let lhs_id = self.compile_expr(lhs.inner);
                 let rhs_id = self.compile_expr(rhs.inner);
-                self.add_instruction(Instruction::Binary(op.into(), lhs_id, rhs_id))
+
+                self.add_instruction(InstructionKind::Binary(op.into(), lhs_id, rhs_id), ty)
             }
             ExprT::UnaryOp { op, rhs, type_: _ } => {
                 let rhs_id = self.compile_expr(rhs.inner);
 
-                self.add_instruction(Instruction::Unary(op.into(), rhs_id))
+                self.add_instruction(InstructionKind::Unary(op.into(), rhs_id), ty)
             }
             ExprT::Primary { value, type_: _ } => {
-                let instruction = Instruction::Primary(self.compile_value(value));
-                self.add_instruction(instruction)
+                let instruction = InstructionKind::Primary(self.compile_value(value));
+                self.add_instruction(instruction, ty)
             }
             ExprT::Print { args, type_: _ } => {
                 let args_id = self.compile_expr(args.inner);
-                self.add_instruction(Instruction::Unary(UnaryOp::Print, args_id))
+                self.add_instruction(InstructionKind::Unary(UnaryOp::Print, args_id), None)
             }
             ExprT::DirectCall {
                 callee,
@@ -422,23 +442,21 @@ impl MirCompiler {
 
                         let mut ids = Vec::new();
                         for ty in fields_types {
+                            let ty = self.ast_type_to_mir_type(ty);
                             // TODO: Deduplicate code
-                            let op = match self
-                                .ast_type_to_mir_type(ty)
-                                .expect("Should be assignable type here")
-                            {
+                            let op = match ty.expect("Should be assignable type here") {
                                 Type::I32 => UnaryOp::I32Load,
                                 Type::F32 => UnaryOp::F32Load,
                                 Type::Pointer => UnaryOp::PointerLoad,
                             };
-                            ids.push(self.add_instruction(Instruction::Unary(op, expr_id)));
+                            ids.push(self.add_instruction(InstructionKind::Unary(op, expr_id), ty));
                         }
 
                         ids
                     }
                 };
 
-                self.add_instruction(Instruction::Call(FunctionId(callee), args))
+                self.add_instruction(InstructionKind::Call(FunctionId(callee), args), ty)
             }
             ExprT::Block {
                 stmts,
@@ -491,7 +509,7 @@ mod test {
     use crate::ast::{BinaryOpT, ExprT, Loc, Type};
     use crate::lexer::LocationRange;
     use crate::loc;
-    use crate::mir::{BinaryOp, Block, BlockId, InstrId, Instruction, Value};
+    use crate::mir::{BinaryOp, Block, BlockId, InstrId, InstructionKind, Value};
     use crate::mir::{MirCompiler, Primary};
     use crate::symbol_table::SymbolTable;
     use id_arena::Arena;
@@ -546,9 +564,9 @@ mod test {
         assert_eq!(
             instructions,
             &vec![
-                Instruction::Primary(Primary::I32(20)),
-                Instruction::Primary(Primary::I32(40)),
-                Instruction::Binary(BinaryOp::I32Add, InstrId(0), InstrId(1))
+                InstructionKind::Primary(Primary::I32(20)),
+                InstructionKind::Primary(Primary::I32(40)),
+                InstructionKind::Binary(BinaryOp::I32Add, InstrId(0), InstrId(1))
             ]
         );
     }
@@ -589,8 +607,8 @@ mod test {
         assert_eq!(
             blocks,
             &vec![
-                Block(vec![Instruction::Primary(Primary::I32(20))]),
-                Block(vec![Instruction::Primary(Primary::I32(40))]),
+                Block(vec![InstructionKind::Primary(Primary::I32(20))]),
+                Block(vec![InstructionKind::Primary(Primary::I32(40))]),
             ]
         );
 
@@ -598,8 +616,8 @@ mod test {
         assert_eq!(
             instructions,
             &vec![
-                Instruction::Primary(Primary::I32(1)),
-                Instruction::If(InstrId(0), BlockId(0), BlockId(1))
+                InstructionKind::Primary(Primary::I32(1)),
+                InstructionKind::If(InstrId(0), BlockId(0), BlockId(1))
             ]
         );
     }

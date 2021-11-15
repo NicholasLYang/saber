@@ -5,12 +5,18 @@ use walrus::{FunctionBuilder, LocalId, Module, ModuleConfig, ValType};
 struct WasmFunction {
     pub builder: FunctionBuilder,
     pub args: Vec<LocalId>,
+    // TODO: We should optimize so that we don't need one local
+    //   per instruction. We can go through instructions, see
+    //   what instructions rely on past ones and if it's only one
+    //   instruction, we make it a stack immediate.
+    pub locals: Vec<Vec<Option<LocalId>>>,
 }
 
 pub struct WasmBackend {
     module: Module,
     wasm_functions: Vec<WasmFunction>,
     current_function: Option<usize>,
+    current_block: Option<usize>,
 }
 
 impl Into<ValType> for mir::Type {
@@ -31,12 +37,46 @@ impl Into<ValType> for &mir::Type {
     }
 }
 
+impl WasmFunction {
+    pub fn new(
+        module: &mut Module,
+        params: &[ValType],
+        returns: &[ValType],
+        body: &[mir::Block],
+    ) -> Self {
+        let mut args = Vec::new();
+
+        for param in params {
+            args.push(module.locals.add(*param));
+        }
+
+        let mut locals = Vec::new();
+
+        for block in body {
+            let mut block_locals = Vec::new();
+
+            for instr in &block.0 {
+                block_locals.push(instr.ty.map(|t| module.locals.add(t.into())))
+            }
+
+            locals.push(block_locals)
+        }
+
+        WasmFunction {
+            builder: FunctionBuilder::new(&mut module.types, params, returns),
+            locals,
+            args,
+        }
+    }
+}
+
 impl WasmBackend {
     pub fn new() -> Self {
         WasmBackend {
             module: Module::default(),
             wasm_functions: Vec::new(),
             current_function: None,
+            current_block: None,
         }
     }
 
@@ -44,16 +84,13 @@ impl WasmBackend {
         for func in &program.functions {
             let params: Vec<_> = func.params.iter().map(|p| p.into()).collect();
             let returns: Vec<_> = func.returns.iter().map(|p| p.into()).collect();
-            let mut args = Vec::new();
 
-            for param in &params {
-                args.push(self.module.locals.add(*param));
-            }
-
-            self.wasm_functions.push(WasmFunction {
-                builder: FunctionBuilder::new(&mut self.module.types, &params, &returns),
-                args,
-            })
+            self.wasm_functions.push(WasmFunction::new(
+                &mut self.module,
+                &params,
+                &returns,
+                &func.body,
+            ))
         }
 
         for (idx, func) in program.functions.into_iter().enumerate() {
@@ -71,24 +108,27 @@ impl WasmBackend {
     }
 
     fn generate_function(&mut self, mut function: mir::Function) {
-        for instr in &function.body[0].0 {
-            match instr {
-                mir::Instruction::Primary(primary) => self.generate_primary(primary),
+        self.current_block = Some(0);
+        for (idx, instr) in function.body[0].0.iter().enumerate() {
+            match &instr.kind {
+                mir::InstructionKind::Primary(primary) => self.generate_primary(primary, idx),
                 _ => {}
             }
         }
     }
 
-    fn generate_primary(&mut self, primary: &mir::Primary) {
-        let mut builder = self.wasm_functions[self.current_function.unwrap()]
-            .builder
-            .func_body();
+    fn generate_primary(&mut self, primary: &mir::Primary, local_idx: usize) {
+        let mut func = &mut self.wasm_functions[self.current_function.unwrap()];
+        let local_id = func.locals[self.current_block.unwrap()][local_idx].unwrap();
+
+        let mut builder = func.builder.func_body();
 
         match primary {
             mir::Primary::I32(i) => builder.i32_const(*i),
             mir::Primary::String(usize) => todo!(),
             mir::Primary::F32(f) => builder.f32_const(*f),
-            mir::Primary::USize(u) => builder.i32_const(*u as i32),
         };
+
+        builder.local_set(local_id);
     }
 }
