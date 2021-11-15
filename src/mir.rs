@@ -37,7 +37,7 @@ pub struct Function {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Block(Vec<Instruction>);
+pub struct Block(pub Vec<Instruction>);
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Instruction {
@@ -55,7 +55,7 @@ pub enum Instruction {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-enum Primary {
+pub enum Primary {
     I32(i32),
     // TODO: Make this into a general purpose pointer type
     //  that indexes into a vec of heap allocated values
