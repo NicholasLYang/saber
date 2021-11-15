@@ -7,6 +7,7 @@ use crate::parser::Parser;
 use crate::runtime::run_code;
 use crate::typechecker::TypeChecker;
 use crate::utils::SaberProgram;
+use crate::wasm_backend::WasmBackend;
 use anyhow::Result;
 use clap::{App, AppSettings, Arg};
 //use code_generator::CodeGenerator;
@@ -31,6 +32,7 @@ mod symbol_table;
 mod typechecker;
 mod utils;
 mod wasm;
+mod wasm_backend;
 
 fn main() -> Result<()> {
     let matches = App::new("saber")
@@ -102,20 +104,13 @@ fn compile_saber_file<T: Write>(file_name: &str, debug_output: Option<T>) -> Res
 
     let (symbol_table, name_table, type_arena, builtin_types) = typechecker.get_tables();
     let mut mir_compiler = MirCompiler::new(symbol_table, type_arena);
-    mir_compiler.compile_program(program_t);
+    let program = mir_compiler.compile_program(program_t);
     mir_compiler.print_functions();
-    todo!()
-    // let code_generator = CodeGenerator::new(typechecker);
-    // let program = code_generator.generate_program(program_t)?;
-    // let mut emitter = Emitter::new();
-    // emitter.emit_program(program)?;
-    // if let Some(debug_output) = debug_output {
-    //     emitter.output(debug_output)?;
-    // }
-    // let mut wasm_bytes = Vec::new();
-    // emitter.output(&mut wasm_bytes)?;
-    // Ok(SaberProgram {
-    //     wasm_bytes,
-    //     runtime_types,
-    // })
+    let mut wasm_backend = WasmBackend::new();
+    let wasm_bytes = wasm_backend.generate_program(program);
+
+    Ok(SaberProgram {
+        wasm_bytes,
+        runtime_types,
+    })
 }

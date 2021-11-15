@@ -156,7 +156,7 @@ fn build_type_names(
 
 impl TypeChecker {
     pub fn new(mut name_table: NameTable) -> TypeChecker {
-        let mut symbol_table = SymbolTable::new();
+        let symbol_table = SymbolTable::new();
         let mut type_arena = Arena::<Type>::new();
         let builtin_types = BuiltInTypes::new(&mut type_arena);
         let type_names = build_type_names(&mut name_table, &builtin_types);

@@ -20,14 +20,19 @@ pub struct BlockId(usize);
 struct FunctionId(usize);
 
 #[derive(Debug)]
-enum Type {
+pub enum Type {
     I32,
     F32,
     Pointer,
 }
 
-struct Function {
+pub struct Program {
+    pub functions: Vec<Function>,
+}
+
+pub struct Function {
     pub params: Vec<Type>,
+    pub returns: Vec<Type>,
     pub body: Vec<Block>,
 }
 
@@ -205,9 +210,13 @@ impl MirCompiler {
         println!("-----------------");
     }
 
-    pub fn compile_program(&mut self, program: ProgramT) {
+    pub fn compile_program(&mut self, program: ProgramT) -> Program {
         for function in program.functions {
             self.compile_function(function.inner);
+        }
+
+        Program {
+            functions: replace(&mut self.functions, Vec::new()),
         }
     }
 
@@ -227,7 +236,14 @@ impl MirCompiler {
             }
         }
 
-        self.functions.push(Function { params, body })
+        self.functions.push(Function {
+            params,
+            body,
+            returns: self
+                .ast_type_to_mir_type(function.return_type)
+                .into_iter()
+                .collect(),
+        })
     }
 
     fn ast_type_to_mir_type(&self, type_id: ast::TypeId) -> Option<Type> {
