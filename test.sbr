@@ -1,3 +1,7 @@
-let main = () => (if true { 10 + 11 } else { 20 + 21 })
+let foo = () => {
+  print("hello")
+}
+
+let main = () => (foo())
 
 export main;

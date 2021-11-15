@@ -103,7 +103,7 @@ fn compile_saber_file<T: Write>(file_name: &str, debug_output: Option<T>) -> Res
     let (symbol_table, name_table, type_arena, builtin_types) = typechecker.get_tables();
     let mut mir_compiler = MirCompiler::new(symbol_table, type_arena);
     mir_compiler.compile_program(program_t);
-    mir_compiler.print_instructions();
+    mir_compiler.print_functions();
     todo!()
     // let code_generator = CodeGenerator::new(typechecker);
     // let program = code_generator.generate_program(program_t)?;

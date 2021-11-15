@@ -6,16 +6,20 @@ no nested scope.
 use crate::ast;
 use crate::ast::{BinaryOpT, ExprT, Loc, ProgramT, StmtT, Target, Value};
 use crate::symbol_table::SymbolTable;
+use crate::utils::get_final_type;
 use id_arena::Arena;
 use indexmap::set::IndexSet;
 use std::mem::replace;
 
 pub type Name = usize;
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub struct InstrId(usize);
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub struct BlockId(usize);
+#[derive(Debug, Copy, Clone, PartialEq)]
+struct FunctionId(usize);
 
+#[derive(Debug)]
 enum Type {
     I32,
     F32,
@@ -23,16 +27,15 @@ enum Type {
 }
 
 struct Function {
-    name: Name,
-    params: Vec<Type>,
-    body: Vec<Instruction>,
+    pub params: Vec<Type>,
+    pub body: Vec<Block>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Block(Vec<Instruction>);
 
 #[derive(Debug, Clone, PartialEq)]
-enum Instruction {
+pub enum Instruction {
     // This could be too specific. I might want
     // blocks to have outgoing edges and have a
     // break with index as the instruction
@@ -43,6 +46,7 @@ enum Instruction {
     VarSet(usize),
     VarGet(usize),
     Return(InstrId),
+    Call(FunctionId, Vec<InstrId>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -100,6 +104,8 @@ enum UnaryOp {
     I32Negate,
     BoolNegate,
     Drop,
+    // Eventually would like to have print be just a function but that requires generics
+    Print,
 }
 
 impl From<ast::UnaryOpT> for UnaryOp {
@@ -152,6 +158,7 @@ pub struct MirCompiler {
     blocks: Vec<Block>,
     current_block: Vec<Instruction>,
     type_arena: Arena<ast::Type>,
+    functions: Vec<Function>,
     function_captures: Vec<IndexSet<Name>>,
 }
 
@@ -164,21 +171,35 @@ impl MirCompiler {
             current_block: Vec::new(),
             symbol_table,
             type_arena,
+            functions: Vec::new(),
             function_captures: Vec::new(),
         }
     }
 
     #[allow(dead_code)]
-    pub fn print_instructions(&self) {
-        for block in &self.blocks {
-            println!("-----------------");
-            for instr in &block.0 {
-                println!("{:?}", instr);
+    pub fn print_functions(&self) {
+        for (idx, func) in self.functions.iter().enumerate() {
+            println!();
+            println!("#{}", idx);
+            println!("params: {:?}", func.params);
+            for block in &func.body {
+                Self::print_block(&block.0)
             }
-            println!("-----------------");
         }
+    }
+
+    #[allow(dead_code)]
+    pub fn print_current_function(&self) {
+        for block in &self.blocks {
+            Self::print_block(&block.0);
+        }
+        Self::print_block(&self.current_block)
+    }
+
+    #[allow(dead_code)]
+    pub fn print_block(block: &[Instruction]) {
         println!("-----------------");
-        for instr in &self.current_block {
+        for instr in block {
             println!("{:?}", instr);
         }
         println!("-----------------");
@@ -197,6 +218,16 @@ impl MirCompiler {
 
     fn compile_function(&mut self, function: ast::Function) {
         self.compile_expr(function.body.inner);
+        let mut body = replace(&mut self.blocks, Vec::new());
+        body.push(Block(replace(&mut self.current_block, Vec::new())));
+        let mut params = Vec::new();
+        for (_, param_type) in function.params {
+            if let Some(ty) = self.ast_type_to_mir_type(param_type) {
+                params.push(ty)
+            }
+        }
+
+        self.functions.push(Function { params, body })
     }
 
     fn ast_type_to_mir_type(&self, type_id: ast::TypeId) -> Option<Type> {
@@ -218,10 +249,10 @@ impl MirCompiler {
     // Compiles enclosed variable by going up scope chain
     fn compile_enclosed_var(&mut self, var_name: Name, function_scopes: Vec<usize>) -> InstrId {
         let mut env_ptr = self.add_instruction(Instruction::VarGet(0));
-
+        let len = function_scopes.len();
         for (idx, func_index) in function_scopes.into_iter().enumerate() {
             // If we're at the last function scope, we need to get the specific field
-            if idx == 0 {
+            if idx == len - 1 {
                 let (captures_index, _) = self.function_captures[func_index].insert_full(var_name);
 
                 let offset =
@@ -346,11 +377,58 @@ impl MirCompiler {
                 let instruction = Instruction::Primary(self.compile_value(value));
                 self.add_instruction(instruction)
             }
+            ExprT::Print { args, type_: _ } => {
+                let args_id = self.compile_expr(args.inner);
+                self.add_instruction(Instruction::Unary(UnaryOp::Print, args_id))
+            }
+            ExprT::DirectCall {
+                callee,
+                args,
+                type_: _,
+            } => {
+                let args = match args.inner {
+                    ExprT::Tuple(fields, ty) => fields
+                        .into_iter()
+                        .map(|field| self.compile_expr(field.inner))
+                        .collect(),
+                    e => {
+                        let expr_type = e.get_type();
+                        let expr_id = self.compile_expr(e);
+
+                        let fields_types = if let ast::Type::Tuple(fields_types) =
+                            &self.type_arena[get_final_type(&self.type_arena, expr_type)]
+                        {
+                            // TODO: Remove this clone
+                            fields_types.clone()
+                        } else {
+                            todo!("Cannot have a non-tuple type here. Can we catch this in the type checker?")
+                        };
+
+                        let mut ids = Vec::new();
+                        for ty in fields_types {
+                            // TODO: Deduplicate code
+                            let op = match self
+                                .ast_type_to_mir_type(ty)
+                                .expect("Should be assignable type here")
+                            {
+                                Type::I32 => UnaryOp::I32Load,
+                                Type::F32 => UnaryOp::F32Load,
+                                Type::Pointer => UnaryOp::PointerLoad,
+                            };
+                            ids.push(self.add_instruction(Instruction::Unary(op, expr_id)));
+                        }
+
+                        ids
+                    }
+                };
+
+                self.add_instruction(Instruction::Call(FunctionId(callee), args))
+            }
             ExprT::Block {
-                mut stmts,
+                stmts,
                 end_expr,
                 scope_index,
-                type_,
+                type_: _,
             } => {
                 let old_scope = self.symbol_table.swap_scope(scope_index);
 
