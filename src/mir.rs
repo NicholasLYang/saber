@@ -9,7 +9,7 @@ use crate::symbol_table::SymbolTable;
 use crate::utils::get_final_type;
 use id_arena::Arena;
 use indexmap::set::IndexSet;
-use std::mem::replace;
+use std::mem::{replace, swap};
 
 pub type Name = usize;
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -19,21 +19,32 @@ pub struct BlockId(usize);
 #[derive(Debug, Copy, Clone, PartialEq)]
 struct FunctionId(usize);
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Hash, Eq)]
 pub enum Type {
     I32,
     F32,
     Pointer,
 }
 
+#[derive(Debug)]
 pub struct Program {
     pub functions: Vec<Function>,
 }
 
+#[derive(Debug)]
 pub struct Function {
     pub params: Vec<Type>,
     pub returns: Vec<Type>,
     pub body: Vec<Block>,
+}
+
+struct CaptureBlock {
+    // Function in which the function is defined
+    enclosing_function: FunctionId,
+    // Block id for enclosing_function
+    block_id: BlockId,
+    // Function that is being defined
+    defined_function: FunctionId,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -54,11 +65,16 @@ pub enum InstructionKind {
     Binary(BinaryOp, InstrId, InstrId),
     Unary(UnaryOp, InstrId),
     Primary(Primary),
-    VarSet(usize),
+    VarSet(usize, InstrId),
     VarGet(usize),
     Return(InstrId),
     Call(FunctionId, Vec<InstrId>),
     Noop,
+    // We use this for captures. Basically we need to compile the captures struct
+    // AFTER the compilation finishes. We do this by having an unconditional branch
+    // to a block and then compiling the struct in that block after
+    Br(BlockId),
+    Alloc(usize),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -170,7 +186,9 @@ pub struct MirCompiler {
     current_block: Vec<Instruction>,
     type_arena: Arena<ast::Type>,
     functions: Vec<Function>,
-    function_captures: Vec<IndexSet<Name>>,
+    // Contains local var indices
+    function_captures: Vec<IndexSet<(usize, Type)>>,
+    capture_blocks: Vec<CaptureBlock>,
 }
 
 impl MirCompiler {
@@ -184,6 +202,7 @@ impl MirCompiler {
             type_arena,
             functions: Vec::new(),
             function_captures: Vec::new(),
+            capture_blocks: Vec::new(),
         }
     }
 
@@ -231,7 +250,55 @@ impl MirCompiler {
         InstrId(self.current_block.len() - 1)
     }
 
+    fn compile_capture_blocks(&mut self) {
+        let capture_blocks = replace(&mut self.capture_blocks, Vec::new());
+        let function_captures = replace(&mut self.function_captures, Vec::new());
+        for CaptureBlock {
+            enclosing_function,
+            defined_function,
+            block_id,
+        } in capture_blocks
+        {
+            // Set the capture block to be current block;
+            swap(
+                &mut self.current_block,
+                &mut self.functions[enclosing_function.0].body[block_id.0].0,
+            );
+
+            let captures = &function_captures[defined_function.0];
+            let alloc_size = captures.len() * 4;
+            let mut ptr =
+                self.add_instruction(InstructionKind::Alloc(alloc_size), Some(Type::Pointer));
+            let offset =
+                self.add_instruction(InstructionKind::Primary(Primary::I32(4)), Some(Type::I32));
+            let original_ptr = ptr;
+
+            for (var_index, var_type) in captures {
+                let op = match var_type {
+                    Type::Pointer => BinaryOp::PointerStore,
+                    Type::I32 => BinaryOp::I32Store,
+                    Type::F32 => BinaryOp::F32Store,
+                };
+                let rhs_id =
+                    self.add_instruction(InstructionKind::VarGet(*var_index), Some(*var_type));
+                self.add_instruction(InstructionKind::Binary(op, ptr, rhs_id), None);
+                ptr = self.add_instruction(
+                    InstructionKind::Binary(BinaryOp::PointerAdd, ptr, offset),
+                    Some(Type::Pointer),
+                )
+            }
+
+            self.add_instruction(InstructionKind::Return(original_ptr), Some(Type::Pointer));
+
+            swap(
+                &mut self.current_block,
+                &mut self.functions[enclosing_function.0].body[block_id.0].0,
+            );
+        }
+    }
+
     fn compile_function(&mut self, function: ast::Function) {
+        self.function_captures.push(IndexSet::new());
         self.compile_expr(function.body.inner);
         let mut body = replace(&mut self.blocks, Vec::new());
         body.push(Block(replace(&mut self.current_block, Vec::new())));
@@ -271,8 +338,8 @@ impl MirCompiler {
     // Compiles enclosed variable by going up scope chain
     fn compile_enclosed_var(
         &mut self,
-        var_name: Name,
         var_type: Type,
+        var_index: usize,
         function_scopes: Vec<usize>,
     ) -> InstrId {
         let mut env_ptr = self.add_instruction(InstructionKind::VarGet(0), Some(Type::Pointer));
@@ -280,7 +347,8 @@ impl MirCompiler {
         for (idx, func_index) in function_scopes.into_iter().enumerate() {
             // If we're at the last function scope, we need to get the specific field
             if idx == len - 1 {
-                let (captures_index, _) = self.function_captures[func_index].insert_full(var_name);
+                let (captures_index, _) =
+                    self.function_captures[func_index].insert_full((var_index, var_type));
 
                 let offset = self.add_instruction(
                     InstructionKind::Primary(Primary::I32((captures_index * 4) as i32)),
@@ -312,6 +380,13 @@ impl MirCompiler {
                 let id = self.compile_expr(expr.inner);
                 self.add_instruction(InstructionKind::Return(id), None)
             }
+            StmtT::Let(name, rhs) => {
+                let entry = self.symbol_table.lookup_name(name).unwrap();
+                let var_index = entry.var_index;
+                let id = self.compile_expr(rhs.inner);
+
+                self.add_instruction(InstructionKind::VarSet(var_index, id), None)
+            }
             s => todo!("{:?}", s),
         }
     }
@@ -334,10 +409,10 @@ impl MirCompiler {
 
                 if function_scopes.is_empty() {
                     let var_index = entry.var_index;
-                    self.add_instruction(InstructionKind::VarSet(var_index), None)
+                    self.add_instruction(InstructionKind::VarSet(var_index, rhs_id), None)
                 } else {
                     let ty = ty.expect("Must be assignable");
-                    let var_ptr = self.compile_enclosed_var(lhs.inner.ident, ty, function_scopes);
+                    let var_ptr = self.compile_enclosed_var(ty, entry.var_index, function_scopes);
                     let op = match ty {
                         Type::I32 => BinaryOp::I32Store,
                         Type::F32 => BinaryOp::F32Store,
@@ -345,6 +420,27 @@ impl MirCompiler {
                     };
                     self.add_instruction(InstructionKind::Binary(op, var_ptr, rhs_id), None)
                 }
+            }
+            ExprT::Block {
+                stmts,
+                end_expr,
+                scope_index,
+                type_: _,
+            } => {
+                let old_scope = self.symbol_table.swap_scope(scope_index);
+
+                let mut instr_id = None;
+                for stmt in stmts {
+                    instr_id = Some(self.compile_stmt(stmt.inner));
+                }
+
+                if let Some(end_expr) = end_expr {
+                    instr_id = Some(self.compile_expr(end_expr.inner));
+                }
+
+                self.symbol_table.swap_scope(old_scope);
+
+                instr_id.unwrap() // If instr_id is None, we've messed up in the type checker
             }
             ExprT::If(cond, then_expr, else_expr, type_) => {
                 let current_block = replace(&mut self.current_block, Vec::new());
@@ -370,6 +466,10 @@ impl MirCompiler {
                     ty,
                 )
             }
+            ExprT::Primary { value, type_: _ } => {
+                let instruction = InstructionKind::Primary(self.compile_value(value));
+                self.add_instruction(instruction, ty)
+            }
             ExprT::Var { name, type_ } => {
                 let (entry, function_scopes) = self
                     .symbol_table
@@ -381,7 +481,8 @@ impl MirCompiler {
                     self.add_instruction(InstructionKind::VarGet(var_index), ty)
                 } else {
                     if let Some(ty) = ty {
-                        let var_ptr = self.compile_enclosed_var(name, ty, function_scopes);
+                        let var_ptr =
+                            self.compile_enclosed_var(ty, entry.var_index, function_scopes);
                         let op = match ty {
                             Type::I32 => UnaryOp::I32Load,
                             Type::F32 => UnaryOp::F32Load,
@@ -409,9 +510,17 @@ impl MirCompiler {
 
                 self.add_instruction(InstructionKind::Unary(op.into(), rhs_id), ty)
             }
-            ExprT::Primary { value, type_: _ } => {
-                let instruction = InstructionKind::Primary(self.compile_value(value));
-                self.add_instruction(instruction, ty)
+            ExprT::Function { func_index, type_ } => {
+                self.blocks.push(Block(Vec::new()));
+                let block_id = BlockId(self.blocks.len() - 1);
+
+                self.capture_blocks.push(CaptureBlock {
+                    enclosing_function: FunctionId(self.functions.len()),
+                    defined_function: FunctionId(func_index),
+                    block_id,
+                });
+
+                self.add_instruction(InstructionKind::Br(block_id), Some(Type::Pointer))
             }
             ExprT::Print { args, type_: _ } => {
                 let args_id = self.compile_expr(args.inner);
@@ -457,27 +566,6 @@ impl MirCompiler {
                 };
 
                 self.add_instruction(InstructionKind::Call(FunctionId(callee), args), ty)
-            }
-            ExprT::Block {
-                stmts,
-                end_expr,
-                scope_index,
-                type_: _,
-            } => {
-                let old_scope = self.symbol_table.swap_scope(scope_index);
-
-                let mut instr_id = None;
-                for stmt in stmts {
-                    instr_id = Some(self.compile_stmt(stmt.inner));
-                }
-
-                if let Some(end_expr) = end_expr {
-                    instr_id = Some(self.compile_expr(end_expr.inner));
-                }
-
-                self.symbol_table.swap_scope(old_scope);
-
-                instr_id.unwrap() // If instr_id is None, we've messed up in the type checker
             }
             e => todo!("{:?}", e),
         }
