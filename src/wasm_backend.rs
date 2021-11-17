@@ -1,6 +1,5 @@
 use crate::mir;
-use crate::utils::SaberProgram;
-use walrus::{FunctionBuilder, LocalId, Module, ModuleConfig, ValType};
+use walrus::{FunctionBuilder, LocalId, Module, ValType};
 
 struct WasmFunction {
     pub builder: FunctionBuilder,
@@ -37,6 +36,57 @@ impl Into<ValType> for &mir::Type {
     }
 }
 
+impl mir::Block {
+    // Go down the block and check if which instructions need local variables versus which
+    // ones are just stack immediates
+    pub fn make_instruction_locals(&self, module: &mut Module) -> Vec<Option<LocalId>> {
+        let mut locals = vec![None; self.0.len()];
+        for (idx, instr) in self.0.iter().enumerate() {
+            match &instr.kind {
+                mir::InstructionKind::If(id, _, _)
+                | mir::InstructionKind::Unary(_, id)
+                | mir::InstructionKind::Return(id) => {
+                    if id.0 != idx - 1 {
+                        let ty = self.0.get(id.0).unwrap().ty;
+                        locals[id.0] = ty.map(|ty| module.locals.add(ty.into()))
+                    }
+                }
+                mir::InstructionKind::Binary(_, lhs, rhs) => {
+                    // We need the lhs and the rhs to be the latest and next-to-latest
+                    // instructions if we want to avoid locals
+                    if lhs.0 != idx - 1 || rhs.0 != idx - 2 {
+                        let lhs_ty = self.0.get(lhs.0).unwrap().ty;
+                        locals[lhs.0] = lhs_ty.map(|ty| module.locals.add(ty.into()));
+                        let rhs_ty = self.0.get(rhs.0).unwrap().ty;
+                        locals[rhs.0] = rhs_ty.map(|ty| module.locals.add(ty.into()))
+                    }
+                }
+                mir::InstructionKind::VarSet(_, _)
+                | mir::InstructionKind::VarGet(_)
+                | mir::InstructionKind::Primary(_)
+                | mir::InstructionKind::Noop
+                | mir::InstructionKind::Br(_)
+                | mir::InstructionKind::Alloc(_) => {
+                    // Surprisingly with InstructionKind::VarSet we don't do anything because
+                    // there's no case where we have to save an instruction, do something else, then set
+                    // it to a variable
+                }
+                mir::InstructionKind::Call(_, args) => {
+                    for (arg_idx, arg) in args.iter().enumerate() {
+                        let arg_instr_idx = idx - args.len() + arg_idx;
+                        if arg_instr_idx == arg.0 {
+                            let arg_ty = self.0.get(arg_instr_idx).unwrap().ty;
+                            locals[arg_instr_idx] = arg_ty.map(|ty| module.locals.add(ty.into()));
+                        }
+                    }
+                }
+            }
+        }
+
+        locals
+    }
+}
+
 impl WasmFunction {
     pub fn new(
         module: &mut Module,
@@ -53,13 +103,7 @@ impl WasmFunction {
         let mut locals = Vec::new();
 
         for block in body {
-            let mut block_locals = Vec::new();
-
-            for instr in &block.0 {
-                block_locals.push(instr.ty.map(|t| module.locals.add(t.into())))
-            }
-
-            locals.push(block_locals)
+            locals.push(block.make_instruction_locals(module));
         }
 
         WasmFunction {
@@ -107,7 +151,7 @@ impl WasmBackend {
         self.module.emit_wasm()
     }
 
-    fn generate_function(&mut self, mut function: mir::Function) {
+    fn generate_function(&mut self, function: mir::Function) {
         self.current_block = Some(0);
         for (idx, instr) in function.body[0].0.iter().enumerate() {
             match &instr.kind {
@@ -118,7 +162,7 @@ impl WasmBackend {
     }
 
     fn generate_primary(&mut self, primary: &mir::Primary, local_idx: usize) {
-        let mut func = &mut self.wasm_functions[self.current_function.unwrap()];
+        let func = &mut self.wasm_functions[self.current_function.unwrap()];
         let local_id = func.locals[self.current_block.unwrap()][local_idx].unwrap();
 
         let mut builder = func.builder.func_body();

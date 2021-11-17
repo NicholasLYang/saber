@@ -46,11 +46,6 @@ pub struct FunctionInfo {
     pub is_top_level: bool,
 }
 
-pub enum VarIndex {
-    Local(usize),
-    Capture(usize),
-}
-
 impl SymbolTable {
     pub fn new() -> Self {
         SymbolTable {

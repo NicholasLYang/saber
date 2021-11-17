@@ -1,7 +1,6 @@
 #[macro_use]
 extern crate strum_macros;
 
-use crate::emitter::Emitter;
 use crate::mir::MirCompiler;
 use crate::parser::Parser;
 use crate::runtime::run_code;
@@ -20,9 +19,6 @@ use std::io::Write;
 use wabt::wasm2wat;
 
 mod ast;
-//mod code_generator;
-mod cps;
-mod emitter;
 mod lexer;
 mod mir;
 mod parser;
@@ -31,7 +27,6 @@ mod runtime;
 mod symbol_table;
 mod typechecker;
 mod utils;
-mod wasm;
 mod wasm_backend;
 
 fn main() -> Result<()> {
@@ -105,8 +100,9 @@ fn compile_saber_file<T: Write>(file_name: &str, debug_output: Option<T>) -> Res
     let (symbol_table, name_table, type_arena, builtin_types) = typechecker.get_tables();
     let mut mir_compiler = MirCompiler::new(symbol_table, type_arena);
     let program = mir_compiler.compile_program(program_t);
+    println!("{:#?}", program);
     mir_compiler.print_functions();
-    let mut wasm_backend = WasmBackend::new();
+    let wasm_backend = WasmBackend::new();
     let wasm_bytes = wasm_backend.generate_program(program);
 
     Ok(SaberProgram {

@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt;
-use std::mem::{replace, take};
+use std::mem::replace;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum TypeError {
@@ -1244,7 +1244,6 @@ impl TypeChecker {
                 Op::LessEqual => Some((BinaryOpT::I32LessEqual, self.builtin_types.bool)),
                 Op::LogicalAnd => Some((BinaryOpT::I32And, self.builtin_types.int)),
                 Op::LogicalOr => Some((BinaryOpT::I32Or, self.builtin_types.int)),
-                _ => None,
             }
         } else if self.is_unifiable(lhs_type, self.builtin_types.float)
             || self.is_unifiable(rhs_type, self.builtin_types.float)

@@ -4,7 +4,7 @@ no nested scope.
 */
 
 use crate::ast;
-use crate::ast::{BinaryOpT, ExprT, Loc, ProgramT, StmtT, Target, Value};
+use crate::ast::{BinaryOpT, ExprT, ProgramT, StmtT, Value};
 use crate::symbol_table::SymbolTable;
 use crate::utils::get_final_type;
 use id_arena::Arena;
@@ -13,11 +13,11 @@ use std::mem::{replace, swap};
 
 pub type Name = usize;
 #[derive(Debug, Copy, Clone, PartialEq)]
-pub struct InstrId(usize);
+pub struct InstrId(pub usize);
 #[derive(Debug, Copy, Clone, PartialEq)]
-pub struct BlockId(usize);
+pub struct BlockId(pub usize);
 #[derive(Debug, Copy, Clone, PartialEq)]
-struct FunctionId(usize);
+pub struct FunctionId(pub usize);
 
 #[derive(Debug, Copy, Clone, PartialEq, Hash, Eq)]
 pub enum Type {
@@ -61,7 +61,7 @@ pub enum InstructionKind {
     // This could be too specific. I might want
     // blocks to have outgoing edges and have a
     // break with index as the instruction
-    If(InstrId, (BlockId, InstrId), (BlockId, InstrId)),
+    If(InstrId, BlockId, BlockId),
     Binary(BinaryOp, InstrId, InstrId),
     Unary(UnaryOp, InstrId),
     Primary(Primary),
@@ -87,7 +87,7 @@ pub enum Primary {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-enum BinaryOp {
+pub enum BinaryOp {
     I32Add,
     I32Sub,
     I32Mul,
@@ -123,7 +123,7 @@ enum BinaryOp {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-enum UnaryOp {
+pub enum UnaryOp {
     PointerLoad,
     F32Load,
     I32Load,
@@ -239,6 +239,8 @@ impl MirCompiler {
         for function in program.functions {
             self.compile_function(function.inner);
         }
+
+        self.compile_capture_blocks();
 
         Program {
             functions: replace(&mut self.functions, Vec::new()),
@@ -395,7 +397,7 @@ impl MirCompiler {
         let ty = self.ast_type_to_mir_type(expr.get_type());
 
         match expr {
-            ExprT::Asgn { lhs, rhs, type_ } => {
+            ExprT::Asgn { lhs, rhs, type_: _ } => {
                 if !lhs.inner.accessors.is_empty() {
                     todo!();
                 }
@@ -412,7 +414,8 @@ impl MirCompiler {
                     self.add_instruction(InstructionKind::VarSet(var_index, rhs_id), None)
                 } else {
                     let ty = ty.expect("Must be assignable");
-                    let var_ptr = self.compile_enclosed_var(ty, entry.var_index, function_scopes);
+                    let var_index = entry.var_index;
+                    let var_ptr = self.compile_enclosed_var(ty, var_index, function_scopes);
                     let op = match ty {
                         Type::I32 => BinaryOp::I32Store,
                         Type::F32 => BinaryOp::F32Store,
@@ -442,15 +445,15 @@ impl MirCompiler {
 
                 instr_id.unwrap() // If instr_id is None, we've messed up in the type checker
             }
-            ExprT::If(cond, then_expr, else_expr, type_) => {
+            ExprT::If(cond, then_expr, else_expr, _) => {
                 let current_block = replace(&mut self.current_block, Vec::new());
 
-                let then_instr_id = self.compile_expr(then_expr.inner);
+                self.compile_expr(then_expr.inner);
                 let then_block = replace(&mut self.current_block, Vec::new());
                 self.blocks.push(Block(then_block));
                 let then_block_id = self.blocks.len() - 1;
 
-                let else_instr_id = self.compile_expr(else_expr.inner);
+                self.compile_expr(else_expr.inner);
                 let else_block = replace(&mut self.current_block, current_block);
                 self.blocks.push(Block(else_block));
                 let else_block_id = self.blocks.len() - 1;
@@ -458,11 +461,7 @@ impl MirCompiler {
                 let cond_id = self.compile_expr(cond.inner);
 
                 self.add_instruction(
-                    InstructionKind::If(
-                        cond_id,
-                        (BlockId(then_block_id), then_instr_id),
-                        (BlockId(else_block_id), else_instr_id),
-                    ),
+                    InstructionKind::If(cond_id, BlockId(then_block_id), BlockId(else_block_id)),
                     ty,
                 )
             }
@@ -470,7 +469,7 @@ impl MirCompiler {
                 let instruction = InstructionKind::Primary(self.compile_value(value));
                 self.add_instruction(instruction, ty)
             }
-            ExprT::Var { name, type_ } => {
+            ExprT::Var { name, type_: _ } => {
                 let (entry, function_scopes) = self
                     .symbol_table
                     .lookup_name_with_function_hierarchy(name)
@@ -481,8 +480,8 @@ impl MirCompiler {
                     self.add_instruction(InstructionKind::VarGet(var_index), ty)
                 } else {
                     if let Some(ty) = ty {
-                        let var_ptr =
-                            self.compile_enclosed_var(ty, entry.var_index, function_scopes);
+                        let var_index = entry.var_index;
+                        let var_ptr = self.compile_enclosed_var(ty, var_index, function_scopes);
                         let op = match ty {
                             Type::I32 => UnaryOp::I32Load,
                             Type::F32 => UnaryOp::F32Load,
@@ -498,7 +497,7 @@ impl MirCompiler {
                 op,
                 lhs,
                 rhs,
-                type_,
+                type_: _,
             } => {
                 let lhs_id = self.compile_expr(lhs.inner);
                 let rhs_id = self.compile_expr(rhs.inner);
@@ -510,7 +509,10 @@ impl MirCompiler {
 
                 self.add_instruction(InstructionKind::Unary(op.into(), rhs_id), ty)
             }
-            ExprT::Function { func_index, type_ } => {
+            ExprT::Function {
+                func_index,
+                type_: _,
+            } => {
                 self.blocks.push(Block(Vec::new()));
                 let block_id = BlockId(self.blocks.len() - 1);
 
@@ -532,7 +534,7 @@ impl MirCompiler {
                 type_: _,
             } => {
                 let args = match args.inner {
-                    ExprT::Tuple(fields, ty) => fields
+                    ExprT::Tuple(fields, _) => fields
                         .into_iter()
                         .map(|field| self.compile_expr(field.inner))
                         .collect(),
@@ -581,14 +583,6 @@ impl MirCompiler {
                 Primary::String(self.string_literals.len() - 1)
             }
         }
-    }
-
-    fn get_current_block(&self) -> &Vec<Instruction> {
-        &self.current_block
-    }
-
-    fn get_blocks(&self) -> &Vec<Block> {
-        &self.blocks
     }
 }
 
