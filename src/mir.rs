@@ -122,7 +122,7 @@ pub enum BinaryOp {
     PointerMul,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum UnaryOp {
     PointerLoad,
     F32Load,
@@ -132,7 +132,9 @@ pub enum UnaryOp {
     BoolNegate,
     Drop,
     // Eventually would like to have print be just a function but that requires generics
-    Print,
+    PrintFloat,
+    PrintInt,
+    PrintPointer,
 }
 
 impl From<ast::UnaryOpT> for UnaryOp {
@@ -179,7 +181,7 @@ impl From<BinaryOpT> for BinaryOp {
 }
 
 pub struct MirCompiler {
-    string_literals: Vec<String>,
+    pub string_literals: Vec<String>,
     parameters: Vec<Type>,
     symbol_table: SymbolTable,
     blocks: Vec<Block>,
@@ -375,8 +377,14 @@ impl MirCompiler {
     pub fn compile_stmt(&mut self, stmt: StmtT) -> InstrId {
         match stmt {
             StmtT::Expr(expr) => {
+                let ty = get_final_type(&self.type_arena, expr.inner.get_type());
                 let id = self.compile_expr(expr.inner);
-                self.add_instruction(InstructionKind::Unary(UnaryOp::Drop, id), None)
+
+                if !matches!(self.type_arena[ty], ast::Type::Unit) {
+                    self.add_instruction(InstructionKind::Unary(UnaryOp::Drop, id), None)
+                } else {
+                    id
+                }
             }
             StmtT::Return(expr) => {
                 let id = self.compile_expr(expr.inner);
@@ -524,9 +532,14 @@ impl MirCompiler {
 
                 self.add_instruction(InstructionKind::Br(block_id), Some(Type::Pointer))
             }
-            ExprT::Print { args, type_: _ } => {
+            ExprT::Print { args, type_ } => {
+                let op = match self.type_arena[type_] {
+                    ast::Type::Integer => UnaryOp::PrintInt,
+                    ast::Type::Float => UnaryOp::PrintFloat,
+                    _ => UnaryOp::PrintPointer,
+                };
                 let args_id = self.compile_expr(args.inner);
-                self.add_instruction(InstructionKind::Unary(UnaryOp::Print, args_id), None)
+                self.add_instruction(InstructionKind::Unary(op, args_id), None)
             }
             ExprT::DirectCall {
                 callee,

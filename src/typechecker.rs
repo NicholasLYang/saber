@@ -176,13 +176,8 @@ impl TypeChecker {
         }
     }
 
-    pub fn get_tables(self) -> (SymbolTable, NameTable, Arena<Type>, BuiltInTypes) {
-        (
-            self.symbol_table,
-            self.name_table,
-            self.type_arena,
-            self.builtin_types,
-        )
+    pub fn get_tables(self) -> (SymbolTable, Arena<Type>) {
+        (self.symbol_table, self.type_arena)
     }
 
     #[allow(dead_code)]
