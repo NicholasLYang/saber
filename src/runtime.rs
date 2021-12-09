@@ -94,10 +94,8 @@ fn print_string(caller: Caller<'_>, ptr: i32) -> Result<(), Trap> {
     // any other memory accessors (assuming they're well-behaved
     // too).
     unsafe {
-        let data = mem.data_unchecked();
-
-        println!("{:?}", data);
-        let data = data
+        let data = mem
+            .data_unchecked()
             .get(ptr_to_contents as u32 as usize..)
             .and_then(|arr| arr.get(..len as u32 as usize));
         let string = match data {

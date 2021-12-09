@@ -213,12 +213,17 @@ impl WasmBackend {
 
         for s in strings {
             let len = s.len();
+            let mut bytes: Vec<u8> = vec![0, 0, 0, 0];
+            let len_as_32 = len as u32;
+            bytes.append(&mut len_as_32.to_le_bytes().to_vec());
+            bytes.append(&mut s.into_bytes());
+
             module.data.add(
                 DataKind::Active(ActiveData {
                     memory,
                     location: ActiveDataLocation::Absolute(data_start),
                 }),
-                s.into_bytes(),
+                bytes,
             );
             ptrs.push(data_start);
             data_start += len as u32;
