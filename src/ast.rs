@@ -3,7 +3,6 @@ use crate::parser::ParseError;
 use crate::typechecker::TypeError;
 use id_arena::{Arena, Id};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::fmt;
 
 pub type Name = usize;
@@ -33,6 +32,45 @@ macro_rules! loc {
 impl<T: fmt::Display> fmt::Display for Loc<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.inner)
+    }
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum Op {
+    Plus,
+    Minus,
+    Times,
+    Div,
+    BangEqual,
+    EqualEqual,
+    Greater,
+    GreaterEqual,
+    Less,
+    LessEqual,
+    LogicalAnd,
+    LogicalOr,
+}
+
+impl fmt::Display for Op {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Op::Plus => "+",
+                Op::Minus => "-",
+                Op::Times => "*",
+                Op::Div => "/",
+                Op::BangEqual => "!=",
+                Op::EqualEqual => "==",
+                Op::Greater => ">",
+                Op::GreaterEqual => ">=",
+                Op::Less => "<",
+                Op::LessEqual => "<=",
+                Op::LogicalAnd => "&&",
+                Op::LogicalOr => "||",
+            }
+        )
     }
 }
 
@@ -102,10 +140,24 @@ pub enum Expr {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct ProgramT {
-    pub functions: HashMap<FunctionId, Loc<Function>>,
+    pub functions: Vec<Loc<Function>>,
     pub stmts: Vec<Loc<StmtT>>,
     pub named_types: Vec<(Name, TypeId)>,
     pub errors: Vec<Loc<TypeError>>,
+    pub exports: Vec<Export>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ExportKind {
+    Var,
+    Function,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Export {
+    pub kind: ExportKind,
+    pub idx: usize,
+    pub name: Name,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -115,12 +167,14 @@ pub enum StmtT {
     Expr(Loc<ExprT>),
     Return(Loc<ExprT>),
     Loop(Loc<ExprT>),
+    Function {
+        func_index: usize,
+    },
     If {
         cond: Box<Loc<ExprT>>,
         then_block: Box<Loc<ExprT>>,
         else_block: Option<Box<Loc<ExprT>>>,
     },
-    Export(Name),
 }
 
 // Field or index accesses on a struct/array
@@ -138,6 +192,80 @@ pub struct Target {
     pub accessors: Vec<Loc<Accessor>>,
 }
 
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum UnaryOpT {
+    F32Minus,
+    I32Minus,
+    BoolNot,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum BinaryOpT {
+    I32Add,
+    I32Sub,
+    I32Mul,
+    I32Div,
+    I32NotEqual,
+    I32Equal,
+    I32Greater,
+    I32GreaterEqual,
+    I32Less,
+    I32LessEqual,
+    I32And,
+    I32Or,
+    F32Add,
+    F32Sub,
+    F32Mul,
+    F32Div,
+    F32NotEqual,
+    F32Equal,
+    F32Greater,
+    F32GreaterEqual,
+    F32Less,
+    F32LessEqual,
+    BoolAnd,
+    BoolOr,
+    StringEqual,
+    StringConcat,
+}
+
+impl fmt::Display for BinaryOpT {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                BinaryOpT::I32Add => "i32.add",
+                BinaryOpT::I32Sub => "i32.sub",
+                BinaryOpT::I32Mul => "i32.mul",
+                BinaryOpT::I32Div => "i32.div",
+                BinaryOpT::I32NotEqual => "i32.not_eq",
+                BinaryOpT::I32Equal => "i32.eq",
+                BinaryOpT::I32Greater => "i32.greater",
+                BinaryOpT::I32GreaterEqual => "i32.greater_eq",
+                BinaryOpT::I32Less => "i32.less",
+                BinaryOpT::I32LessEqual => "i32.less_eq",
+                BinaryOpT::I32And => "i32.and",
+                BinaryOpT::I32Or => "i32.or",
+                BinaryOpT::F32Add => "f32.add",
+                BinaryOpT::F32Sub => "f32.sub",
+                BinaryOpT::F32Mul => "f32.mul",
+                BinaryOpT::F32Div => "f32.div",
+                BinaryOpT::F32NotEqual => "f32.not_eq",
+                BinaryOpT::F32Equal => "f32.equal",
+                BinaryOpT::F32Greater => "f32.greater",
+                BinaryOpT::F32GreaterEqual => "f32.greater_eq",
+                BinaryOpT::F32Less => "f32.less",
+                BinaryOpT::F32LessEqual => "f32.less_eq",
+                BinaryOpT::BoolAnd => "bool.and",
+                BinaryOpT::BoolOr => "bool.or",
+                BinaryOpT::StringEqual => "str.eq",
+                BinaryOpT::StringConcat => "str.concat",
+            }
+        )
+    }
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub enum ExprT {
     Asgn {
@@ -151,12 +279,7 @@ pub enum ExprT {
         scope_index: usize,
         type_: TypeId,
     },
-    If(
-        Box<Loc<ExprT>>,
-        Box<Loc<ExprT>>,
-        Option<Box<Loc<ExprT>>>,
-        TypeId,
-    ),
+    If(Box<Loc<ExprT>>, Box<Loc<ExprT>>, Box<Loc<ExprT>>, TypeId),
     Primary {
         value: Value,
         type_: TypeId,
@@ -166,14 +289,18 @@ pub enum ExprT {
         type_: TypeId,
     },
     BinOp {
-        op: Op,
+        op: BinaryOpT,
         lhs: Box<Loc<ExprT>>,
         rhs: Box<Loc<ExprT>>,
         type_: TypeId,
     },
     UnaryOp {
-        op: UnaryOp,
+        op: UnaryOpT,
         rhs: Box<Loc<ExprT>>,
+        type_: TypeId,
+    },
+    Function {
+        func_index: usize,
         type_: TypeId,
     },
     Record {
@@ -187,9 +314,12 @@ pub enum ExprT {
         type_: TypeId,
     },
     TupleField(Box<Loc<ExprT>>, u32, TypeId),
+    Print {
+        args: Box<Loc<ExprT>>,
+        type_: TypeId,
+    },
     DirectCall {
         callee: FunctionId,
-        captures_var_index: Option<usize>,
         args: Box<Loc<ExprT>>,
         type_: TypeId,
     },
@@ -219,7 +349,6 @@ pub struct Function {
     pub params: Vec<(Name, TypeId)>,
     pub return_type: TypeId,
     pub body: Box<Loc<ExprT>>,
-    pub local_variables: Vec<TypeId>,
     pub scope_index: usize,
 }
 
@@ -245,50 +374,11 @@ pub enum UnaryOp {
     Not,
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum Op {
-    Plus,
-    Minus,
-    Times,
-    Div,
-    BangEqual,
-    EqualEqual,
-    Greater,
-    GreaterEqual,
-    Less,
-    LessEqual,
-    LogicalAnd,
-    LogicalOr,
-}
-
-impl fmt::Display for Op {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                Op::Plus => "+",
-                Op::Minus => "-",
-                Op::Times => "*",
-                Op::Div => "/",
-                Op::BangEqual => "!=",
-                Op::EqualEqual => "==",
-                Op::Greater => ">",
-                Op::GreaterEqual => ">=",
-                Op::Less => "<",
-                Op::LessEqual => "<=",
-                Op::LogicalAnd => "&&",
-                Op::LogicalOr => "||",
-            }
-        )
-    }
-}
-
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub enum Type {
     Unit,
     Float,
-    Int,
+    Integer,
     Bool,
     Char,
     String,
@@ -306,7 +396,7 @@ impl Type {
     pub fn is_ref_type(&self) -> bool {
         matches!(
             self,
-            Type::Int | Type::Bool | Type::Unit | Type::Char | Type::Float
+            Type::Integer | Type::Bool | Type::Unit | Type::Char | Type::Float
         )
     }
 }
@@ -326,7 +416,7 @@ impl BuiltInTypes {
         BuiltInTypes {
             unit: type_arena.alloc(Type::Unit),
             float: type_arena.alloc(Type::Float),
-            int: type_arena.alloc(Type::Int),
+            int: type_arena.alloc(Type::Integer),
             bool: type_arena.alloc(Type::Bool),
             char: type_arena.alloc(Type::Char),
             string: type_arena.alloc(Type::String),
@@ -383,15 +473,19 @@ impl ExprT {
                 rhs: _,
                 type_,
             } => *type_,
+            ExprT::Function {
+                func_index: _,
+                type_,
+            } => *type_,
             ExprT::Index {
                 lhs: _,
                 index: _,
                 type_,
             } => *type_,
             ExprT::TupleField(_, _, type_) => *type_,
+            ExprT::Print { args: _, type_ } => *type_,
             ExprT::DirectCall {
                 callee: _,
-                captures_var_index: _,
                 args: _,
                 type_,
             } => *type_,

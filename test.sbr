@@ -1,5 +1,8 @@
 let main = () => {
-  printString("hello world!");
+  let a = "foo";
+  print(a);
+
+  return a;
 }
 
 export main;

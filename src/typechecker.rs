@@ -1,6 +1,7 @@
 use crate::ast::{
-    Accessor, BuiltInTypes, Expr, ExprT, Function, FunctionId, Loc, Name, Op, Pat, Program,
-    ProgramT, Stmt, StmtT, Target, Type, TypeDef, TypeId, TypeSig, UnaryOp, Value,
+    Accessor, BinaryOpT, BuiltInTypes, Export, ExportKind, Expr, ExprT, Function, FunctionId, Loc,
+    Name, Op, Pat, Program, ProgramT, Stmt, StmtT, Target, Type, TypeDef, TypeId, TypeSig, UnaryOp,
+    UnaryOpT, Value,
 };
 use crate::lexer::LocationRange;
 use crate::loc;
@@ -12,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt;
-use std::mem::take;
+use std::mem::replace;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum TypeError {
@@ -54,6 +55,8 @@ pub enum TypeError {
     },
     InvalidAsgnTarget,
     NoLoopBreak,
+    NoElseInIfExpr,
+    EmptyBlock,
 }
 
 impl fmt::Display for TypeError {
@@ -96,12 +99,19 @@ impl fmt::Display for TypeError {
             ),
             TypeError::InvalidAsgnTarget => write!(f, "Invalid left hand side of an assignment"),
             TypeError::NoLoopBreak => write!(f, "Cannot break when not in loop"),
+            // TODO: Make this intelligible to normal human beings
+            TypeError::NoElseInIfExpr => {
+                write!(f, "No else branch in if expression, means that type is (). How about you use it as a statement?")
+            }
+            TypeError::EmptyBlock => {
+                write!(f, "Block is empty")
+            }
         }
     }
 }
 
 pub struct TypeChecker {
-    symbol_table: SymbolTable,
+    pub symbol_table: SymbolTable,
     functions: HashMap<FunctionId, Loc<Function>>,
     // Standard types like int, bool, etc.
     builtin_types: BuiltInTypes,
@@ -113,9 +123,9 @@ pub struct TypeChecker {
     // Index for type variable names
     type_var_index: usize,
     // Type arena
-    type_arena: Arena<Type>,
+    pub type_arena: Arena<Type>,
     // Symbol table
-    name_table: NameTable,
+    pub name_table: NameTable,
     // Struct types
     struct_types: Vec<(Name, TypeId)>,
     // Expr function index. Used for codegen
@@ -123,6 +133,7 @@ pub struct TypeChecker {
     // TODO: Allow for more complicated loop
     // breaking patterns
     is_in_loop: bool,
+    exports: Vec<Export>,
 }
 
 fn build_type_names(
@@ -146,39 +157,9 @@ fn build_type_names(
 
 impl TypeChecker {
     pub fn new(mut name_table: NameTable) -> TypeChecker {
-        let mut symbol_table = SymbolTable::new();
+        let symbol_table = SymbolTable::new();
         let mut type_arena = Arena::<Type>::new();
-        let print_int_id = name_table.insert("printInt".into());
         let builtin_types = BuiltInTypes::new(&mut type_arena);
-
-        symbol_table.insert_function(
-            print_int_id,
-            builtin_types.int,
-            builtin_types.unit,
-            type_arena.alloc(Type::Arrow(builtin_types.int, builtin_types.unit)),
-        );
-        let print_float_id = name_table.insert("printFloat".into());
-        symbol_table.insert_function(
-            print_float_id,
-            builtin_types.float,
-            builtin_types.unit,
-            type_arena.alloc(Type::Arrow(builtin_types.float, builtin_types.unit)),
-        );
-        let print_string_id = name_table.insert("printString".into());
-        symbol_table.insert_function(
-            print_string_id,
-            builtin_types.string,
-            builtin_types.unit,
-            type_arena.alloc(Type::Arrow(builtin_types.string, builtin_types.unit)),
-        );
-        let print_char_id = name_table.insert("printChar".into());
-        symbol_table.insert_function(
-            print_char_id,
-            builtin_types.char,
-            builtin_types.unit,
-            type_arena.alloc(Type::Arrow(builtin_types.char, builtin_types.unit)),
-        );
-
         let type_names = build_type_names(&mut name_table, &builtin_types);
 
         TypeChecker {
@@ -188,25 +169,13 @@ impl TypeChecker {
             return_type: None,
             type_var_index: 0,
             functions: HashMap::new(),
+            exports: Vec::new(),
             type_arena,
             name_table,
             struct_types: Vec::new(),
             expr_func_index: 0,
             is_in_loop: false,
         }
-    }
-
-    pub fn get_tables(self) -> (SymbolTable, NameTable, Arena<Type>, BuiltInTypes) {
-        (
-            self.symbol_table,
-            self.name_table,
-            self.type_arena,
-            self.builtin_types,
-        )
-    }
-
-    pub fn get_expr_func_index(&self) -> usize {
-        self.expr_func_index
     }
 
     #[allow(dead_code)]
@@ -283,10 +252,18 @@ impl TypeChecker {
         }
         let mut named_types = Vec::new();
         std::mem::swap(&mut named_types, &mut self.struct_types);
+        let mut functions = vec![None; self.symbol_table.get_function_index()];
+
+        let functions_map = replace(&mut self.functions, HashMap::new());
+        let exports = replace(&mut self.exports, Vec::new());
+        for (func_index, function) in functions_map {
+            functions[func_index] = Some(function);
+        }
 
         ProgramT {
             stmts: typed_stmts,
-            functions: take(&mut self.functions),
+            functions: functions.into_iter().map(|f| f.unwrap()).collect(),
+            exports,
             named_types,
             errors,
         }
@@ -409,7 +386,7 @@ impl TypeChecker {
                 };
                 let func_info = sym_entry.function_info.as_ref().unwrap();
                 let func_index = func_info.func_index;
-                let (function, captures) = self.function(func_name, params, *body)?;
+                let function = self.function(func_name, params, *body)?;
                 self.functions.insert(func_index, loc!(function, location));
 
                 // If we have a return type, we're inside a function and need to have a captures struct.
@@ -417,7 +394,7 @@ impl TypeChecker {
                 if self.return_type.is_some() {
                     Ok(vec![Loc {
                         location,
-                        inner: StmtT::Let(func_name, captures),
+                        inner: StmtT::Function { func_index },
                     }])
                 } else {
                     Ok(Vec::new())
@@ -455,16 +432,30 @@ impl TypeChecker {
                 }
             }
             Stmt::Export(name) => {
-                self.symbol_table.lookup_name(name).ok_or(loc!(
+                let entry = self.symbol_table.lookup_name(name).ok_or(loc!(
                     TypeError::VarNotDefined {
                         name: self.name_table.get_str(&name).to_string(),
                     },
                     location
                 ))?;
-                Ok(vec![Loc {
-                    location,
-                    inner: StmtT::Export(name),
-                }])
+
+                let export = if let Some(info) = &entry.function_info {
+                    Export {
+                        kind: ExportKind::Function,
+                        idx: info.func_index,
+                        name,
+                    }
+                } else {
+                    Export {
+                        kind: ExportKind::Var,
+                        idx: entry.var_index,
+                        name,
+                    }
+                };
+
+                self.exports.push(export);
+
+                Ok(Vec::new())
             }
         }
     }
@@ -734,43 +725,19 @@ impl TypeChecker {
         Ok(bindings)
     }
 
-    fn create_captures_tuple(&mut self, location: LocationRange) -> Loc<ExprT> {
-        let captures = self.symbol_table.get_captures().unwrap();
-        if captures.is_empty() {
-            return loc!(ExprT::Tuple(Vec::new(), self.builtin_types.unit), location);
-        }
-        let mut fields = Vec::new();
-        let mut types = Vec::new();
-        for (name, _, type_) in captures {
-            fields.push(Loc {
-                location,
-                inner: ExprT::Var {
-                    name: *name,
-                    type_: *type_,
-                },
-            });
-            types.push(*type_);
-        }
-        let type_id = self.type_arena.alloc(Type::Tuple(types));
-        let name = self.name_table.get_fresh_name();
-        self.struct_types.push((name, type_id));
-        loc!(ExprT::Tuple(fields, type_id), location)
-    }
-
     fn function(
         &mut self,
         name: Name,
         params: Pat,
         body: Loc<Expr>,
-        // TODO: Create a Closure struct
-    ) -> Result<(Function, Loc<ExprT>), Loc<TypeError>> {
+    ) -> Result<Function, Loc<TypeError>> {
         let entry = self.symbol_table.lookup_name(name);
         let entry = entry.as_ref().unwrap();
         let func_info = entry.function_info.as_ref().unwrap();
         let scope = func_info.func_scope;
         let return_type = func_info.return_type;
+
         self.symbol_table.swap_scope(scope);
-        let old_var_types = self.symbol_table.reset_vars();
         let func_params = self.get_func_params(&params)?;
         // Save the current return type
         let mut old_return_type = self.return_type;
@@ -791,25 +758,14 @@ impl TypeChecker {
             old_return_type.unwrap()
         };
 
-        // If return type is a type var, we just set it be unit
-        if matches!(self.type_arena[return_type], Type::Var(..)) {
-            self.type_arena[return_type] = Type::Unit;
-        };
-
-        let captures = self.create_captures_tuple(body.location);
-
-        let local_variables = self.symbol_table.restore_vars(old_var_types);
         let scope_index = self.symbol_table.restore_scope();
-        Ok((
-            Function {
-                params: func_params,
-                body: Box::new(body),
-                local_variables,
-                scope_index,
-                return_type,
-            },
-            captures,
-        ))
+
+        Ok(Function {
+            params: func_params,
+            body: Box::new(body),
+            scope_index,
+            return_type,
+        })
     }
 
     fn asgn_lhs(&mut self, lhs: Loc<Expr>) -> Result<(Loc<Target>, TypeId), Loc<TypeError>> {
@@ -822,6 +778,7 @@ impl TypeChecker {
                     },
                     location
                 ))?;
+
                 Ok((
                     loc!(
                         Target {
@@ -907,13 +864,13 @@ impl TypeChecker {
                 let lhs_type = typed_lhs.inner.get_type();
                 let rhs_type = typed_rhs.inner.get_type();
                 match self.op(&op, lhs_type, rhs_type) {
-                    Some(op_type) => Ok(Loc {
+                    Some((op, type_)) => Ok(Loc {
                         location,
                         inner: ExprT::BinOp {
                             op,
                             lhs: Box::new(typed_lhs),
                             rhs: Box::new(typed_rhs),
-                            type_: op_type,
+                            type_,
                         },
                     }),
                     None => {
@@ -993,77 +950,70 @@ impl TypeChecker {
                     self.symbol_table
                         .insert_function(name, params_type, return_type, type_);
 
-                let (function, captures) = self.function(name, params, *body)?;
+                let function = self.function(name, params, *body)?;
 
                 self.functions.insert(func_index, loc!(function, location));
-                let table_index = self.expr_func_index;
-                let table_index_expr = loc!(
-                    ExprT::Primary {
-                        value: Value::Integer(table_index.try_into().unwrap()),
-                        type_: self.builtin_types.int,
-                    },
-                    location
-                );
-
-                let closure_tuple_type = self.type_arena.alloc(Type::Tuple(vec![
-                    captures.inner.get_type(),
-                    self.builtin_types.int,
-                ]));
 
                 self.expr_func_index += 1;
-                Ok(loc!(
-                    ExprT::Tuple(vec![table_index_expr, captures], closure_tuple_type),
-                    location
-                ))
+                Ok(loc!(ExprT::Function { func_index, type_ }, location))
             }
             Expr::UnaryOp { op, rhs } => {
                 let typed_rhs = self.expr(*rhs)?;
                 let rhs_type = typed_rhs.inner.get_type();
-                let is_valid_types = match op {
+                let op_t = match op {
                     UnaryOp::Minus => {
-                        self.is_unifiable(rhs_type, self.builtin_types.int)
-                            || self.is_unifiable(rhs_type, self.builtin_types.float)
+                        if self.is_unifiable(rhs_type, self.builtin_types.int) {
+                            UnaryOpT::I32Minus
+                        } else if self.is_unifiable(rhs_type, self.builtin_types.float) {
+                            UnaryOpT::F32Minus
+                        } else {
+                            return Err(loc!(TypeError::InvalidUnaryExpr, location));
+                        }
                     }
-                    UnaryOp::Not => self.is_unifiable(rhs_type, self.builtin_types.bool),
+                    UnaryOp::Not => {
+                        if self.is_unifiable(rhs_type, self.builtin_types.bool) {
+                            UnaryOpT::BoolNot
+                        } else {
+                            return Err(loc!(TypeError::InvalidUnaryExpr, location));
+                        }
+                    }
                 };
-                if is_valid_types {
-                    Ok(Loc {
-                        location,
-                        inner: ExprT::UnaryOp {
-                            op,
-                            rhs: Box::new(typed_rhs),
-                            type_: rhs_type,
-                        },
-                    })
-                } else {
-                    Err(loc!(TypeError::InvalidUnaryExpr, location))
-                }
+
+                Ok(Loc {
+                    location,
+                    inner: ExprT::UnaryOp {
+                        op: op_t,
+                        rhs: Box::new(typed_rhs),
+                        type_: rhs_type,
+                    },
+                })
             }
             Expr::Call { callee, args } => {
-                let typed_callee = self.expr(*callee)?;
                 let typed_args = self.expr(*args)?;
-                if let ExprT::Var { name, type_: _ } = &typed_callee.inner {
-                    if let Some(entry) = self.symbol_table.lookup_name(*name) {
+
+                if let Expr::Var { name } = &callee.inner {
+                    if self.name_table.get_str(name) == "print" {
+                        return Ok(loc!(
+                            ExprT::Print {
+                                args: Box::new(typed_args),
+                                type_: self.builtin_types.unit
+                            },
+                            location
+                        ));
+                    } else if let Some(entry) = self.symbol_table.lookup_name(*name) {
                         if let Some(FunctionInfo {
                             func_index,
                             func_scope: _,
                             params_type,
                             return_type,
-                            is_top_level,
+                            is_top_level: _,
                         }) = entry.function_info
                         {
-                            let captures_var_index = if !is_top_level {
-                                Some(entry.var_index)
-                            } else {
-                                None
-                            };
-
                             self.unify_or_err(params_type, typed_args.inner.get_type(), location)?;
                             return Ok(Loc {
                                 location,
                                 inner: ExprT::DirectCall {
                                     callee: func_index,
-                                    captures_var_index,
                                     args: Box::new(typed_args),
                                     type_: return_type,
                                 },
@@ -1071,6 +1021,8 @@ impl TypeChecker {
                         }
                     }
                 }
+
+                let typed_callee = self.expr(*callee)?;
                 let callee_type = typed_callee.inner.get_type();
                 let (params_type, return_type) = match &self.type_arena[callee_type] {
                     Type::Arrow(params_type, return_type) => (*params_type, *return_type),
@@ -1095,6 +1047,9 @@ impl TypeChecker {
                 })
             }
             Expr::Block(stmts, end_expr) => {
+                if stmts.is_empty() && end_expr.is_none() {
+                    return Err(loc!(TypeError::EmptyBlock, location));
+                }
                 let scope_index = self.symbol_table.push_scope();
                 self.hoist_functions(&stmts)?;
                 let mut typed_stmts = Vec::new();
@@ -1122,31 +1077,20 @@ impl TypeChecker {
                 let typed_cond = self.expr(*cond)?;
                 let typed_then_block = self.expr(*then_block)?;
                 let then_type = typed_then_block.inner.get_type();
-                if let Some(else_block) = else_block {
-                    let typed_else_block = self.expr(*else_block)?;
-                    let else_type = typed_else_block.inner.get_type();
-                    self.unify_or_err(then_type, else_type, location)?;
-                    Ok(Loc {
-                        location,
-                        inner: ExprT::If(
-                            Box::new(typed_cond),
-                            Box::new(typed_then_block),
-                            Some(Box::new(typed_else_block)),
-                            then_type,
-                        ),
-                    })
-                } else {
-                    self.unify_or_err(self.builtin_types.unit, then_type, location)?;
-                    Ok(Loc {
-                        location,
-                        inner: ExprT::If(
-                            Box::new(typed_cond),
-                            Box::new(typed_then_block),
-                            None,
-                            self.builtin_types.unit,
-                        ),
-                    })
-                }
+                let else_block = else_block.ok_or(loc!(TypeError::NoElseInIfExpr, location))?;
+                let typed_else_block = self.expr(*else_block)?;
+                let else_type = typed_else_block.inner.get_type();
+                self.unify_or_err(then_type, else_type, location)?;
+
+                Ok(Loc {
+                    location,
+                    inner: ExprT::If(
+                        Box::new(typed_cond),
+                        Box::new(typed_then_block),
+                        Box::new(typed_else_block),
+                        then_type,
+                    ),
+                })
             }
             Expr::Record { name, fields } => {
                 let type_id = if let Some(id) = self.type_names.get(&name) {
@@ -1289,51 +1233,53 @@ impl TypeChecker {
         }
     }
 
-    fn op(&mut self, op: &Op, lhs_type: TypeId, rhs_type: TypeId) -> Option<TypeId> {
-        match op {
-            Op::Plus | Op::Minus | Op::Times | Op::Div => {
-                let lhs_type = get_final_type(&self.type_arena, lhs_type);
-                let rhs_type = get_final_type(&self.type_arena, rhs_type);
+    fn op(&mut self, op: &Op, lhs_type: TypeId, rhs_type: TypeId) -> Option<(BinaryOpT, TypeId)> {
+        let lhs_type = get_final_type(&self.type_arena, lhs_type);
+        let rhs_type = get_final_type(&self.type_arena, rhs_type);
 
-                if self.is_unifiable(lhs_type, self.builtin_types.int)
-                    && self.is_unifiable(rhs_type, self.builtin_types.int)
-                {
-                    Some(self.builtin_types.int)
-                } else if self.is_unifiable(lhs_type, self.builtin_types.float)
-                    || self.is_unifiable(rhs_type, self.builtin_types.float)
-                {
-                    Some(self.builtin_types.float)
-                } else {
-                    None
-                }
+        if self.is_unifiable(lhs_type, self.builtin_types.int)
+            && self.is_unifiable(rhs_type, self.builtin_types.int)
+        {
+            match op {
+                Op::Plus => Some((BinaryOpT::I32Add, self.builtin_types.int)),
+                Op::Minus => Some((BinaryOpT::I32Sub, self.builtin_types.int)),
+                Op::Times => Some((BinaryOpT::I32Mul, self.builtin_types.int)),
+                Op::Div => Some((BinaryOpT::I32Div, self.builtin_types.int)),
+                Op::BangEqual => Some((BinaryOpT::I32NotEqual, self.builtin_types.bool)),
+                Op::EqualEqual => Some((BinaryOpT::I32Equal, self.builtin_types.bool)),
+                Op::Greater => Some((BinaryOpT::I32Greater, self.builtin_types.bool)),
+                Op::GreaterEqual => Some((BinaryOpT::I32GreaterEqual, self.builtin_types.bool)),
+                Op::Less => Some((BinaryOpT::I32Less, self.builtin_types.bool)),
+                Op::LessEqual => Some((BinaryOpT::I32LessEqual, self.builtin_types.bool)),
+                Op::LogicalAnd => Some((BinaryOpT::I32And, self.builtin_types.int)),
+                Op::LogicalOr => Some((BinaryOpT::I32Or, self.builtin_types.int)),
             }
-            Op::BangEqual | Op::EqualEqual => {
-                if self.is_unifiable(lhs_type, rhs_type) {
-                    Some(self.builtin_types.bool)
-                } else {
-                    None
-                }
+        } else if self.is_unifiable(lhs_type, self.builtin_types.float)
+            || self.is_unifiable(rhs_type, self.builtin_types.float)
+        {
+            match op {
+                Op::Plus => Some((BinaryOpT::F32Add, self.builtin_types.float)),
+                Op::Minus => Some((BinaryOpT::F32Sub, self.builtin_types.float)),
+                Op::Times => Some((BinaryOpT::F32Mul, self.builtin_types.float)),
+                Op::Div => Some((BinaryOpT::F32Div, self.builtin_types.float)),
+                Op::BangEqual => Some((BinaryOpT::F32NotEqual, self.builtin_types.bool)),
+                Op::EqualEqual => Some((BinaryOpT::F32Equal, self.builtin_types.bool)),
+                Op::Greater => Some((BinaryOpT::F32Greater, self.builtin_types.bool)),
+                Op::GreaterEqual => Some((BinaryOpT::F32GreaterEqual, self.builtin_types.bool)),
+                Op::Less => Some((BinaryOpT::F32Less, self.builtin_types.bool)),
+                Op::LessEqual => Some((BinaryOpT::F32LessEqual, self.builtin_types.bool)),
+                _ => None,
             }
-            Op::GreaterEqual | Op::Greater | Op::Less | Op::LessEqual => {
-                if (self.is_unifiable(lhs_type, self.builtin_types.int)
-                    && self.is_unifiable(rhs_type, self.builtin_types.int))
-                    || (self.is_unifiable(lhs_type, self.builtin_types.float)
-                        && self.is_unifiable(rhs_type, self.builtin_types.float))
-                {
-                    Some(self.builtin_types.bool)
-                } else {
-                    None
-                }
+        } else if self.is_unifiable(lhs_type, self.builtin_types.string)
+            && self.is_unifiable(rhs_type, self.builtin_types.string)
+        {
+            match op {
+                Op::EqualEqual => Some((BinaryOpT::StringEqual, self.builtin_types.bool)),
+                Op::Plus => Some((BinaryOpT::StringConcat, self.builtin_types.string)),
+                _ => None,
             }
-            Op::LogicalAnd | Op::LogicalOr => {
-                if self.is_unifiable(lhs_type, self.builtin_types.bool)
-                    && self.is_unifiable(rhs_type, self.builtin_types.bool)
-                {
-                    Some(self.builtin_types.bool)
-                } else {
-                    None
-                }
-            }
+        } else {
+            None
         }
     }
 
@@ -1425,9 +1371,9 @@ impl TypeChecker {
                     _ => None,
                 }
             }
-            (Type::Int, Type::Int) => Some(self.builtin_types.int),
-            (Type::Int, Type::Bool) => Some(type_id1),
-            (Type::Bool, Type::Int) => Some(type_id2),
+            (Type::Integer, Type::Integer) => Some(self.builtin_types.int),
+            (Type::Integer, Type::Bool) => Some(type_id1),
+            (Type::Bool, Type::Integer) => Some(type_id2),
             (Type::Var(_), _) => {
                 self.type_arena[type_id1] = Type::Solved(type_id2);
                 Some(type_id2)

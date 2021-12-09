@@ -1,14 +1,15 @@
 #[macro_use]
 extern crate strum_macros;
 
-use crate::emitter::Emitter;
+use crate::mir::MirCompiler;
 use crate::parser::Parser;
 use crate::runtime::run_code;
 use crate::typechecker::TypeChecker;
 use crate::utils::SaberProgram;
+use crate::wasm_backend::WasmBackend;
 use anyhow::Result;
 use clap::{App, AppSettings, Arg};
-use code_generator::CodeGenerator;
+//use code_generator::CodeGenerator;
 use codespan_reporting::diagnostic::Diagnostic;
 use codespan_reporting::files::SimpleFile;
 use codespan_reporting::term;
@@ -18,17 +19,15 @@ use std::io::Write;
 use wabt::wasm2wat;
 
 mod ast;
-mod code_generator;
-mod cps;
-mod emitter;
 mod lexer;
+mod mir;
 mod parser;
 mod printer;
 mod runtime;
 mod symbol_table;
 mod typechecker;
 mod utils;
-mod wasm;
+mod wasm_backend;
 
 fn main() -> Result<()> {
     let matches = App::new("saber")
@@ -98,15 +97,13 @@ fn compile_saber_file<T: Write>(file_name: &str, debug_output: Option<T>) -> Res
         term::emit(&mut writer.lock(), &config, &file, &diagnostic).unwrap();
     }
 
-    let code_generator = CodeGenerator::new(typechecker);
-    let program = code_generator.generate_program(program_t)?;
-    let mut emitter = Emitter::new();
-    emitter.emit_program(program)?;
-    if let Some(debug_output) = debug_output {
-        emitter.output(debug_output)?;
-    }
-    let mut wasm_bytes = Vec::new();
-    emitter.output(&mut wasm_bytes)?;
+    let mut mir_compiler = MirCompiler::new(typechecker);
+    let program = mir_compiler.compile_program(program_t);
+    println!("{:#?}", program);
+    mir_compiler.print_functions();
+    let wasm_backend = WasmBackend::new(mir_compiler);
+    let wasm_bytes = wasm_backend.generate_program(program);
+
     Ok(SaberProgram {
         wasm_bytes,
         runtime_types,

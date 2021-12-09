@@ -1,4 +1,5 @@
-use crate::code_generator::BOX_ARRAY_ID;
+//use crate::code_generator::BOX_ARRAY_ID;
+static BOX_ARRAY_ID: i32 = 0;
 use crate::utils::SaberProgram;
 use anyhow::Result;
 use byteorder::{LittleEndian, WriteBytesExt};
@@ -87,7 +88,6 @@ fn print_string(caller: Caller<'_>, ptr: i32) -> Result<(), Trap> {
     let ptr_to_len = ptr + 4;
     let len = get_u32(ptr_to_len as usize, &mem)?;
     let ptr_to_contents = ptr + 8;
-
     // We're reading raw wasm memory here so we need `unsafe`. Note
     // though that this should be safe because we don't reenter wasm
     // while we're reading wasm memory, nor should we clash with
@@ -107,6 +107,7 @@ fn print_string(caller: Caller<'_>, ptr: i32) -> Result<(), Trap> {
         };
         println!("{}", string);
     }
+
     Ok(())
 }
 
@@ -233,22 +234,15 @@ pub fn run_code(program: SaberProgram) -> Result<()> {
     let instance = Instance::new(
         &store,
         &module,
-        &[
-            alloc.into(),
-            dealloc.into(),
-            clone.into(),
-            streq.into(),
-            print_heap.into(),
-            print_int.into(),
-            print_float.into(),
-            print_string.into(),
-            print_char.into(),
-        ],
+        &[print_int.into(), print_float.into(), print_string.into()],
     )?;
+
     let main = instance
         .get_func("main")
         .expect("No main function")
-        .get1::<i32, ()>()?;
-    main(0)?;
+        .get0::<i32>()?;
+
+    let res = main()?;
+    println!("{}", res);
     Ok(())
 }

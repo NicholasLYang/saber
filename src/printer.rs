@@ -10,7 +10,7 @@ use itertools::Itertools;
 pub fn type_to_string(name_table: &NameTable, type_table: &Arena<Type>, type_id: TypeId) -> String {
     match &type_table[type_id] {
         Type::Unit => "()".to_string(),
-        Type::Int => "int".to_string(),
+        Type::Integer => "int".to_string(),
         Type::Float => "float".to_string(),
         Type::Bool => "bool".to_string(),
         Type::Char => "char".to_string(),
@@ -41,10 +41,7 @@ pub fn type_to_string(name_table: &NameTable, type_table: &Arena<Type>, type_id:
             let return_str = type_to_string(name_table, type_table, *return_type);
             format!("{} => {}", params_str, return_str)
         }
-        Type::Solved(type_id) => format!(
-            "{}",
-            type_to_string(name_table, type_table, *type_id)
-        ),
+        Type::Solved(type_id) => format!("{}", type_to_string(name_table, type_table, *type_id)),
     }
 }
 
