@@ -144,6 +144,20 @@ pub struct ProgramT {
     pub stmts: Vec<Loc<StmtT>>,
     pub named_types: Vec<(Name, TypeId)>,
     pub errors: Vec<Loc<TypeError>>,
+    pub exports: Vec<Export>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ExportKind {
+    Var,
+    Function,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Export {
+    pub kind: ExportKind,
+    pub idx: usize,
+    pub name: Name,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -161,7 +175,6 @@ pub enum StmtT {
         then_block: Box<Loc<ExprT>>,
         else_block: Option<Box<Loc<ExprT>>>,
     },
-    Export(Name),
 }
 
 // Field or index accesses on a struct/array

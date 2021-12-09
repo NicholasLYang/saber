@@ -88,15 +88,16 @@ fn print_string(caller: Caller<'_>, ptr: i32) -> Result<(), Trap> {
     let ptr_to_len = ptr + 4;
     let len = get_u32(ptr_to_len as usize, &mem)?;
     let ptr_to_contents = ptr + 8;
-
     // We're reading raw wasm memory here so we need `unsafe`. Note
     // though that this should be safe because we don't reenter wasm
     // while we're reading wasm memory, nor should we clash with
     // any other memory accessors (assuming they're well-behaved
     // too).
     unsafe {
-        let data = mem
-            .data_unchecked()
+        let data = mem.data_unchecked();
+
+        println!("{:?}", data);
+        let data = data
             .get(ptr_to_contents as u32 as usize..)
             .and_then(|arr| arr.get(..len as u32 as usize));
         let string = match data {
@@ -108,6 +109,7 @@ fn print_string(caller: Caller<'_>, ptr: i32) -> Result<(), Trap> {
         };
         println!("{}", string);
     }
+
     Ok(())
 }
 
@@ -234,22 +236,15 @@ pub fn run_code(program: SaberProgram) -> Result<()> {
     let instance = Instance::new(
         &store,
         &module,
-        &[
-            alloc.into(),
-            dealloc.into(),
-            clone.into(),
-            streq.into(),
-            print_heap.into(),
-            print_int.into(),
-            print_float.into(),
-            print_string.into(),
-            print_char.into(),
-        ],
+        &[print_int.into(), print_float.into(), print_string.into()],
     )?;
+
     let main = instance
         .get_func("main")
         .expect("No main function")
-        .get1::<i32, ()>()?;
-    main(0)?;
+        .get0::<i32>()?;
+
+    let res = main()?;
+    println!("{}", res);
     Ok(())
 }

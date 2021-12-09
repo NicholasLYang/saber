@@ -4,9 +4,10 @@ no nested scope.
 */
 
 use crate::ast;
-use crate::ast::{BinaryOpT, ExprT, ProgramT, StmtT, Value};
+use crate::ast::{BinaryOpT, Export, ExportKind, ExprT, ProgramT, StmtT, Value};
 use crate::symbol_table::SymbolTable;
-use crate::utils::get_final_type;
+use crate::typechecker::TypeChecker;
+use crate::utils::{get_final_type, NameTable};
 use id_arena::Arena;
 use indexmap::set::IndexSet;
 use std::mem::{replace, swap};
@@ -36,6 +37,7 @@ pub struct Function {
     pub params: Vec<Type>,
     pub returns: Vec<Type>,
     pub body: Vec<Block>,
+    pub export_name: Option<Name>,
 }
 
 struct CaptureBlock {
@@ -182,6 +184,7 @@ impl From<BinaryOpT> for BinaryOp {
 
 pub struct MirCompiler {
     pub string_literals: Vec<String>,
+    pub name_table: NameTable,
     parameters: Vec<Type>,
     symbol_table: SymbolTable,
     blocks: Vec<Block>,
@@ -194,12 +197,20 @@ pub struct MirCompiler {
 }
 
 impl MirCompiler {
-    pub fn new(symbol_table: SymbolTable, type_arena: Arena<ast::Type>) -> Self {
+    pub fn new(type_checker: TypeChecker) -> Self {
+        let TypeChecker {
+            name_table,
+            symbol_table,
+            type_arena,
+            ..
+        } = type_checker;
+
         MirCompiler {
             string_literals: Vec::new(),
             parameters: Vec::new(),
             blocks: Vec::new(),
             current_block: Vec::new(),
+            name_table,
             symbol_table,
             type_arena,
             functions: Vec::new(),
@@ -243,6 +254,17 @@ impl MirCompiler {
         }
 
         self.compile_capture_blocks();
+
+        for Export { kind, idx, name } in program.exports {
+            match kind {
+                ExportKind::Var => {
+                    todo!()
+                }
+                ExportKind::Function => {
+                    self.functions[idx].export_name = Some(name);
+                }
+            }
+        }
 
         Program {
             functions: replace(&mut self.functions, Vec::new()),
@@ -320,6 +342,7 @@ impl MirCompiler {
                 .ast_type_to_mir_type(function.return_type)
                 .into_iter()
                 .collect(),
+            export_name: None,
         })
     }
 

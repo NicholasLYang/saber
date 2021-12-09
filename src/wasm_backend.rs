@@ -1,5 +1,7 @@
+use crate::ast::Name;
 use crate::mir;
 use crate::mir::{MirCompiler, UnaryOp};
+use crate::utils::NameTable;
 use std::collections::HashMap;
 use walrus::{
     ActiveData, ActiveDataLocation, DataKind, FunctionBuilder, FunctionId, LocalId, MemoryId,
@@ -15,12 +17,14 @@ struct WasmFunction {
     //   instruction, we make it a stack immediate.
     pub instruction_locals: Vec<Vec<Option<LocalId>>>,
     pub var_locals: HashMap<usize, LocalId>,
+    export_name: Option<Name>,
 }
 
 pub struct WasmBackend {
     module: Module,
     memory_id: MemoryId,
     string_ptrs: Vec<u32>,
+    name_table: NameTable,
     wasm_functions: Vec<WasmFunction>,
     current_function: Option<usize>,
     current_block: Option<usize>,
@@ -107,6 +111,7 @@ impl WasmFunction {
         params: &[ValType],
         returns: &[ValType],
         body: &[mir::Block],
+        export_name: Option<Name>,
     ) -> Self {
         let mut args = Vec::new();
 
@@ -125,6 +130,7 @@ impl WasmFunction {
             instruction_locals: locals,
             var_locals: HashMap::new(),
             args,
+            export_name,
         }
     }
 }
@@ -132,7 +138,9 @@ impl WasmFunction {
 impl WasmBackend {
     pub fn new(mir_compiler: MirCompiler) -> Self {
         let MirCompiler {
-            string_literals, ..
+            string_literals,
+            name_table,
+            ..
         } = mir_compiler;
 
         let mut module = Module::default();
@@ -147,11 +155,13 @@ impl WasmBackend {
         let (print_int, _) = module.add_import_func("std", "print_int", print_int_type);
         let (print_float, _) = module.add_import_func("std", "print_float", print_float_type);
         let (print_pointer, _) = module.add_import_func("std", "print_pointer", print_pointer_type);
+        module.exports.add("memory", memory_id);
 
         WasmBackend {
             module,
             memory_id,
             string_ptrs,
+            name_table,
             wasm_functions: Vec::new(),
             current_function: None,
             current_block: None,
@@ -171,6 +181,7 @@ impl WasmBackend {
                 &params,
                 &returns,
                 &func.body,
+                func.export_name,
             ))
         }
 
@@ -179,10 +190,13 @@ impl WasmBackend {
             self.generate_function(func)
         }
 
-        for func_builder in self.wasm_functions {
-            func_builder
-                .builder
-                .finish(func_builder.args, &mut self.module.funcs);
+        for func in self.wasm_functions {
+            let func_id = func.builder.finish(func.args, &mut self.module.funcs);
+
+            if let Some(name) = func.export_name {
+                let name = self.name_table.get_str(&name);
+                self.module.exports.add(name, func_id);
+            }
         }
 
         self.module.emit_wasm()
@@ -227,7 +241,7 @@ impl WasmBackend {
                     func.var_locals.insert(*var_index, var_local);
                 }
                 mir::InstructionKind::VarGet(idx) => {
-                    let mut func = &mut self.wasm_functions[fn_idx];
+                    let func = &mut self.wasm_functions[fn_idx];
                     let var_local = *func.var_locals.get(idx).unwrap();
                     let mut builder = func.builder.func_body();
 

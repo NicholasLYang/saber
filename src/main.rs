@@ -97,8 +97,7 @@ fn compile_saber_file<T: Write>(file_name: &str, debug_output: Option<T>) -> Res
         term::emit(&mut writer.lock(), &config, &file, &diagnostic).unwrap();
     }
 
-    let (symbol_table, type_arena) = typechecker.get_tables();
-    let mut mir_compiler = MirCompiler::new(symbol_table, type_arena);
+    let mut mir_compiler = MirCompiler::new(typechecker);
     let program = mir_compiler.compile_program(program_t);
     println!("{:#?}", program);
     mir_compiler.print_functions();

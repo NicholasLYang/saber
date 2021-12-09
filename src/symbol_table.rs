@@ -90,10 +90,6 @@ impl SymbolTable {
         scope
     }
 
-    pub fn get_scope_entries(&self, scope: usize) -> impl Iterator<Item = &(Name, SymbolEntry)> {
-        self.scopes[scope].symbols.iter()
-    }
-
     // Gets the entry and the list of functions that we pass in the lookup process
     pub fn lookup_name_with_function_hierarchy(
         &self,

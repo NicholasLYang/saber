@@ -1,7 +1,7 @@
 use crate::ast::{
-    Accessor, BinaryOpT, BuiltInTypes, Expr, ExprT, Function, FunctionId, Loc, Name, Op, Pat,
-    Program, ProgramT, Stmt, StmtT, Target, Type, TypeDef, TypeId, TypeSig, UnaryOp, UnaryOpT,
-    Value,
+    Accessor, BinaryOpT, BuiltInTypes, Export, ExportKind, Expr, ExprT, Function, FunctionId, Loc,
+    Name, Op, Pat, Program, ProgramT, Stmt, StmtT, Target, Type, TypeDef, TypeId, TypeSig, UnaryOp,
+    UnaryOpT, Value,
 };
 use crate::lexer::LocationRange;
 use crate::loc;
@@ -111,7 +111,7 @@ impl fmt::Display for TypeError {
 }
 
 pub struct TypeChecker {
-    symbol_table: SymbolTable,
+    pub symbol_table: SymbolTable,
     functions: HashMap<FunctionId, Loc<Function>>,
     // Standard types like int, bool, etc.
     builtin_types: BuiltInTypes,
@@ -123,9 +123,9 @@ pub struct TypeChecker {
     // Index for type variable names
     type_var_index: usize,
     // Type arena
-    type_arena: Arena<Type>,
+    pub type_arena: Arena<Type>,
     // Symbol table
-    name_table: NameTable,
+    pub name_table: NameTable,
     // Struct types
     struct_types: Vec<(Name, TypeId)>,
     // Expr function index. Used for codegen
@@ -133,6 +133,7 @@ pub struct TypeChecker {
     // TODO: Allow for more complicated loop
     // breaking patterns
     is_in_loop: bool,
+    exports: Vec<Export>,
 }
 
 fn build_type_names(
@@ -168,16 +169,13 @@ impl TypeChecker {
             return_type: None,
             type_var_index: 0,
             functions: HashMap::new(),
+            exports: Vec::new(),
             type_arena,
             name_table,
             struct_types: Vec::new(),
             expr_func_index: 0,
             is_in_loop: false,
         }
-    }
-
-    pub fn get_tables(self) -> (SymbolTable, Arena<Type>) {
-        (self.symbol_table, self.type_arena)
     }
 
     #[allow(dead_code)]
@@ -257,6 +255,7 @@ impl TypeChecker {
         let mut functions = vec![None; self.symbol_table.get_function_index()];
 
         let functions_map = replace(&mut self.functions, HashMap::new());
+        let exports = replace(&mut self.exports, Vec::new());
         for (func_index, function) in functions_map {
             functions[func_index] = Some(function);
         }
@@ -264,6 +263,7 @@ impl TypeChecker {
         ProgramT {
             stmts: typed_stmts,
             functions: functions.into_iter().map(|f| f.unwrap()).collect(),
+            exports,
             named_types,
             errors,
         }
@@ -432,16 +432,30 @@ impl TypeChecker {
                 }
             }
             Stmt::Export(name) => {
-                self.symbol_table.lookup_name(name).ok_or(loc!(
+                let entry = self.symbol_table.lookup_name(name).ok_or(loc!(
                     TypeError::VarNotDefined {
                         name: self.name_table.get_str(&name).to_string(),
                     },
                     location
                 ))?;
-                Ok(vec![Loc {
-                    location,
-                    inner: StmtT::Export(name),
-                }])
+
+                let export = if let Some(info) = &entry.function_info {
+                    Export {
+                        kind: ExportKind::Function,
+                        idx: info.func_index,
+                        name,
+                    }
+                } else {
+                    Export {
+                        kind: ExportKind::Var,
+                        idx: entry.var_index,
+                        name,
+                    }
+                };
+
+                self.exports.push(export);
+
+                Ok(Vec::new())
             }
         }
     }
