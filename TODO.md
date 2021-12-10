@@ -1,10 +1,15 @@
 # TODO
+## Next
+- Remove warnings
+- Start planning refactor
+- Finish MIR
+## Backlog
 - General
   - ~~Fix all the damn copies and bad, non idiomatic Rust.~~
   - ~~Probably add a ref count for types (really no need to copy them
     since they're relatively immutable)~~
   - Convert typechecking and code gen errors to codespan
-  - Add arrays
+  - ~~Add arrays~~
 - Parsing
   - ~~Convert to expression based syntax~~
   - Trailing comma?
@@ -32,7 +37,7 @@
   - Hook up garbage collection to code gen
   - Convert to walrus
 - IR
-  - Design IR 
+  - ~~Design IR~~ 
 - Tests/Debugging
   - ~~Write some tests~~
   - ~~Add locations in errors with row/col~~
