@@ -66,7 +66,6 @@ fn main() -> Result<()> {
     } else if let Some(run_matches) = matches.subcommand_matches("run") {
         let file = run_matches.value_of("file").unwrap();
         let saber_program = compile_saber_file(file, debug_file)?;
-        println!("{}", wasm2wat(&saber_program.wasm_bytes).unwrap());
         run_code(saber_program)?;
     }
     Ok(())
@@ -99,7 +98,7 @@ fn compile_saber_file<T: Write>(file_name: &str, debug_output: Option<T>) -> Res
 
     let mut mir_compiler = MirCompiler::new(typechecker);
     let program = mir_compiler.compile_program(program_t);
-    println!("{:#?}", program);
+
     mir_compiler.print_functions();
     let wasm_backend = WasmBackend::new(mir_compiler);
     let wasm_bytes = wasm_backend.generate_program(program);
