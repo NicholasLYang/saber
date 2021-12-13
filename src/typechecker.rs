@@ -744,7 +744,6 @@ impl TypeChecker {
 
         self.return_type = Some(return_type);
 
-        let body_location = body.location;
         // Check body
         let body_t = match body.inner {
             Expr::Block(stmts, end_expr) => {

@@ -554,6 +554,22 @@ impl MirCompiler {
         }
     }
 
+    fn ast_type_to_load_op(&self, ty: Option<Type>) -> Option<UnaryOp> {
+        ty.map(|t| match t {
+            Type::I32 => UnaryOp::I32Load,
+            Type::F32 => UnaryOp::F32Load,
+            Type::Pointer => UnaryOp::PointerLoad,
+        })
+    }
+
+    fn ast_type_to_store_op(&self, ty: Option<Type>) -> Option<BinaryOp> {
+        ty.map(|t| match t {
+            Type::I32 => BinaryOp::I32Store,
+            Type::F32 => BinaryOp::F32Store,
+            Type::Pointer => BinaryOp::PointerStore,
+        })
+    }
+
     // Compiles enclosed variable by going up scope chain
     fn compile_enclosed_var(
         &mut self,
@@ -618,7 +634,6 @@ impl MirCompiler {
 
     pub fn compile_expr(&mut self, expr: ExprT) -> InstrId {
         let ty = self.ast_type_to_mir_type(expr.get_type());
-
         match expr {
             ExprT::Asgn { lhs, rhs, type_: _ } => {
                 if !lhs.inner.accessors.is_empty() {
@@ -761,10 +776,8 @@ impl MirCompiler {
                     let field_ty = self.ast_type_to_mir_type(field.inner.get_type());
                     let field_id = self.compile_expr(field.inner);
 
-                    let op = match field_ty {
-                        Some(Type::F32) => BinaryOp::F32Store,
-                        Some(Type::I32) => BinaryOp::F32Store,
-                        Some(Type::Pointer) => BinaryOp::PointerStore,
+                    let op = match self.ast_type_to_store_op(field_ty) {
+                        Some(op) => op,
                         // If there's no MIR type, this is a unit expression
                         // and doesn't need to be stored
                         None => continue,
@@ -805,6 +818,53 @@ impl MirCompiler {
 
                 ptr
             }
+            ExprT::Index { lhs, index, type_ } => {
+                let ty = self.ast_type_to_mir_type(type_);
+                let op = match self.ast_type_to_load_op(ty) {
+                    None => {
+                        return self.add_instruction(InstructionKind::Noop, None);
+                    }
+                    Some(op) => op,
+                };
+
+                let lhs_id = self.compile_expr(lhs.inner);
+                let index_id = self.compile_expr(index.inner);
+                // TODO: Define stuff like word once
+                let word = self
+                    .add_instruction(InstructionKind::Primary(Primary::I32(32)), Some(Type::I32));
+                let index_in_bytes = self.add_instruction(
+                    InstructionKind::Binary(BinaryOp::I32Mul, index_id, word),
+                    Some(Type::I32),
+                );
+
+                let ptr = self.add_instruction(
+                    InstructionKind::Binary(BinaryOp::PointerAdd, lhs_id, index_in_bytes),
+                    Some(Type::Pointer),
+                );
+
+                self.add_instruction(InstructionKind::Unary(op, ptr), ty)
+            }
+            ExprT::TupleField(tuple, index, _) => {
+                let op = match self.ast_type_to_load_op(ty) {
+                    None => {
+                        return self.add_instruction(InstructionKind::Noop, None);
+                    }
+                    Some(op) => op,
+                };
+
+                let tuple_id = self.compile_expr(tuple.inner);
+                let index_id = self.add_instruction(
+                    InstructionKind::Primary(Primary::I32((index * 32) as i32)),
+                    Some(Type::I32),
+                );
+
+                let ptr = self.add_instruction(
+                    InstructionKind::Binary(BinaryOp::PointerAdd, tuple_id, index_id),
+                    Some(Type::Pointer),
+                );
+
+                self.add_instruction(InstructionKind::Unary(op, ptr), ty)
+            }
             ExprT::Print { args, type_ } => {
                 let op = match self.type_arena[type_] {
                     ast::Type::Integer => UnaryOp::PrintInt,
@@ -840,12 +900,10 @@ impl MirCompiler {
                         let mut ids = Vec::new();
                         for ty in fields_types {
                             let ty = self.ast_type_to_mir_type(ty);
-                            // TODO: Deduplicate code
-                            let op = match ty.expect("Should be assignable type here") {
-                                Type::I32 => UnaryOp::I32Load,
-                                Type::F32 => UnaryOp::F32Load,
-                                Type::Pointer => UnaryOp::PointerLoad,
-                            };
+                            let op = self
+                                .ast_type_to_load_op(ty)
+                                .expect("Should be assignable type here");
+
                             ids.push(self.add_instruction(InstructionKind::Unary(op, expr_id), ty));
                         }
 
