@@ -1,6 +1,7 @@
 use crate::ast::Name;
 use crate::mir;
-use crate::mir::{MirCompiler, UnaryOp};
+use crate::mir::compiler::MirCompiler;
+use crate::mir::UnaryOp;
 use crate::utils::NameTable;
 use std::collections::HashMap;
 use walrus::{

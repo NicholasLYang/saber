@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate strum_macros;
 
-use crate::mir::MirCompiler;
+use crate::mir::analyzer::Analyzer;
 use crate::parser::Parser;
 use crate::runtime::run_code;
 use crate::typechecker::TypeChecker;
@@ -9,11 +9,11 @@ use crate::utils::SaberProgram;
 use crate::wasm_backend::WasmBackend;
 use anyhow::Result;
 use clap::{App, AppSettings, Arg};
-//use code_generator::CodeGenerator;
 use codespan_reporting::diagnostic::Diagnostic;
 use codespan_reporting::files::SimpleFile;
 use codespan_reporting::term;
 use codespan_reporting::term::termcolor::{ColorChoice, StandardStream};
+use mir::compiler::MirCompiler;
 use std::fs;
 
 mod ast;
@@ -91,7 +91,11 @@ fn compile_saber_file(file_name: &str) -> Result<SaberProgram> {
     }
     let mut mir_compiler = MirCompiler::new(typechecker);
     let program = mir_compiler.compile_program(program_t);
-    println!("{}", program);
+    let analyzer = Analyzer {};
+
+    let ty = analyzer.analyze_function(program.functions.get(0).unwrap());
+    println!("{:?}", ty);
+
     let wasm_backend = WasmBackend::new(mir_compiler);
     let wasm_bytes = wasm_backend.generate_program(program);
 
