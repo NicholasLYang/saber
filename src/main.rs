@@ -16,7 +16,6 @@ use codespan_reporting::term;
 use codespan_reporting::term::termcolor::{ColorChoice, StandardStream};
 use std::fs::{self, File};
 use std::io::Write;
-use wabt::wasm2wat;
 
 mod ast;
 mod lexer;

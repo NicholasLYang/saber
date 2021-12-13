@@ -140,3 +140,12 @@ let foo = (env: []) => {
 
 Tell the function that initially captures the value to add it to its environment struct.
 Then build field chain and rewrite var to be a field access
+
+
+## Control Flow Analysis
+
+For functions, replace end expression in block with a return statement
+
+This allows us to have function bodies that are a vector of statements.
+
+Then for control flow, check that there is a return statement at the end.

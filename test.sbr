@@ -1,8 +1,13 @@
-let main = () => {
-  let a = "foo";
-  print(a);
+struct Person {
+  name: string
+}
 
-  return a;
+let main = () => {
+  let p = Person {
+    name: "John"
+  };
+
+  print(p.name);
 }
 
 export main;

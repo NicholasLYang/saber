@@ -358,7 +358,8 @@ impl MirCompiler {
             | ast::Type::Record(_, _)
             | ast::Type::Tuple(_)
             | ast::Type::Arrow(_, _) => Some(Type::Pointer),
-            _ => None,
+            ast::Type::Solved(id) => self.ast_type_to_mir_type(id),
+            ast::Type::Unit => None,
         }
     }
 
@@ -554,6 +555,64 @@ impl MirCompiler {
                 });
 
                 self.add_instruction(InstructionKind::Br(block_id), Some(Type::Pointer))
+            }
+            ExprT::Record {
+                name,
+                fields,
+                type_,
+            } => {
+                // We have to store the fields because we need to know how many
+                // fields are actually reified versus just empty fields
+                // TODO: Figure out if reification should be its own pass
+                let mut field_ids_and_ops = Vec::new();
+
+                for (_, field) in fields {
+                    let field_ty = self.ast_type_to_mir_type(field.inner.get_type());
+                    let field_id = self.compile_expr(field.inner);
+
+                    let op = match field_ty {
+                        Some(Type::F32) => BinaryOp::F32Store,
+                        Some(Type::I32) => BinaryOp::F32Store,
+                        Some(Type::Pointer) => BinaryOp::PointerStore,
+                        // If there's no MIR type, this is a unit expression
+                        // and doesn't need to be stored
+                        None => continue,
+                    };
+                    field_ids_and_ops.push((field_id, op));
+                }
+
+                let record_len_in_words = field_ids_and_ops.len() * 4 + 1;
+                let mut ptr = self.add_instruction(
+                    InstructionKind::Alloc(record_len_in_words),
+                    Some(Type::Pointer),
+                );
+                let word = self
+                    .add_instruction(InstructionKind::Primary(Primary::I32(32)), Some(Type::I32));
+                let final_ty = get_final_type(&self.type_arena, type_);
+                let final_ty_id = self.add_instruction(
+                    InstructionKind::Primary(Primary::I32(final_ty.index() as i32)),
+                    Some(Type::I32),
+                );
+
+                self.add_instruction(
+                    InstructionKind::Binary(BinaryOp::I32Store, ptr, final_ty_id),
+                    Some(Type::I32),
+                );
+                ptr = self.add_instruction(
+                    InstructionKind::Binary(BinaryOp::I32Add, ptr, word),
+                    Some(Type::I32),
+                );
+
+                for (id, op) in field_ids_and_ops {
+                    self.add_instruction(InstructionKind::Binary(op, ptr, id), None);
+
+                    ptr = self.add_instruction(
+                        InstructionKind::Binary(BinaryOp::PointerAdd, ptr, word),
+                        Some(Type::Pointer),
+                    );
+                }
+
+                ptr
             }
             ExprT::Print { args, type_ } => {
                 let op = match self.type_arena[type_] {

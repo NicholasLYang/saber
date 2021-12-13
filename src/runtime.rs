@@ -25,8 +25,8 @@ fn set_u32(store: &mut Caller<'_, ()>, ptr: usize, num: u32, mem: &Memory) -> Re
         .map_err(|_| Trap::new("Cannot read from memory"))
 }
 
-fn alloc(mut caller: Caller<'_, ()>, size: i32) -> Result<i32, Trap> {
-    let aligned_size: u32 = (((size + 8) + 3) & !0x03) as u32;
+fn alloc(mut caller: Caller<'_, ()>, size_in_bytes: i32) -> Result<i32, Trap> {
+    let aligned_size: u32 = (((size_in_bytes + 8) + 3) & !0x03) as u32;
     let mut mem = match caller.get_export("memory") {
         Some(Extern::Memory(mem)) => mem,
         _ => return Err(Trap::new("failed to find host memory")),
@@ -224,7 +224,12 @@ pub fn run_code(program: SaberProgram) -> Result<()> {
     let instance = Instance::new(
         &mut store,
         &module,
-        &[print_int.into(), print_float.into(), print_string.into()],
+        &[
+            print_int.into(),
+            print_float.into(),
+            print_string.into(),
+            alloc.into(),
+        ],
     )?;
 
     let mut results = vec![Val::I32(0)];

@@ -21,6 +21,7 @@
   - Constraint solve type variables (kinda done?)
   - Add sum and product types
   - Add generics
+- Control flow analysis
 - Closures
   - ~~Get closures working~~
   - ~~Get anonymous closures working~~  
@@ -35,7 +36,8 @@
   - ~~Add strings~~
   - ~~Garbage collection!~~
   - Hook up garbage collection to code gen
-  - Convert to walrus
+  - ~~Convert to walrus~~
+  - LLVM backend?
 - IR
   - ~~Design IR~~ 
 - Tests/Debugging

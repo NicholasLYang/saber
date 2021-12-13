@@ -31,6 +31,7 @@ pub struct WasmBackend {
     print_int: FunctionId,
     print_float: FunctionId,
     print_pointer: FunctionId,
+    alloc: FunctionId,
 }
 
 impl Into<ValType> for mir::Type {
@@ -152,9 +153,12 @@ impl WasmBackend {
         let print_int_type = module.types.add(&[ValType::I32], &[]);
         let print_float_type = module.types.add(&[ValType::F32], &[]);
         let print_pointer_type = module.types.add(&[ValType::I32], &[]);
+        let alloc_type = module.types.add(&[ValType::I32], &[ValType::I32]);
         let (print_int, _) = module.add_import_func("std", "print_int", print_int_type);
         let (print_float, _) = module.add_import_func("std", "print_float", print_float_type);
         let (print_pointer, _) = module.add_import_func("std", "print_pointer", print_pointer_type);
+        let (alloc, _) = module.add_import_func("std", "alloc", alloc_type);
+
         module.exports.add("memory", memory_id);
 
         WasmBackend {
@@ -168,6 +172,7 @@ impl WasmBackend {
             print_int,
             print_float,
             print_pointer,
+            alloc,
         }
     }
 
@@ -251,6 +256,13 @@ impl WasmBackend {
                     let mut builder = func.builder.func_body();
 
                     builder.local_get(var_local);
+                }
+                mir::InstructionKind::Alloc(size_in_words) => {
+                    let func = &mut self.wasm_functions[fn_idx];
+                    let mut builder = func.builder.func_body();
+
+                    let size_in_bytes = *size_in_words * 8;
+                    builder.i32_const(size_in_bytes as i32).call(self.alloc);
                 }
                 mir::InstructionKind::Return(id) => {
                     let local = self.get_local(*id);
