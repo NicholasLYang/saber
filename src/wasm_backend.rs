@@ -138,17 +138,10 @@ impl WasmFunction {
 
 impl WasmBackend {
     pub fn new(mir_compiler: MirCompiler) -> Self {
-        let MirCompiler {
-            string_literals,
-            name_table,
-            ..
-        } = mir_compiler;
+        let MirCompiler { name_table, .. } = mir_compiler;
 
         let mut module = Module::default();
         let memory_id = module.memories.add_local(false, 1, None);
-
-        let string_ptrs =
-            Self::add_strings_to_data_section(memory_id, &mut module, string_literals);
 
         let print_int_type = module.types.add(&[ValType::I32], &[]);
         let print_float_type = module.types.add(&[ValType::F32], &[]);
@@ -164,7 +157,7 @@ impl WasmBackend {
         WasmBackend {
             module,
             memory_id,
-            string_ptrs,
+            string_ptrs: Vec::new(),
             name_table,
             wasm_functions: Vec::new(),
             current_function: None,
@@ -177,6 +170,8 @@ impl WasmBackend {
     }
 
     pub fn generate_program(mut self, program: mir::Program) -> Vec<u8> {
+        self.add_strings_to_data_section(program.string_literals);
+
         for func in &program.functions {
             let params: Vec<_> = func.params.iter().map(|p| p.into()).collect();
             let returns: Vec<_> = func.returns.iter().map(|p| p.into()).collect();
@@ -208,13 +203,9 @@ impl WasmBackend {
     }
 
     // Adds strings to data section and returns vector of pointers to memory
-    fn add_strings_to_data_section(
-        memory: MemoryId,
-        module: &mut Module,
-        strings: Vec<String>,
-    ) -> Vec<u32> {
+    fn add_strings_to_data_section(&mut self, strings: Vec<String>) {
         let mut data_start = 0;
-        let mut ptrs = Vec::new();
+        let memory = self.memory_id;
 
         for s in strings {
             let len = s.len();
@@ -223,18 +214,16 @@ impl WasmBackend {
             bytes.append(&mut len_as_32.to_le_bytes().to_vec());
             bytes.append(&mut s.into_bytes());
 
-            module.data.add(
+            self.module.data.add(
                 DataKind::Active(ActiveData {
                     memory,
                     location: ActiveDataLocation::Absolute(data_start),
                 }),
                 bytes,
             );
-            ptrs.push(data_start);
+            self.string_ptrs.push(data_start);
             data_start += len as u32;
         }
-
-        ptrs
     }
 
     fn generate_function(&mut self, function: mir::Function) {
@@ -242,7 +231,7 @@ impl WasmBackend {
         for (idx, instr) in function.body[0].0.iter().enumerate() {
             let fn_idx = self.current_function.unwrap();
             match &instr.kind {
-                mir::InstructionKind::Primary(primary) => self.generate_primary(primary, idx),
+                mir::InstructionKind::Primary(primary) => self.generate_primary(primary),
                 mir::InstructionKind::Unary(op, rhs) => self.generate_unary(*op, *rhs),
                 mir::InstructionKind::VarSet(var_index, idx) => {
                     let var_local = self.get_local(*idx).unwrap();
@@ -293,7 +282,7 @@ impl WasmBackend {
         self.wasm_functions[current_function].instruction_locals[current_block][id.0]
     }
 
-    fn generate_primary(&mut self, primary: &mir::Primary, local_idx: usize) {
+    fn generate_primary(&mut self, primary: &mir::Primary) {
         let func = &mut self.wasm_functions[self.current_function.unwrap()];
 
         let mut builder = func.builder.func_body();
@@ -320,7 +309,11 @@ impl WasmBackend {
             UnaryOp::PrintInt => self.print_int,
             UnaryOp::PrintFloat => self.print_float,
             UnaryOp::PrintPointer => self.print_pointer,
-            _ => todo!(),
+            UnaryOp::Drop => {
+                builder.drop();
+                return;
+            }
+            op => todo!("UNARY OP: {:?}", op),
         };
 
         builder.call(fn_id);

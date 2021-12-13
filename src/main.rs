@@ -14,8 +14,7 @@ use codespan_reporting::diagnostic::Diagnostic;
 use codespan_reporting::files::SimpleFile;
 use codespan_reporting::term;
 use codespan_reporting::term::termcolor::{ColorChoice, StandardStream};
-use std::fs::{self, File};
-use std::io::Write;
+use std::fs;
 
 mod ast;
 mod lexer;
@@ -53,25 +52,21 @@ fn main() -> Result<()> {
         .setting(AppSettings::ArgRequiredElseHelp)
         .setting(AppSettings::ColoredHelp)
         .get_matches();
-    let debug_file = if let Some(debug_file_path) = matches.value_of("debug") {
-        Some(File::create(debug_file_path)?)
-    } else {
-        None
-    };
+
     if let Some(build_matches) = matches.subcommand_matches("build") {
         let file = build_matches.value_of("file").unwrap();
-        let saber_program = compile_saber_file(file, debug_file)?;
+        let saber_program = compile_saber_file(file)?;
         fs::write("out.wasm", saber_program.wasm_bytes)?;
     } else if let Some(run_matches) = matches.subcommand_matches("run") {
         let file = run_matches.value_of("file").unwrap();
-        let saber_program = compile_saber_file(file, debug_file)?;
+        let saber_program = compile_saber_file(file)?;
         run_code(saber_program)?;
     }
     Ok(())
 }
 
 // TODO: Add some more general format for flags/build config
-fn compile_saber_file<T: Write>(file_name: &str, debug_output: Option<T>) -> Result<SaberProgram> {
+fn compile_saber_file(file_name: &str) -> Result<SaberProgram> {
     let contents = fs::read_to_string(file_name)?;
     let writer = StandardStream::stderr(ColorChoice::Always);
     let config = codespan_reporting::term::Config::default();
@@ -94,11 +89,9 @@ fn compile_saber_file<T: Write>(file_name: &str, debug_output: Option<T>) -> Res
         let diagnostic: Diagnostic<()> = error.into();
         term::emit(&mut writer.lock(), &config, &file, &diagnostic).unwrap();
     }
-
     let mut mir_compiler = MirCompiler::new(typechecker);
     let program = mir_compiler.compile_program(program_t);
-
-    mir_compiler.print_functions();
+    println!("{}", program);
     let wasm_backend = WasmBackend::new(mir_compiler);
     let wasm_bytes = wasm_backend.generate_program(program);
 

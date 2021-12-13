@@ -348,7 +348,7 @@ pub enum Value {
 pub struct Function {
     pub params: Vec<(Name, TypeId)>,
     pub return_type: TypeId,
-    pub body: Box<Loc<ExprT>>,
+    pub body: Vec<Loc<StmtT>>,
     pub scope_index: usize,
 }
 

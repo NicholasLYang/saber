@@ -2,7 +2,6 @@
 static BOX_ARRAY_ID: i32 = 0;
 use crate::utils::SaberProgram;
 use anyhow::Result;
-use byteorder::{LittleEndian, WriteBytesExt};
 use std::collections::HashMap;
 use std::convert::TryInto;
 use wasmtime::{Caller, Extern, Func, Instance, Memory, Module, Store, Trap, Val};

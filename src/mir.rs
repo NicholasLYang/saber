@@ -10,6 +10,8 @@ use crate::typechecker::TypeChecker;
 use crate::utils::{get_final_type, NameTable};
 use id_arena::Arena;
 use indexmap::set::IndexSet;
+use std::fmt;
+use std::fmt::Formatter;
 use std::mem::{replace, swap};
 
 pub type Name = usize;
@@ -27,9 +29,34 @@ pub enum Type {
     Pointer,
 }
 
+impl fmt::Display for Type {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Type::I32 => write!(f, "i32"),
+            Type::F32 => write!(f, "f32"),
+            Type::Pointer => write!(f, "pointer"),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Program {
     pub functions: Vec<Function>,
+    pub string_literals: Vec<String>,
+}
+
+impl fmt::Display for Program {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        for function in &self.functions {
+            writeln!(f, "{}", function)?;
+        }
+
+        writeln!(f, "Strings:")?;
+        for (i, string) in self.string_literals.iter().enumerate() {
+            writeln!(f, "${}: {}", i, string)?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -38,6 +65,35 @@ pub struct Function {
     pub returns: Vec<Type>,
     pub body: Vec<Block>,
     pub export_name: Option<Name>,
+}
+
+impl fmt::Display for Function {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let params = self
+            .params
+            .iter()
+            .map(|t| format!("{}", t))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let returns = self
+            .returns
+            .iter()
+            .map(|t| format!("{}", t))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        writeln!(f, "({}) -> ({})", params, returns)?;
+
+        let body = self
+            .body
+            .iter()
+            .enumerate()
+            .map(|(i, b)| format!("@{}\n{}", i, b))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        writeln!(f, "{}", body)
+    }
 }
 
 struct CaptureBlock {
@@ -52,10 +108,36 @@ struct CaptureBlock {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Block(pub Vec<Instruction>);
 
+impl fmt::Display for Block {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        writeln!(f, "------------------")?;
+        let instructions = self
+            .0
+            .iter()
+            .enumerate()
+            .map(|(i, instr)| format!("#{}: {}", i, instr))
+            .collect::<Vec<_>>()
+            .join("\n");
+        writeln!(f, "{}", instructions)?;
+        writeln!(f, "------------------")
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Instruction {
     pub kind: InstructionKind,
     pub ty: Option<Type>,
+}
+
+impl fmt::Display for Instruction {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}: {}",
+            self.kind,
+            self.ty.map(|t| t.to_string()).unwrap_or("None".to_string())
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -79,6 +161,38 @@ pub enum InstructionKind {
     Alloc(usize),
 }
 
+impl fmt::Display for InstructionKind {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            InstructionKind::If(cond_id, then_block_id, else_block_id) => {
+                write!(
+                    f,
+                    "if #{} @{} @{}",
+                    cond_id.0, then_block_id.0, else_block_id.0
+                )
+            }
+            InstructionKind::Binary(op, lhs_id, rhs_id) => {
+                write!(f, "{} #{} #{}", op, lhs_id.0, rhs_id.0)
+            }
+            InstructionKind::Unary(op, rhs_id) => write!(f, "{} #{}", op, rhs_id.0),
+            InstructionKind::Primary(primary) => write!(f, "{}", primary),
+            InstructionKind::VarSet(idx, rhs_id) => write!(f, "var.set {} #{}", idx, rhs_id.0),
+            InstructionKind::VarGet(idx) => write!(f, "var.get {}", idx),
+            InstructionKind::Return(id) => write!(f, "return #{}", id.0),
+            InstructionKind::Call(func_idx, args) => {
+                write!(f, "call {}", func_idx.0)?;
+                for arg in args {
+                    write!(f, " #{}", arg.0)?;
+                }
+                Ok(())
+            }
+            InstructionKind::Noop => write!(f, "noop"),
+            InstructionKind::Br(block_id) => write!(f, "br @{}", block_id.0),
+            InstructionKind::Alloc(size) => write!(f, "alloc {}", size),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Primary {
     I32(i32),
@@ -86,6 +200,16 @@ pub enum Primary {
     //  that indexes into a vec of heap allocated values
     String(usize),
     F32(f32),
+}
+
+impl fmt::Display for Primary {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Primary::I32(i) => write!(f, "i32.const {}", i),
+            Primary::String(i) => write!(f, "str.const ${}", i),
+            Primary::F32(i) => write!(f, "f32.const {}", i),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -121,7 +245,48 @@ pub enum BinaryOp {
     StringConcat,
     PointerStore,
     PointerAdd,
-    PointerMul,
+}
+
+impl fmt::Display for BinaryOp {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                BinaryOp::I32Add => "i32.add",
+                BinaryOp::I32Sub => "i32.sub",
+                BinaryOp::I32Mul => "i32.mul",
+                BinaryOp::I32Div => "i32.div",
+                BinaryOp::I32NotEqual => "i32.not_eq",
+                BinaryOp::I32Equal => "i32.eq",
+                BinaryOp::I32Greater => "i32.gt",
+                BinaryOp::I32GreaterEqual => "i32.gt_eq",
+                BinaryOp::I32Less => "i32.lt",
+                BinaryOp::I32LessEqual => "i32.lt_eq",
+                BinaryOp::I32And => "i32.and",
+                BinaryOp::I32Or => "i32.or",
+                BinaryOp::I32Store => "i32.store",
+                BinaryOp::I32Tee => "i32.tee",
+                BinaryOp::F32Add => "f32.add",
+                BinaryOp::F32Sub => "f32.sub",
+                BinaryOp::F32Mul => "f32.mul",
+                BinaryOp::F32Div => "f32.div",
+                BinaryOp::F32NotEqual => "f32.not_eq",
+                BinaryOp::F32Equal => "f32.eq",
+                BinaryOp::F32Greater => "f32.gt",
+                BinaryOp::F32GreaterEqual => "f32.gt_eq",
+                BinaryOp::F32Less => "f32.lt",
+                BinaryOp::F32LessEqual => "f32.lt_eq",
+                BinaryOp::F32Store => "f32.store",
+                BinaryOp::BoolAnd => "bool.and",
+                BinaryOp::BoolOr => "bool.or",
+                BinaryOp::StringEqual => "str.eq",
+                BinaryOp::StringConcat => "str.concat",
+                BinaryOp::PointerStore => "ptr.store",
+                BinaryOp::PointerAdd => "ptr.add",
+            }
+        )
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -137,6 +302,27 @@ pub enum UnaryOp {
     PrintFloat,
     PrintInt,
     PrintPointer,
+}
+
+impl fmt::Display for UnaryOp {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                UnaryOp::PointerLoad => "ptr.load",
+                UnaryOp::F32Load => "f32.load",
+                UnaryOp::I32Load => "i32.load",
+                UnaryOp::F32Negate => "f32.neg",
+                UnaryOp::I32Negate => "i32.neg",
+                UnaryOp::BoolNegate => "bool.not",
+                UnaryOp::Drop => "drop",
+                UnaryOp::PrintFloat => "print_float",
+                UnaryOp::PrintInt => "print_int",
+                UnaryOp::PrintPointer => "print_pointer",
+            }
+        )
+    }
 }
 
 impl From<ast::UnaryOpT> for UnaryOp {
@@ -268,6 +454,7 @@ impl MirCompiler {
 
         Program {
             functions: replace(&mut self.functions, Vec::new()),
+            string_literals: replace(&mut self.string_literals, Vec::new()),
         }
     }
 
@@ -325,7 +512,11 @@ impl MirCompiler {
 
     fn compile_function(&mut self, function: ast::Function) {
         self.function_captures.push(IndexSet::new());
-        self.compile_expr(function.body.inner);
+
+        for stmt in function.body {
+            self.compile_stmt(stmt.inner);
+        }
+
         let mut body = replace(&mut self.blocks, Vec::new());
         body.push(Block(replace(&mut self.current_block, Vec::new())));
         let mut params = Vec::new();
@@ -557,7 +748,7 @@ impl MirCompiler {
                 self.add_instruction(InstructionKind::Br(block_id), Some(Type::Pointer))
             }
             ExprT::Record {
-                name,
+                name: _,
                 fields,
                 type_,
             } => {

@@ -746,23 +746,46 @@ impl TypeChecker {
 
         let body_location = body.location;
         // Check body
-        let body = self.expr(body)?;
+        let body_t = match body.inner {
+            Expr::Block(stmts, end_expr) => {
+                let mut stmts_t = Vec::new();
+                for stmt in stmts {
+                    stmts_t.append(&mut self.stmt(stmt)?)
+                }
 
-        let body_type = body.inner.get_type();
-        std::mem::swap(&mut old_return_type, &mut self.return_type);
-        // If the body type is unit, we don't try to unify the body type
-        // with return type.
-        let return_type = if body_type != self.builtin_types.unit {
-            self.unify_or_err(old_return_type.unwrap(), body_type, body_location)?
-        } else {
-            old_return_type.unwrap()
+                if let Some(end_expr) = end_expr {
+                    let location = end_expr.location;
+                    let end_expr_t = self.expr(*end_expr)?;
+                    let old_return_type = self.return_type.unwrap();
+
+                    self.return_type = Some(self.unify_or_err(
+                        end_expr_t.inner.get_type(),
+                        old_return_type,
+                        end_expr_t.location,
+                    )?);
+
+                    stmts_t.push(Loc {
+                        location,
+                        inner: StmtT::Expr(end_expr_t),
+                    });
+                }
+
+                stmts_t
+            }
+            _ => {
+                let location = body.location;
+                let expr_t = self.expr(body)?;
+                vec![loc!(StmtT::Return(expr_t), location)]
+            }
         };
+
+        std::mem::swap(&mut old_return_type, &mut self.return_type);
 
         let scope_index = self.symbol_table.restore_scope();
 
         Ok(Function {
             params: func_params,
-            body: Box::new(body),
+            body: body_t,
             scope_index,
             return_type,
         })
