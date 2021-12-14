@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate strum_macros;
 
-use crate::mir::MirCompiler;
+use crate::mir::analyzer::Analyzer;
 use crate::parser::Parser;
 use crate::runtime::run_code;
 use crate::typechecker::TypeChecker;
@@ -9,12 +9,13 @@ use crate::utils::SaberProgram;
 use crate::wasm_backend::WasmBackend;
 use anyhow::Result;
 use clap::{App, AppSettings, Arg};
-//use code_generator::CodeGenerator;
 use codespan_reporting::diagnostic::Diagnostic;
 use codespan_reporting::files::SimpleFile;
 use codespan_reporting::term;
 use codespan_reporting::term::termcolor::{ColorChoice, StandardStream};
+use mir::compiler::MirCompiler;
 use std::fs;
+use wabt::wasm2wat;
 
 mod ast;
 mod lexer;
@@ -90,10 +91,24 @@ fn compile_saber_file(file_name: &str) -> Result<SaberProgram> {
         term::emit(&mut writer.lock(), &config, &file, &diagnostic).unwrap();
     }
     let mut mir_compiler = MirCompiler::new(typechecker);
-    let program = mir_compiler.compile_program(program_t);
+    let mut program = mir_compiler.compile_program(program_t);
+    let analyzer = Analyzer {};
+    match analyzer.analyze_program(&mut program) {
+        Ok(_) => {}
+        Err(e) => {
+            eprintln!("{}", e);
+            std::process::exit(1);
+        }
+    }
+
     println!("{}", program);
+
     let wasm_backend = WasmBackend::new(mir_compiler);
     let wasm_bytes = wasm_backend.generate_program(program);
+    println!(
+        "{}",
+        wasm2wat(&wasm_bytes).expect("Error converting to wat")
+    );
 
     Ok(SaberProgram {
         wasm_bytes,
