@@ -13,12 +13,8 @@ use walrus::{
 struct WasmFunction {
     pub builder: FunctionBuilder,
     pub args: Vec<LocalId>,
-    // TODO: We should optimize so that we don't need one local
-    //   per instruction. We can go through instructions, see
-    //   what instructions rely on past ones and if it's only one
-    //   instruction, we make it a stack immediate.
-    pub instruction_locals: Vec<Vec<Option<LocalId>>>,
-    pub var_locals: HashMap<usize, LocalId>,
+    pub instruction_liveness: Vec<Vec<InstrLiveness>>,
+    pub var_locals: HashMap<usize, InstrLiveness>,
     export_name: Option<Name>,
 }
 
@@ -54,57 +50,94 @@ impl Into<ValType> for &mir::Type {
     }
 }
 
+// Bad name, but we compute if the instruction is either saved in a local,
+// a stack immediate. or if it's dead
+#[derive(Copy, Clone, Debug)]
+pub enum InstrLiveness {
+    Saved(LocalId),
+    Immediate,
+    Dead,
+}
+
 impl mir::Block {
+    // Get local for instruction. If instruction is an empty type, then we treat it as an Immediate
+    fn get_instr_local(&self, module: &mut Module, id: &mir::InstrId) -> InstrLiveness {
+        let ty = self.0.get(id.0).unwrap().ty;
+        if let Some(ty) = ty {
+            InstrLiveness::Saved(module.locals.add(ty.into()))
+        } else {
+            InstrLiveness::Immediate
+        }
+    }
     // Go down the block and check if which instructions need local variables versus which
     // ones are just stack immediates
-    pub fn make_instruction_locals(&self, module: &mut Module) -> Vec<Option<LocalId>> {
-        let mut locals = vec![None; self.0.len()];
+    pub fn make_instruction_liveness(&self, module: &mut Module) -> Vec<InstrLiveness> {
+        let mut liveness = vec![InstrLiveness::Dead; self.0.len()];
+
         for (idx, instr) in self.0.iter().enumerate() {
             match &instr.kind {
-                mir::InstructionKind::If(id, _, _)
-                | mir::InstructionKind::Unary(_, id)
-                | mir::InstructionKind::Return(id) => {
-                    if id.0 != idx - 1 {
-                        let ty = self.0.get(id.0).unwrap().ty;
-                        locals[id.0] = ty.map(|ty| module.locals.add(ty.into()))
+                mir::InstructionKind::Unary(op, id) => {
+                    if matches!(
+                        op,
+                        UnaryOp::Drop
+                            | UnaryOp::PrintFloat
+                            | UnaryOp::PrintInt
+                            | UnaryOp::PrintPointer
+                    ) {
+                        // These instructions are always alive because they have side effects
+                        // TODO: Figure out how to track side effects and always keep those
+                        //   instructions alive
+                        liveness[idx] = InstrLiveness::Immediate;
                     }
+
+                    liveness[id.0] = if id.0 != idx - 1 {
+                        self.get_instr_local(module, id)
+                    } else {
+                        InstrLiveness::Immediate
+                    };
+                }
+                mir::InstructionKind::If(id, _, _) | mir::InstructionKind::Return(id) => {
+                    liveness[id.0] = if id.0 != idx - 1 {
+                        self.get_instr_local(module, id)
+                    } else {
+                        InstrLiveness::Immediate
+                    };
                 }
                 mir::InstructionKind::Binary(_, lhs, rhs) => {
                     // We need the lhs and the rhs to be the latest and next-to-latest
                     // instructions if we want to avoid locals
                     if lhs.0 != idx - 1 || rhs.0 != idx - 2 {
-                        let lhs_ty = self.0.get(lhs.0).unwrap().ty;
-                        locals[lhs.0] = lhs_ty.map(|ty| module.locals.add(ty.into()));
-                        let rhs_ty = self.0.get(rhs.0).unwrap().ty;
-                        locals[rhs.0] = rhs_ty.map(|ty| module.locals.add(ty.into()))
+                        liveness[lhs.0] = self.get_instr_local(module, lhs);
+                        liveness[rhs.0] = self.get_instr_local(module, rhs);
+                    } else {
+                        liveness[lhs.0] = InstrLiveness::Immediate;
+                        liveness[rhs.0] = InstrLiveness::Immediate;
                     }
                 }
                 mir::InstructionKind::VarSet(_, rhs_id) => {
-                    let ty = self.0.get(rhs_id.0).unwrap().ty;
-                    locals[rhs_id.0] = ty.map(|t| module.locals.add(t.into()));
+                    liveness[rhs_id.0] = self.get_instr_local(module, rhs_id);
+                    liveness[idx] = InstrLiveness::Immediate;
                 }
                 mir::InstructionKind::VarGet(_)
                 | mir::InstructionKind::Primary(_)
                 | mir::InstructionKind::Noop
                 | mir::InstructionKind::Br(_)
-                | mir::InstructionKind::Alloc(_) => {
-                    // Surprisingly with InstructionKind::VarSet we don't do anything because
-                    // there's no case where we have to save an instruction, do something else, then set
-                    // it to a variable
-                }
+                | mir::InstructionKind::Alloc(_) => {}
                 mir::InstructionKind::Call(_, args) => {
                     for (arg_idx, arg) in args.iter().enumerate() {
                         let arg_instr_idx = idx - args.len() + arg_idx;
-                        if arg_instr_idx == arg.0 {
-                            let arg_ty = self.0.get(arg_instr_idx).unwrap().ty;
-                            locals[arg_instr_idx] = arg_ty.map(|ty| module.locals.add(ty.into()));
-                        }
+                        liveness[arg_instr_idx] = if arg_instr_idx == arg.0 {
+                            InstrLiveness::Immediate
+                        } else {
+                            self.get_instr_local(module, arg)
+                        };
                     }
+                    liveness[idx] = InstrLiveness::Immediate;
                 }
             }
         }
 
-        locals
+        liveness
     }
 }
 
@@ -122,15 +155,15 @@ impl WasmFunction {
             args.push(module.locals.add(*param));
         }
 
-        let mut locals = Vec::new();
+        let mut liveness = Vec::new();
 
         for block in body {
-            locals.push(block.make_instruction_locals(module));
+            liveness.push(block.make_instruction_liveness(module));
         }
 
         WasmFunction {
             builder: FunctionBuilder::new(&mut module.types, params, returns),
-            instruction_locals: locals,
+            instruction_liveness: liveness,
             var_locals: HashMap::new(),
             args,
             export_name,
@@ -230,23 +263,30 @@ impl WasmBackend {
 
     fn generate_function(&mut self, function: mir::Function) {
         self.current_block = Some(0);
+        let fn_idx = self.current_function.unwrap();
         for (idx, instr) in function.body[0].0.iter().enumerate() {
-            let fn_idx = self.current_function.unwrap();
+            let liveness = self.wasm_functions[fn_idx].instruction_liveness[0][idx];
+            // If we're dead, don't do anything
+            if matches!(liveness, InstrLiveness::Dead) {
+                continue;
+            }
             match &instr.kind {
                 mir::InstructionKind::Primary(primary) => self.generate_primary(primary),
                 mir::InstructionKind::Unary(op, rhs) => self.generate_unary(*op, *rhs),
                 mir::InstructionKind::VarSet(var_index, idx) => {
-                    let var_local = self.get_local(*idx).unwrap();
+                    let var_liveness = self.get_liveness(*idx);
                     let func = &mut self.wasm_functions[fn_idx];
 
-                    func.var_locals.insert(*var_index, var_local);
+                    func.var_locals.insert(*var_index, var_liveness);
                 }
                 mir::InstructionKind::VarGet(idx) => {
                     let func = &mut self.wasm_functions[fn_idx];
-                    let var_local = *func.var_locals.get(idx).unwrap();
+                    let var_liveness = *func.var_locals.get(idx).unwrap();
                     let mut builder = func.builder.func_body();
 
-                    builder.local_get(var_local);
+                    if let InstrLiveness::Saved(local_id) = var_liveness {
+                        builder.local_get(local_id);
+                    }
                 }
                 mir::InstructionKind::Alloc(size_in_words) => {
                     let func = &mut self.wasm_functions[fn_idx];
@@ -256,24 +296,28 @@ impl WasmBackend {
                     builder.i32_const(size_in_bytes as i32).call(self.alloc);
                 }
                 mir::InstructionKind::Return(id) => {
-                    let local = self.get_local(*id);
+                    let liveness = self.get_liveness(*id);
                     let func = &mut self.wasm_functions[self.current_function.unwrap()];
 
                     let mut builder = func.builder.func_body();
-                    if let Some(l) = local {
+                    if let InstrLiveness::Saved(l) = liveness {
                         builder.local_get(l);
                     }
 
                     builder.return_();
                 }
                 mir::InstructionKind::Binary(op, lhs, rhs) => {
-                    let lhs = self.get_local(*lhs);
-                    let rhs = self.get_local(*rhs);
+                    let lhs_liveness = self.get_liveness(*lhs);
+                    let rhs_liveness = self.get_liveness(*rhs);
                     let func = &mut self.wasm_functions[self.current_function.unwrap()];
 
                     let mut builder = func.builder.func_body();
-                    lhs.map(|l| builder.local_get(l));
-                    rhs.map(|r| builder.local_get(r));
+                    if let InstrLiveness::Saved(lhs_id) = lhs_liveness {
+                        builder.local_get(lhs_id);
+                    }
+                    if let InstrLiveness::Saved(rhs_id) = rhs_liveness {
+                        builder.local_get(rhs_id);
+                    }
 
                     match op {
                         mir::BinaryOp::I32Store | mir::BinaryOp::PointerStore => {
@@ -295,19 +339,18 @@ impl WasmBackend {
                 instr => todo!("INSTR NOT IMPLEMENTED: {}", instr),
             }
 
-            let local = self.wasm_functions[fn_idx].instruction_locals[0][idx];
             let mut main_body = self.wasm_functions[fn_idx].builder.func_body();
-            if let Some(id) = local {
+            if let InstrLiveness::Saved(id) = liveness {
                 main_body.local_set(id);
             }
         }
     }
 
-    fn get_local(&self, id: mir::InstrId) -> Option<LocalId> {
+    fn get_liveness(&self, id: mir::InstrId) -> InstrLiveness {
         let current_function = self.current_function.unwrap();
         let current_block = self.current_block.unwrap();
 
-        self.wasm_functions[current_function].instruction_locals[current_block][id.0]
+        self.wasm_functions[current_function].instruction_liveness[current_block][id.0]
     }
 
     fn generate_primary(&mut self, primary: &mir::Primary) {
@@ -324,13 +367,13 @@ impl WasmBackend {
     }
 
     fn generate_unary(&mut self, op: mir::UnaryOp, rhs: mir::InstrId) {
-        let rhs_local = self.get_local(rhs);
+        let rhs_liveness = self.get_liveness(rhs);
         let func = &mut self.wasm_functions[self.current_function.unwrap()];
 
         let mut builder = func.builder.func_body();
 
-        if let Some(rhs) = rhs_local {
-            builder.local_get(rhs);
+        if let InstrLiveness::Saved(rhs_id) = rhs_liveness {
+            builder.local_get(rhs_id);
         }
 
         match op {
