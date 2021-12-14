@@ -4,6 +4,7 @@ use crate::mir::compiler::MirCompiler;
 use crate::mir::UnaryOp;
 use crate::utils::NameTable;
 use std::collections::HashMap;
+use walrus::ir::{BinaryOp, LoadKind, MemArg, StoreKind};
 use walrus::{
     ActiveData, ActiveDataLocation, DataKind, FunctionBuilder, FunctionId, LocalId, MemoryId,
     Module, ValType,
@@ -265,7 +266,33 @@ impl WasmBackend {
 
                     builder.return_();
                 }
-                _ => {}
+                mir::InstructionKind::Binary(op, lhs, rhs) => {
+                    let lhs = self.get_local(*lhs);
+                    let rhs = self.get_local(*rhs);
+                    let func = &mut self.wasm_functions[self.current_function.unwrap()];
+
+                    let mut builder = func.builder.func_body();
+                    lhs.map(|l| builder.local_get(l));
+                    rhs.map(|r| builder.local_get(r));
+
+                    match op {
+                        mir::BinaryOp::I32Store | mir::BinaryOp::PointerStore => {
+                            builder.store(
+                                self.memory_id,
+                                StoreKind::I32 { atomic: false },
+                                MemArg {
+                                    align: 2,
+                                    offset: 0,
+                                },
+                            );
+                        }
+                        mir::BinaryOp::I32Add | mir::BinaryOp::PointerAdd => {
+                            builder.binop(BinaryOp::I32Add);
+                        }
+                        op => todo!("OP NOT IMPLEMENTED: {}", op),
+                    }
+                }
+                instr => todo!("INSTR NOT IMPLEMENTED: {}", instr),
             }
 
             let local = self.wasm_functions[fn_idx].instruction_locals[0][idx];
@@ -306,17 +333,20 @@ impl WasmBackend {
             builder.local_get(rhs);
         }
 
-        let fn_id = match op {
-            UnaryOp::PrintInt => self.print_int,
-            UnaryOp::PrintFloat => self.print_float,
-            UnaryOp::PrintPointer => self.print_pointer,
-            UnaryOp::Drop => {
-                builder.drop();
-                return;
-            }
+        match op {
+            UnaryOp::PrintInt => builder.call(self.print_int),
+            UnaryOp::PrintFloat => builder.call(self.print_float),
+            UnaryOp::PrintPointer => builder.call(self.print_pointer),
+            UnaryOp::Drop => builder.drop(),
+            UnaryOp::PointerLoad => builder.load(
+                self.memory_id,
+                LoadKind::I32 { atomic: false },
+                MemArg {
+                    align: 2,
+                    offset: 0,
+                },
+            ),
             op => todo!("UNARY OP: {:?}", op),
         };
-
-        builder.call(fn_id);
     }
 }

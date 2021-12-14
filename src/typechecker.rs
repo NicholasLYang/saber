@@ -765,7 +765,7 @@ impl TypeChecker {
 
                     stmts_t.push(Loc {
                         location,
-                        inner: StmtT::Expr(end_expr_t),
+                        inner: StmtT::Return(end_expr_t),
                     });
                 }
 

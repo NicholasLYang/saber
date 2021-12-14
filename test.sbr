@@ -3,9 +3,9 @@ struct Person {
 }
 
 let main = () => {
-  print("hello, world");
+  let p = Person { name: "Nicholas" };
 
-  10
+  print(p.name);
 }
 
 export main;

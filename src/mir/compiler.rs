@@ -155,6 +155,7 @@ impl MirCompiler {
 
     fn compile_function(&mut self, function: ast::Function) {
         self.function_captures.push(IndexSet::new());
+        let old_scope = self.symbol_table.swap_scope(function.scope_index);
 
         for stmt in function.body {
             self.compile_stmt(stmt.inner);
@@ -177,7 +178,9 @@ impl MirCompiler {
                 .into_iter()
                 .collect(),
             export_name: None,
-        })
+        });
+
+        self.symbol_table.swap_scope(old_scope);
     }
 
     fn ast_type_to_mir_type(&self, type_id: ast::TypeId) -> Option<Type> {
@@ -429,10 +432,12 @@ impl MirCompiler {
                 }
 
                 let record_len_in_words = field_ids_and_ops.len() * 4 + 1;
-                let mut ptr = self.add_instruction(
+                let original_ptr = self.add_instruction(
                     InstructionKind::Alloc(record_len_in_words),
                     Some(Type::Pointer),
                 );
+
+                let mut ptr = original_ptr;
                 let word = self
                     .add_instruction(InstructionKind::Primary(Primary::I32(32)), Some(Type::I32));
                 let final_ty = get_final_type(&self.type_arena, type_);
@@ -459,7 +464,7 @@ impl MirCompiler {
                     );
                 }
 
-                ptr
+                original_ptr
             }
             ExprT::Index { lhs, index, type_ } => {
                 let ty = self.ast_type_to_mir_type(type_);
@@ -495,6 +500,7 @@ impl MirCompiler {
                     Some(op) => op,
                 };
 
+                let index = index + 1; // Gotta account for type tag
                 let tuple_id = self.compile_expr(tuple.inner);
                 let index_id = self.add_instruction(
                     InstructionKind::Primary(Primary::I32((index * 32) as i32)),

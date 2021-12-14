@@ -80,7 +80,7 @@ fn print_string(mut caller: Caller<'_, ()>, ptr: i32) -> Result<(), Trap> {
         _ => return Err(Trap::new("failed to find host memory")),
     };
 
-    //
+    println!("PTR: {}", ptr);
     let ptr_to_len = ptr + 4;
     let len = get_u32(&mut caller, ptr_to_len as usize, &mut mem)?;
     let ptr_to_contents = ptr + 8;
@@ -231,7 +231,8 @@ pub fn run_code(program: SaberProgram) -> Result<()> {
         ],
     )?;
 
-    let mut results = vec![Val::I32(0)];
+    let mut results = Vec::new();
+
     instance
         .get_func(&mut store, "main")
         .expect("No main function")

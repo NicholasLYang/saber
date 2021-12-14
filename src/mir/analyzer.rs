@@ -2,18 +2,49 @@
  * Currently just control flow analysis but perhaps more stuff in the future
  */
 
-use crate::mir::{Block, BlockId, Function, InstructionKind, Type};
+use crate::mir::{BlockId, Function, InstructionKind, Program, Type};
+use std::fmt;
+
+// TODO: Figure out a way to make analyzer errors give nicer output
+#[derive(Debug, Clone, PartialEq)]
+pub enum AnalyzerError {
+    NoReturn,
+}
+
+impl fmt::Display for AnalyzerError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            AnalyzerError::NoReturn => write!(f, "Function does not return a value"),
+        }
+    }
+}
 
 pub struct Analyzer {}
 
 impl Analyzer {
+    pub fn analyze_program(&self, program: &mut Program) -> Result<(), AnalyzerError> {
+        for function in &mut program.functions {
+            let ty = self.analyze_function(function);
+            if ty.is_none() {
+                if function.returns.len() == 1
+                    && matches!(function.returns.get(0).unwrap(), Type::Pointer)
+                {
+                    function.returns.clear();
+                } else {
+                    return Err(AnalyzerError::NoReturn);
+                }
+            }
+        }
+
+        Ok(())
+    }
     // We go through function block and check if there is a return instruction
     // If we find one, we know that the function returns a value
     // Otherwise, we check the blocks referenced via If/Br instructions and see
     // if they contain a return. For If, both branches need to return.
     // If we discover that there is a branch that does not return, we know that
     // the function has an empty, i.e. (), return type
-    pub fn analyze_function(&self, function: &Function) -> Option<Type> {
+    fn analyze_function(&self, function: &Function) -> Option<Type> {
         self.analyze_block(function, BlockId(function.body.len() - 1))
     }
 
