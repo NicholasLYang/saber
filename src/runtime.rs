@@ -1,10 +1,9 @@
-//use crate::code_generator::BOX_ARRAY_ID;
 static BOX_ARRAY_ID: i32 = 0;
 use crate::utils::SaberProgram;
 use anyhow::Result;
 use std::collections::HashMap;
 use std::convert::TryInto;
-use wasmtime::{Caller, Extern, Func, Instance, Memory, Module, Store, Trap, Val};
+use wasmtime::{Caller, Extern, Func, Instance, Memory, Module, Store, Trap};
 
 #[inline]
 fn get_u32(store: &mut Caller<'_, ()>, ptr: usize, mem: &mut Memory) -> Result<u32> {
@@ -24,54 +23,55 @@ fn set_u32(store: &mut Caller<'_, ()>, ptr: usize, num: u32, mem: &Memory) -> Re
         .map_err(|_| Trap::new("Cannot read from memory"))
 }
 
-fn alloc(mut caller: Caller<'_, ()>, size_in_bytes: i32) -> Result<i32, Trap> {
-    let aligned_size: u32 = (((size_in_bytes + 8) + 3) & !0x03) as u32;
-    let mut mem = match caller.get_export("memory") {
-        Some(Extern::Memory(mem)) => mem,
-        _ => return Err(Trap::new("failed to find host memory")),
-    };
-    let mem_len = mem.data_size(&mut caller);
-    let mut ptr: usize = 0;
-    while ptr < mem_len {
-        let len = get_u32(&mut caller, ptr as usize, &mut mem)?;
-        // If length is 0, block is not initialized. We can assume everything
-        // from here to end of array is free
-        if len == 0 {
-            // We multiply (memArray.length - ptr) by 4 because we're dealing with
-            // a 32 bit array
-            if ((mem_len - ptr) * 4) < aligned_size as usize {
-                mem.grow(
-                    &mut caller,
-                    std::cmp::max((aligned_size / PAGE_SIZE) as u64, 1),
-                )?;
+fn alloc(heap_start: u32) -> impl Fn(Caller<'_, ()>, i32) -> Result<i32, Trap> {
+    move |mut caller: Caller<'_, ()>, size_in_bytes: i32| {
+        let aligned_size: u32 = (((size_in_bytes + 8) + 3) & !0x03) as u32;
+        let mut mem = match caller.get_export("memory") {
+            Some(Extern::Memory(mem)) => mem,
+            _ => return Err(Trap::new("failed to find host memory")),
+        };
+        let mem_len = mem.data_size(&mut caller);
+        let mut ptr = heap_start as usize;
+        while ptr < mem_len {
+            let len = get_u32(&mut caller, ptr as usize, &mut mem)?;
+            // If length is 0, block is not initialized. We can assume everything
+            // from here to end of array is free
+            if len == 0 {
+                // We multiply (memArray.length - ptr) by 4 because we're dealing with
+                // a 32 bit array
+                if ((mem_len - ptr) * 4) < aligned_size as usize {
+                    mem.grow(
+                        &mut caller,
+                        std::cmp::max((aligned_size / PAGE_SIZE) as u64, 1),
+                    )?;
+                }
+                // Or with 1 to indicate allocated
+                set_u32(&mut caller, ptr, aligned_size | 1, &mem)?;
+                set_u32(&mut caller, ptr + 1, 1, &mem)?;
+                return Ok(((ptr + 2) * 4).try_into().unwrap());
+                // If the block is allocated, we move on
+            } else if len & 1 != 0 {
+                ptr += ((len - 1) / 4) as usize;
+                // If the length is big enough, we allocate the block
+            } else if len > aligned_size {
+                // Or with 1 to indicate allocated
+                set_u32(&mut caller, ptr, aligned_size | 1, &mem)?;
+                set_u32(&mut caller, ptr + 1, 1, &mem)?;
+
+                return Ok(((ptr + 2) * 4).try_into().unwrap());
+            } else {
+                ptr += (len / 4) as usize;
             }
-            // Or with 1 to indicate allocated
-            set_u32(&mut caller, ptr, aligned_size | 1, &mem)?;
-            set_u32(&mut caller, ptr + 1, 1, &mem)?;
-
-            return Ok(((ptr + 2) * 4).try_into().unwrap());
-        // If the block is allocated, we move on
-        } else if len & 1 != 0 {
-            ptr += ((len - 1) / 4) as usize;
-        // If the length is big enough, we allocate the block
-        } else if len > aligned_size {
-            // Or with 1 to indicate allocated
-            set_u32(&mut caller, ptr, aligned_size | 1, &mem)?;
-            set_u32(&mut caller, ptr + 1, 1, &mem)?;
-
-            return Ok(((ptr + 2) * 4).try_into().unwrap());
-        } else {
-            ptr += (len / 4) as usize;
         }
+        mem.grow(
+            &mut caller,
+            std::cmp::max((aligned_size / PAGE_SIZE) as u64, 1),
+        )?;
+        set_u32(&mut caller, ptr, aligned_size | 1, &mem)?;
+        set_u32(&mut caller, ptr + 1, 1, &mem)?;
+        let res = ((ptr + 2) * 4).try_into().unwrap();
+        Ok(res)
     }
-    mem.grow(
-        &mut caller,
-        std::cmp::max((aligned_size / PAGE_SIZE) as u64, 1),
-    )?;
-    set_u32(&mut caller, ptr, aligned_size | 1, &mem)?;
-    set_u32(&mut caller, ptr + 1, 1, &mem)?;
-
-    Ok(((ptr + 2) * 4).try_into().unwrap())
 }
 
 fn print_string(mut caller: Caller<'_, ()>, ptr: i32) -> Result<(), Trap> {
@@ -80,7 +80,6 @@ fn print_string(mut caller: Caller<'_, ()>, ptr: i32) -> Result<(), Trap> {
         _ => return Err(Trap::new("failed to find host memory")),
     };
 
-    println!("PTR: {}", ptr);
     let ptr_to_len = ptr + 4;
     let len = get_u32(&mut caller, ptr_to_len as usize, &mut mem)?;
     let ptr_to_contents = ptr + 8;
@@ -145,11 +144,15 @@ macro_rules! get_memory {
 static PAGE_SIZE: u32 = 65536;
 
 pub fn run_code(program: SaberProgram) -> Result<()> {
-    let wasm_bytes = program.wasm_bytes;
-    let runtime_types = program.runtime_types;
+    let SaberProgram {
+        code,
+        heap_start,
+        runtime_types,
+    } = program;
+
     let mut store = Store::default();
-    let module = Module::new(store.engine(), wasm_bytes)?;
-    let alloc = Func::wrap(&mut store, alloc);
+    let module = Module::new(store.engine(), code)?;
+    let alloc = Func::wrap(&mut store, alloc(heap_start));
 
     let dealloc = Func::wrap(&mut store, move |mut caller: Caller<'_, ()>, ptr: i32| {
         let mut mem = get_memory!(caller);
@@ -227,6 +230,7 @@ pub fn run_code(program: SaberProgram) -> Result<()> {
             print_int.into(),
             print_float.into(),
             print_string.into(),
+            print_heap.into(),
             alloc.into(),
         ],
     )?;

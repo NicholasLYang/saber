@@ -14,7 +14,6 @@ use std::mem::{replace, swap};
 pub struct MirCompiler {
     pub string_literals: Vec<String>,
     pub name_table: NameTable,
-    parameters: Vec<Type>,
     symbol_table: SymbolTable,
     blocks: Vec<Block>,
     current_block: Vec<Instruction>,
@@ -36,7 +35,6 @@ impl MirCompiler {
 
         MirCompiler {
             string_literals: Vec::new(),
-            parameters: Vec::new(),
             blocks: Vec::new(),
             current_block: Vec::new(),
             name_table,

@@ -6,7 +6,7 @@ use crate::parser::Parser;
 use crate::runtime::run_code;
 use crate::typechecker::TypeChecker;
 use crate::utils::SaberProgram;
-use crate::wasm_backend::WasmBackend;
+use crate::wasm_backend::{WasmBackend, WasmProgram};
 use anyhow::Result;
 use clap::{App, AppSettings, Arg};
 use codespan_reporting::diagnostic::Diagnostic;
@@ -57,7 +57,7 @@ fn main() -> Result<()> {
     if let Some(build_matches) = matches.subcommand_matches("build") {
         let file = build_matches.value_of("file").unwrap();
         let saber_program = compile_saber_file(file)?;
-        fs::write("out.wasm", saber_program.wasm_bytes)?;
+        fs::write("out.wasm", saber_program.code)?;
     } else if let Some(run_matches) = matches.subcommand_matches("run") {
         let file = run_matches.value_of("file").unwrap();
         let saber_program = compile_saber_file(file)?;
@@ -104,14 +104,12 @@ fn compile_saber_file(file_name: &str) -> Result<SaberProgram> {
     println!("{}", program);
 
     let wasm_backend = WasmBackend::new(mir_compiler);
-    let wasm_bytes = wasm_backend.generate_program(program);
-    println!(
-        "{}",
-        wasm2wat(&wasm_bytes).expect("Error converting to wat")
-    );
+    let WasmProgram { code, heap_start } = wasm_backend.generate_program(program);
+    println!("{}", wasm2wat(&code).expect("Error converting to wat"));
 
     Ok(SaberProgram {
-        wasm_bytes,
+        code,
+        heap_start,
         runtime_types,
     })
 }

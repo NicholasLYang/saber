@@ -4,7 +4,8 @@ use id_arena::Arena;
 use std::collections::HashMap;
 
 pub struct SaberProgram {
-    pub wasm_bytes: Vec<u8>,
+    pub code: Vec<u8>,
+    pub heap_start: u32,
     pub runtime_types: HashMap<usize, Vec<bool>>,
 }
 

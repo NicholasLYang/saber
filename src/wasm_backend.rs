@@ -10,6 +10,11 @@ use walrus::{
     Module, ValType,
 };
 
+pub struct WasmProgram {
+    pub code: Vec<u8>,
+    pub heap_start: u32,
+}
+
 struct WasmFunction {
     pub builder: FunctionBuilder,
     pub args: Vec<LocalId>,
@@ -29,6 +34,7 @@ pub struct WasmBackend {
     print_int: FunctionId,
     print_float: FunctionId,
     print_pointer: FunctionId,
+    print_heap: FunctionId,
     alloc: FunctionId,
 }
 
@@ -103,7 +109,7 @@ impl mir::Block {
                         InstrLiveness::Immediate
                     };
                 }
-                mir::InstructionKind::Binary(_, lhs, rhs) => {
+                mir::InstructionKind::Binary(op, lhs, rhs) => {
                     // We need the lhs and the rhs to be the latest and next-to-latest
                     // instructions if we want to avoid locals
                     if lhs.0 != idx - 1 || rhs.0 != idx - 2 {
@@ -112,6 +118,15 @@ impl mir::Block {
                     } else {
                         liveness[lhs.0] = InstrLiveness::Immediate;
                         liveness[rhs.0] = InstrLiveness::Immediate;
+                    }
+
+                    if matches!(
+                        op,
+                        mir::BinaryOp::I32Store
+                            | mir::BinaryOp::PointerStore
+                            | mir::BinaryOp::F32Store
+                    ) {
+                        liveness[idx] = InstrLiveness::Immediate;
                     }
                 }
                 mir::InstructionKind::VarSet(_, rhs_id) => {
@@ -137,6 +152,7 @@ impl mir::Block {
             }
         }
 
+        println!("{:?}", liveness);
         liveness
     }
 }
@@ -181,10 +197,13 @@ impl WasmBackend {
         let print_int_type = module.types.add(&[ValType::I32], &[]);
         let print_float_type = module.types.add(&[ValType::F32], &[]);
         let print_pointer_type = module.types.add(&[ValType::I32], &[]);
+        let print_heap_type = module.types.add(&[], &[]);
         let alloc_type = module.types.add(&[ValType::I32], &[ValType::I32]);
+
         let (print_int, _) = module.add_import_func("std", "print_int", print_int_type);
         let (print_float, _) = module.add_import_func("std", "print_float", print_float_type);
         let (print_pointer, _) = module.add_import_func("std", "print_pointer", print_pointer_type);
+        let (print_heap, _) = module.add_import_func("std", "print_heap", print_heap_type);
         let (alloc, _) = module.add_import_func("std", "alloc", alloc_type);
 
         module.exports.add("memory", memory_id);
@@ -200,12 +219,13 @@ impl WasmBackend {
             print_int,
             print_float,
             print_pointer,
+            print_heap,
             alloc,
         }
     }
 
-    pub fn generate_program(mut self, program: mir::Program) -> Vec<u8> {
-        self.add_strings_to_data_section(program.string_literals);
+    pub fn generate_program(mut self, program: mir::Program) -> WasmProgram {
+        let heap_start = self.add_strings_to_data_section(program.string_literals);
 
         for func in &program.functions {
             let params: Vec<_> = func.params.iter().map(|p| p.into()).collect();
@@ -234,11 +254,14 @@ impl WasmBackend {
             }
         }
 
-        self.module.emit_wasm()
+        WasmProgram {
+            code: self.module.emit_wasm(),
+            heap_start,
+        }
     }
 
     // Adds strings to data section and returns vector of pointers to memory
-    fn add_strings_to_data_section(&mut self, strings: Vec<String>) {
+    fn add_strings_to_data_section(&mut self, strings: Vec<String>) -> u32 {
         let mut data_start = 0;
         let memory = self.memory_id;
 
@@ -258,7 +281,10 @@ impl WasmBackend {
             );
             self.string_ptrs.push(data_start);
             data_start += len as u32;
+            data_start += 8;
         }
+
+        data_start
     }
 
     fn generate_function(&mut self, function: mir::Function) {
