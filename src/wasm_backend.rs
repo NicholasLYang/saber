@@ -359,6 +359,9 @@ impl WasmBackend {
                         mir::BinaryOp::I32Add | mir::BinaryOp::PointerAdd => {
                             builder.binop(BinaryOp::I32Add);
                         }
+                        mir::BinaryOp::F32Div => {
+                            builder.binop(BinaryOp::F32Div);
+                        }
                         op => todo!("OP NOT IMPLEMENTED: {}", op),
                     }
                 }

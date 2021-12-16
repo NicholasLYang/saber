@@ -1,6 +1,6 @@
 let main = () => {
   let arr = [1, 2, 3];
-  printInt(arr[1]);
+  print(arr[1]);
 }
 
 export main;

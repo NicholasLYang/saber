@@ -2,7 +2,7 @@ let main = () => {
   let a = (20, "foo");
   let b = (a, 11);
   let c = (b, 2);
-  printInt(c.0.0.0);
+  print(c.0.0.0);
 }
 
 export main;

@@ -4,16 +4,16 @@ struct Person {
 
 let main = () => {
   let foo = 10;
-  printString("FOO IN MAIN");
-  printInt(foo);
+  print("FOO IN MAIN");
+  print(foo);
   let fn = () => {
     foo = 20;
-    printString("FOO IN FN");
-    printInt(foo);
+    print("FOO IN FN");
+    print(foo);
   }
   fn();
-  printString("FOO IN MAIN 2");
-  printInt(foo);
+  print("FOO IN MAIN 2");
+  print(foo);
 }
 
 export main;
