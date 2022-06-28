@@ -26,9 +26,14 @@ impl Analyzer {
         for function in &mut program.functions {
             let ty = self.analyze_function(function);
             if ty.is_none() {
-                if function.returns.len() == 1
-                    && matches!(function.returns.get(0).unwrap(), Type::Pointer)
-                {
+                // NOTE: This is not quite right because you could have a function
+                // that returns a pointer and doesn't return a value on all
+                // paths.
+                let is_generic_and_empty = function.returns.len() == 1
+                    && matches!(function.returns.get(0).unwrap(), Type::Pointer);
+                let is_empty = function.returns.is_empty();
+
+                if is_generic_and_empty || is_empty {
                     function.returns.clear();
                 } else {
                     return Err(AnalyzerError::NoReturn);

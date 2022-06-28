@@ -152,7 +152,6 @@ impl mir::Block {
             }
         }
 
-        println!("{:?}", liveness);
         liveness
     }
 }

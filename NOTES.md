@@ -149,3 +149,8 @@ For functions, replace end expression in block with a return statement
 This allows us to have function bodies that are a vector of statements.
 
 Then for control flow, check that there is a return statement at the end.
+
+## Traits
+
+There should be some form of traits within the language. Basically, a way to define
+an abstract interface that multiple types can implement.

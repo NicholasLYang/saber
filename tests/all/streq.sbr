@@ -1,11 +1,15 @@
 let main = () => {
   let a = "foo";
   let b = "foo";
-  if a == b {
-    printString("equal!");
+  if is_equal(a, b) {
+    print("equal!");
   } else {
-    printString("not equal!");
+    print("not equal!");
   }
+}
+
+let is_equal = (a: string, b: string) => {
+  a == b
 }
 
 export main;
