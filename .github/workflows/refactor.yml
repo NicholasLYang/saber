@@ -1,0 +1,14 @@
+name: Rename
+on:
+  pull_request_review_comment:
+    types: [created, edited]
+  workflow_dispatch:
+
+jobs:
+  rename-symbol:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - run: "curl -L https://github.com/rust-analyzer/rust-analyzer/releases/latest/download/rust-analyzer-x86_64-unknown-linux-gnu.gz | gunzip -c - > rust-analyzer"
+      - run: "chmod +x rust-analyzer"
+      - run: "./rust-analyzer --help"
