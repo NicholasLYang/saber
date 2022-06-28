@@ -1,0 +1,9 @@
+name: Rename
+on:
+  pull_request_review_comment:
+    types: [created, edited]
+jobs:
+  rename-symbol:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "This is a rename symbol job!"
