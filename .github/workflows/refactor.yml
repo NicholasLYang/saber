@@ -2,8 +2,7 @@ name: Rename
 on:
   pull_request_review_comment:
     types: [created, edited]
-  workflow_dispatch:
-
+    
 jobs:
   rename-symbol:
     runs-on: ubuntu-latest
