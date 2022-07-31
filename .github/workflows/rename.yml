@@ -1,0 +1,58 @@
+name: Rename
+on:
+  pull_request_review_comment:
+    types: [created, edited]
+
+jobs:
+  rename-symbol:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v3
+      - name: Parse comment for directive
+        id: parse_comment
+        run: |
+          echo "
+            const comment = \`${{ github.event.comment.body }}\`;
+            const side = \`${{ github.event.comment.side }}\`;
+            // We make sure it's the right side of the diff
+            // otherwise we're renaming old code.
+            const isRightSide = side === 'RIGHT';
+            const matches = comment.match(/^\s*refactor\s*\(\s*(\w[\w\d]*)\s*,\s*(\w[\w\d]*)\s*\)\s*$/);
+            if (matches && isRightSide) {
+              console.log('::set-output name=isMatch::true');
+              console.log('::set-output name=symbolName::' + matches[1]);
+              console.log('::set-output name=newSymbolName::' + matches[2]);
+            } else {
+              console.log('::set-output name=isMatch::false');
+            }
+          " > parse.js
+          node parse.js
+          rm parse.js
+      - uses: actions/checkout@v3
+        if: steps.parse_comment.outputs.isMatch == 'true'
+      - run: "curl -L https://github.com/rust-analyzer/rust-analyzer/releases/latest/download/rust-analyzer-x86_64-unknown-linux-gnu.gz | gunzip -c - > /usr/local/bin/rust-analyzer"
+        if: steps.parse_comment.outputs.isMatch == 'true'
+      - run: "chmod +x /usr/local/bin/rust-analyzer"
+        if: steps.parse_comment.outputs.isMatch == 'true'
+      - run: npx --yes refactor-cli rename ${{ steps.parse_comment.outputs.symbolName }} ${{ steps.parse_comment.outputs.newSymbolName }} --repoPath . --file ./${{ github.event.comment.path }} --line ${{ github.event.comment.line }}
+        if: steps.parse_comment.outputs.isMatch == 'true'
+      - name: Create Pull Request
+        if: steps.parse_comment.outputs.isMatch == 'true'
+        uses: peter-evans/create-pull-request@v4
+        with:
+          base: ${{ github.event.pull_request.head.ref }}
+          branch: rename_${{ steps.parse_comment.outputs.symbolName }}_to_${{ steps.parse_comment.outputs.newSymbolName }}_${{ github.sha }}
+          title: Rename ${{ steps.parse_comment.outputs.symbolName }} to ${{ steps.parse_comment.outputs.newSymbolName }}
+          body: |
+           Renamed ${{ steps.parse_comment.outputs.symbolName }} to ${{ steps.parse_comment.outputs.newSymbolName }}
+            at ${{ github.event.comment.path }} on line ${{ github.event.comment.line }}.
+
+           [Comment](${{ github.event.comment.html_url }})
+      - name: Update comment
+        if: steps.parse_comment.outputs.isMatch == 'true'
+        uses: peter-evans/create-or-update-comment@v2
+        with:
+          comment-id: ${{ github.event.comment.id }}
+          body: |
+            Done!
+
