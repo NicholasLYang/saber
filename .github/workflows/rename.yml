@@ -25,6 +25,7 @@ jobs:
             } else {
               console.log('::set-output name=isMatch::false');
             }
+            console.log(matches);
           " > parse.js
           node parse.js
           rm parse.js
