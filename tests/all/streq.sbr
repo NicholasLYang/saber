@@ -8,8 +8,8 @@ let main = () => {
   }
 }
 
-let is_equal = (a: string, b: string) => {
-  a == b
+let is_equal = (s1: string, s2: string) => {
+  s1 == s2
 }
 
 export main;
