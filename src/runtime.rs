@@ -171,7 +171,7 @@ pub fn run_code(program: SaberProgram) -> Result<()> {
         }
     });
 
-    let str_eq = Func::wrap(
+    let string_eq = Func::wrap(
         &mut store,
         |mut caller: Caller<'_, ()>, p1: i32, p2: i32| -> Result<u32, Trap> {
             if p1 == p2 {
@@ -232,7 +232,7 @@ pub fn run_code(program: SaberProgram) -> Result<()> {
             print_string.into(),
             print_heap.into(),
             alloc.into(),
-            str_eq.into(),
+            string_eq.into(),
         ],
     )?;
 
