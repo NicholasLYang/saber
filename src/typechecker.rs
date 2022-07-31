@@ -735,7 +735,7 @@ impl TypeChecker {
         let func_info = entry.function_info.as_ref().unwrap();
         let scope = func_info.func_scope;
         let return_type = func_info.return_type;
-        let flattened_parameters = func_info.flattened_parameters.clone();
+        let flattened_parameters = func_info.flattened_params.clone();
 
         self.symbol_table.swap_scope(scope);
         // Save the current return type
@@ -1033,7 +1033,7 @@ impl TypeChecker {
                             params_type,
                             return_type,
                             is_top_level: _,
-                            flattened_parameters: _,
+                            flattened_params: _,
                         }) = entry.function_info
                         {
                             self.unify_or_err(params_type, typed_args.inner.get_type(), location)?;
