@@ -49,11 +49,4 @@ jobs:
             at ${{ github.event.comment.path }} on line ${{ github.event.comment.line }}.
 
            [Comment](${{ github.event.comment.html_url }})
-      - name: Update comment
-        if: steps.parse_comment.outputs.isMatch == 'true'
-        uses: peter-evans/create-or-update-comment@v2
-        with:
-          comment-id: ${{ github.event.comment.id }}
-          body: |
-            Done!
 
