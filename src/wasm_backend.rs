@@ -36,6 +36,7 @@ pub struct WasmBackend {
     print_pointer: FunctionId,
     print_heap: FunctionId,
     alloc: FunctionId,
+    str_eq: FunctionId,
 }
 
 impl Into<ValType> for mir::Type {
@@ -198,12 +199,16 @@ impl WasmBackend {
         let print_pointer_type = module.types.add(&[ValType::I32], &[]);
         let print_heap_type = module.types.add(&[], &[]);
         let alloc_type = module.types.add(&[ValType::I32], &[ValType::I32]);
+        let str_eq_type = module
+            .types
+            .add(&[ValType::I32, ValType::I32], &[ValType::I32]);
 
         let (print_int, _) = module.add_import_func("std", "print_int", print_int_type);
         let (print_float, _) = module.add_import_func("std", "print_float", print_float_type);
         let (print_pointer, _) = module.add_import_func("std", "print_pointer", print_pointer_type);
         let (print_heap, _) = module.add_import_func("std", "print_heap", print_heap_type);
         let (alloc, _) = module.add_import_func("std", "alloc", alloc_type);
+        let (str_eq, _) = module.add_import_func("std", "str_eq", str_eq_type);
 
         module.exports.add("memory", memory_id);
 
@@ -220,6 +225,7 @@ impl WasmBackend {
             print_pointer,
             print_heap,
             alloc,
+            str_eq,
         }
     }
 
@@ -360,6 +366,9 @@ impl WasmBackend {
                         }
                         mir::BinaryOp::F32Div => {
                             builder.binop(BinaryOp::F32Div);
+                        }
+                        mir::BinaryOp::StringEqual => {
+                            builder.call(self.str_eq);
                         }
                         op => todo!("OP NOT IMPLEMENTED: {}", op),
                     }
