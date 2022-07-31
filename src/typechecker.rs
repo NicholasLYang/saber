@@ -280,8 +280,14 @@ impl TypeChecker {
                     self.get_fresh_type_var()
                 };
                 let type_ = self.type_arena.alloc(Type::Arrow(params_type, return_type));
-                self.symbol_table
-                    .insert_function(*func_name, params_type, return_type, type_);
+                let flattened_parameters = self.get_func_params(&params)?;
+                self.symbol_table.insert_function(
+                    *func_name,
+                    params_type,
+                    return_type,
+                    type_,
+                    flattened_parameters,
+                );
             }
         }
         Ok(())
@@ -386,7 +392,7 @@ impl TypeChecker {
                 };
                 let func_info = sym_entry.function_info.as_ref().unwrap();
                 let func_index = func_info.func_index;
-                let function = self.function(func_name, params, *body)?;
+                let function = self.function(func_name, *body)?;
                 self.functions.insert(func_index, loc!(function, location));
 
                 // If we have a return type, we're inside a function and need to have a captures struct.
@@ -553,12 +559,10 @@ impl TypeChecker {
         match pat {
             Pat::Id(name, Some(type_sig), _) => {
                 let type_ = self.lookup_type_sig(type_sig)?;
-                self.symbol_table.insert_var(*name, type_);
                 Ok(vec![(*name, type_)])
             }
             Pat::Id(name, None, _) => {
                 let type_ = self.get_fresh_type_var();
-                self.symbol_table.insert_var(*name, type_);
                 Ok(vec![(*name, type_)])
             }
             Pat::Tuple(pats, _) => {
@@ -725,20 +729,15 @@ impl TypeChecker {
         Ok(bindings)
     }
 
-    fn function(
-        &mut self,
-        name: Name,
-        params: Pat,
-        body: Loc<Expr>,
-    ) -> Result<Function, Loc<TypeError>> {
+    fn function(&mut self, name: Name, body: Loc<Expr>) -> Result<Function, Loc<TypeError>> {
         let entry = self.symbol_table.lookup_name(name);
         let entry = entry.as_ref().unwrap();
         let func_info = entry.function_info.as_ref().unwrap();
         let scope = func_info.func_scope;
         let return_type = func_info.return_type;
+        let flattened_parameters = func_info.flattened_parameters.clone();
 
         self.symbol_table.swap_scope(scope);
-        let func_params = self.get_func_params(&params)?;
         // Save the current return type
         let mut old_return_type = self.return_type;
 
@@ -783,7 +782,7 @@ impl TypeChecker {
         let scope_index = self.symbol_table.restore_scope();
 
         Ok(Function {
-            params: func_params,
+            params: flattened_parameters,
             body: body_t,
             scope_index,
             return_type,
@@ -968,11 +967,16 @@ impl TypeChecker {
                     self.get_fresh_type_var()
                 };
                 let type_ = self.type_arena.alloc(Type::Arrow(params_type, return_type));
-                let func_index =
-                    self.symbol_table
-                        .insert_function(name, params_type, return_type, type_);
+                let flattened_parameters = self.get_func_params(&params)?;
+                let func_index = self.symbol_table.insert_function(
+                    name,
+                    params_type,
+                    return_type,
+                    type_,
+                    flattened_parameters,
+                );
 
-                let function = self.function(name, params, *body)?;
+                let function = self.function(name, *body)?;
 
                 self.functions.insert(func_index, loc!(function, location));
 
@@ -1029,6 +1033,7 @@ impl TypeChecker {
                             params_type,
                             return_type,
                             is_top_level: _,
+                            flattened_parameters: _,
                         }) = entry.function_info
                         {
                             self.unify_or_err(params_type, typed_args.inner.get_type(), location)?;

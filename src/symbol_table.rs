@@ -44,6 +44,7 @@ pub struct FunctionInfo {
     pub params_type: TypeId,
     pub return_type: TypeId,
     pub is_top_level: bool,
+    pub flattened_parameters: Vec<(Name, TypeId)>,
 }
 
 impl SymbolTable {
@@ -134,6 +135,10 @@ impl SymbolTable {
         self.scopes[scope].parent
     }
 
+    pub fn get_current_scope(&self) -> &Scope {
+        &self.scopes[self.current_scope]
+    }
+
     pub fn insert_var(&mut self, name: Name, var_type: TypeId) {
         self.insert_var_with_function_info(name, var_type, None)
     }
@@ -184,7 +189,21 @@ impl SymbolTable {
         params_type: TypeId,
         return_type: TypeId,
         type_: TypeId,
+        flattened_parameters: Vec<(Name, TypeId)>,
     ) -> usize {
+        let mut symbols = HashMap::new();
+
+        for (var_index, (name, var_type)) in flattened_parameters.iter().enumerate() {
+            symbols.insert(
+                *name,
+                SymbolEntry {
+                    var_type: *var_type,
+                    var_index,
+                    function_info: None,
+                },
+            );
+        }
+
         let func_scope = self.scopes.len();
         let is_top_level = self.scopes[self.current_scope].parent_func_scope.is_none();
         let function_info = FunctionInfo {
@@ -193,11 +212,12 @@ impl SymbolTable {
             params_type,
             return_type,
             is_top_level,
+            flattened_parameters,
         };
         self.insert_var_with_function_info(name, type_, Some(function_info));
 
         self.scopes.push(Scope {
-            symbols: HashMap::new(),
+            symbols,
             scope_type: ScopeType::Function {
                 var_types: Vec::new(),
                 func_index: self.function_index,

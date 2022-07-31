@@ -306,9 +306,14 @@ impl WasmBackend {
                 }
                 mir::InstructionKind::VarGet(idx) => {
                     let func = &mut self.wasm_functions[fn_idx];
-                    let var_liveness = *func.var_locals.get(idx).unwrap();
                     let mut builder = func.builder.func_body();
 
+                    if *idx < func.args.len() {
+                        builder.local_get(func.args[*idx]);
+                        return;
+                    }
+
+                    let var_liveness = *func.var_locals.get(idx).unwrap();
                     if let InstrLiveness::Saved(local_id) = var_liveness {
                         builder.local_get(local_id);
                     }
