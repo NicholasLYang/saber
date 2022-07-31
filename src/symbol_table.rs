@@ -44,7 +44,7 @@ pub struct FunctionInfo {
     pub params_type: TypeId,
     pub return_type: TypeId,
     pub is_top_level: bool,
-    pub flattened_parameters: Vec<(Name, TypeId)>,
+    pub flattened_params: Vec<(Name, TypeId)>,
 }
 
 impl SymbolTable {
@@ -212,7 +212,7 @@ impl SymbolTable {
             params_type,
             return_type,
             is_top_level,
-            flattened_parameters,
+            flattened_params: flattened_parameters,
         };
         self.insert_var_with_function_info(name, type_, Some(function_info));
 
