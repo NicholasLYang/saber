@@ -7,7 +7,7 @@ use std::str::CharIndices;
 
 #[derive(Clone, Debug, PartialEq, EnumDiscriminants, Serialize, Deserialize)]
 #[strum_discriminants(derive(Serialize, Deserialize))]
-pub enum Token {
+pub enum SyntaxToken {
     Break,
     False,
     True,
@@ -213,8 +213,8 @@ impl<'input> Lexer<'input> {
     fn lookahead_match(
         &mut self,
         start_loc: usize,
-        matched_token: Token,
-        alt_token: Token,
+        matched_token: SyntaxToken,
+        alt_token: SyntaxToken,
         match_ch: char,
     ) -> <Lexer<'input> as Iterator>::Item {
         match self.lookahead {
@@ -265,7 +265,7 @@ impl<'input> Lexer<'input> {
                 self.bump();
                 let end_index = self.current_location;
                 Ok(loc!(
-                    Token::String(self.source[start_index + 1..i].to_string()),
+                    SyntaxToken::String(self.source[start_index + 1..i].to_string()),
                     LocationRange(start_index, end_index),
                 ))
             }
@@ -293,7 +293,7 @@ impl<'input> Lexer<'input> {
         let end_index = end_index.unwrap_or_else(|| self.source.len());
         if is_decimal {
             Ok(loc!(
-                Token::Float(
+                SyntaxToken::Float(
                     self.source[start_index..end_index]
                         .parse()
                         .expect("unparseable number"),
@@ -302,7 +302,7 @@ impl<'input> Lexer<'input> {
             ))
         } else {
             Ok(loc!(
-                Token::Integer(
+                SyntaxToken::Integer(
                     self.source[start_index..end_index]
                         .parse()
                         .expect("unparseable number"),
@@ -317,25 +317,25 @@ impl<'input> Lexer<'input> {
             .take_while(|ch| is_id_start(ch) || is_id_body(ch))
             .unwrap_or_else(|| self.source.len());
         let token = match &self.source[start_index..end_index] {
-            "break" => Token::Break,
-            "else" => Token::Else,
-            "false" => Token::False,
-            "for" => Token::For,
-            "if" => Token::If,
-            "loop" => Token::Loop,
-            "struct" => Token::Struct,
-            "return" => Token::Return,
-            "true" => Token::True,
-            "let" => Token::Let,
-            "while" => Token::While,
-            "export" => Token::Export,
+            "break" => SyntaxToken::Break,
+            "else" => SyntaxToken::Else,
+            "false" => SyntaxToken::False,
+            "for" => SyntaxToken::For,
+            "if" => SyntaxToken::If,
+            "loop" => SyntaxToken::Loop,
+            "struct" => SyntaxToken::Struct,
+            "return" => SyntaxToken::Return,
+            "true" => SyntaxToken::True,
+            "let" => SyntaxToken::Let,
+            "while" => SyntaxToken::While,
+            "export" => SyntaxToken::Export,
             ident => {
                 let ident = ident.to_string();
                 if let Some(id) = self.name_table.get_id(&ident) {
-                    Token::Ident(*id)
+                    SyntaxToken::Ident(*id)
                 } else {
                     let id = self.name_table.insert(ident);
-                    Token::Ident(id)
+                    SyntaxToken::Ident(id)
                 }
             }
         };
@@ -344,7 +344,7 @@ impl<'input> Lexer<'input> {
 }
 
 impl<'input> Iterator for Lexer<'input> {
-    type Item = Result<Loc<Token>, Loc<LexicalError>>;
+    type Item = Result<Loc<SyntaxToken>, Loc<LexicalError>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.skip_whitespace();
@@ -352,69 +352,69 @@ impl<'input> Iterator for Lexer<'input> {
         if let Some((end_index, ch)) = self.bump() {
             match ch {
                 '{' => Some(Ok(loc!(
-                    Token::LBrace,
+                    SyntaxToken::LBrace,
                     LocationRange(start_index, end_index)
                 ))),
                 '}' => Some(Ok(loc!(
-                    Token::RBrace,
+                    SyntaxToken::RBrace,
                     LocationRange(start_index, end_index)
                 ))),
                 '(' => Some(Ok(loc!(
-                    Token::LParen,
+                    SyntaxToken::LParen,
                     LocationRange(start_index, end_index)
                 ))),
                 ')' => Some(Ok(loc!(
-                    Token::RParen,
+                    SyntaxToken::RParen,
                     LocationRange(start_index, end_index)
                 ))),
                 '[' => Some(Ok(loc!(
-                    Token::LBracket,
+                    SyntaxToken::LBracket,
                     LocationRange(start_index, end_index)
                 ))),
                 ']' => Some(Ok(loc!(
-                    Token::RBracket,
+                    SyntaxToken::RBracket,
                     LocationRange(start_index, end_index)
                 ))),
                 ';' => Some(Ok(loc!(
-                    Token::Semicolon,
+                    SyntaxToken::Semicolon,
                     LocationRange(start_index, end_index)
                 ))),
                 ',' => Some(Ok(loc!(
-                    Token::Comma,
+                    SyntaxToken::Comma,
                     LocationRange(start_index, end_index)
                 ))),
-                '.' => Some(Ok(loc!(Token::Dot, LocationRange(start_index, end_index)))),
+                '.' => Some(Ok(loc!(SyntaxToken::Dot, LocationRange(start_index, end_index)))),
                 '\\' => Some(Ok(loc!(
-                    Token::Slash,
+                    SyntaxToken::Slash,
                     LocationRange(start_index, end_index)
                 ))),
                 ':' => Some(Ok(loc!(
-                    Token::Colon,
+                    SyntaxToken::Colon,
                     LocationRange(start_index, end_index)
                 ))),
-                '+' => Some(self.lookahead_match(start_index, Token::PlusEqual, Token::Plus, '=')),
+                '+' => Some(self.lookahead_match(start_index, SyntaxToken::PlusEqual, SyntaxToken::Plus, '=')),
                 '-' => match self.lookahead {
                     Some((_, '>')) => {
                         self.bump();
                         Some(Ok(loc!(
-                            Token::Arrow,
+                            SyntaxToken::Arrow,
                             LocationRange(start_index, self.current_location),
                         )))
                     }
                     Some((_, '=')) => {
                         self.bump();
                         Some(Ok(loc!(
-                            Token::MinusEqual,
+                            SyntaxToken::MinusEqual,
                             LocationRange(start_index, self.current_location),
                         )))
                     }
                     _ => Some(Ok(loc!(
-                        Token::Minus,
+                        SyntaxToken::Minus,
                         LocationRange(start_index, end_index)
                     ))),
                 },
                 '*' => {
-                    Some(self.lookahead_match(start_index, Token::TimesEqual, Token::Times, '='))
+                    Some(self.lookahead_match(start_index, SyntaxToken::TimesEqual, SyntaxToken::Times, '='))
                 }
                 '/' => match self.lookahead {
                     Some((_, '/')) => {
@@ -424,42 +424,42 @@ impl<'input> Iterator for Lexer<'input> {
                     Some((_, '=')) => {
                         self.bump();
                         Some(Ok(loc!(
-                            Token::DivEqual,
+                            SyntaxToken::DivEqual,
                             LocationRange(start_index, self.current_location),
                         )))
                     }
-                    _ => Some(Ok(loc!(Token::Div, LocationRange(start_index, end_index)))),
+                    _ => Some(Ok(loc!(SyntaxToken::Div, LocationRange(start_index, end_index)))),
                 },
-                '!' => Some(self.lookahead_match(start_index, Token::BangEqual, Token::Bang, '=')),
+                '!' => Some(self.lookahead_match(start_index, SyntaxToken::BangEqual, SyntaxToken::Bang, '=')),
                 '=' => match self.lookahead {
                     Some((_, '>')) => {
                         self.bump();
                         Some(Ok(loc!(
-                            Token::FatArrow,
+                            SyntaxToken::FatArrow,
                             LocationRange(start_index, self.current_location),
                         )))
                     }
                     Some((_, '=')) => {
                         self.bump();
                         Some(Ok(loc!(
-                            Token::EqualEqual,
+                            SyntaxToken::EqualEqual,
                             LocationRange(start_index, self.current_location),
                         )))
                     }
                     _ => Some(Ok(loc!(
-                        Token::Equal,
+                        SyntaxToken::Equal,
                         LocationRange(start_index, end_index)
                     ))),
                 },
                 '>' => Some(self.lookahead_match(
                     start_index,
-                    Token::GreaterEqual,
-                    Token::Greater,
+                    SyntaxToken::GreaterEqual,
+                    SyntaxToken::Greater,
                     '=',
                 )),
-                '<' => Some(self.lookahead_match(start_index, Token::LessEqual, Token::Less, '=')),
-                '&' => Some(self.lookahead_match(start_index, Token::AmpAmp, Token::Amp, '&')),
-                '|' => Some(self.lookahead_match(start_index, Token::PipePipe, Token::Pipe, '|')),
+                '<' => Some(self.lookahead_match(start_index, SyntaxToken::LessEqual, SyntaxToken::Less, '=')),
+                '&' => Some(self.lookahead_match(start_index, SyntaxToken::AmpAmp, SyntaxToken::Amp, '&')),
+                '|' => Some(self.lookahead_match(start_index, SyntaxToken::PipePipe, SyntaxToken::Pipe, '|')),
                 '"' => Some(self.read_string(end_index)),
                 ch if is_id_start(ch) => Some(self.read_identifier(end_index)),
                 ch if ch.is_ascii_digit() => Some(self.read_number(end_index)),

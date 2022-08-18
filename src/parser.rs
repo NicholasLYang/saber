@@ -1,6 +1,6 @@
 use crate::ast::{Expr, Name, Op, Pat, Stmt, TypeSig, Value};
 use crate::ast::{Loc, Program, TypeDef, UnaryOp};
-use crate::lexer::{Lexer, LexicalError, LocationRange, Token, TokenDiscriminants};
+use crate::lexer::{Lexer, LexicalError, LocationRange, SyntaxToken, TokenDiscriminants};
 use crate::loc;
 use crate::printer::token_to_string;
 use crate::utils::NameTable;
@@ -12,7 +12,7 @@ use std::result::Result;
 pub struct Parser<'input> {
     pub lexer: Lexer<'input>,
     errors: Vec<Loc<ParseError>>,
-    pushedback_tokens: Vec<Loc<Token>>,
+    pushedback_tokens: Vec<Loc<SyntaxToken>>,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -91,7 +91,7 @@ impl<'input> Parser<'input> {
     fn expect(
         &mut self,
         expected: TokenDiscriminants,
-    ) -> Result<(Token, LocationRange), Loc<ParseError>> {
+    ) -> Result<(SyntaxToken, LocationRange), Loc<ParseError>> {
         let token = self.bump()?;
         if let Some(Loc {
             inner: token,
@@ -121,14 +121,14 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn pushback(&mut self, token: Loc<Token>) {
+    fn pushback(&mut self, token: Loc<SyntaxToken>) {
         self.pushedback_tokens.push(token);
     }
 
     fn match_one(
         &mut self,
         lookahead: TokenDiscriminants,
-    ) -> Result<Option<Loc<Token>>, Loc<ParseError>> {
+    ) -> Result<Option<Loc<SyntaxToken>>, Loc<ParseError>> {
         if let Some(Loc {
             inner: token,
             location,
@@ -148,8 +148,8 @@ impl<'input> Parser<'input> {
 
     fn match_multiple(
         &mut self,
-        tokens: Vec<Token>,
-    ) -> Result<Option<Loc<Token>>, Loc<ParseError>> {
+        tokens: Vec<SyntaxToken>,
+    ) -> Result<Option<Loc<SyntaxToken>>, Loc<ParseError>> {
         for token in tokens {
             if let Some(token) = self.match_one((&token).into())? {
                 return Ok(Some(token));
@@ -158,7 +158,7 @@ impl<'input> Parser<'input> {
         Ok(None)
     }
 
-    fn bump(&mut self) -> Result<Option<Loc<Token>>, Loc<ParseError>> {
+    fn bump(&mut self) -> Result<Option<Loc<SyntaxToken>>, Loc<ParseError>> {
         match self.pushedback_tokens.pop() {
             Some(tok) => Ok(Some(tok)),
             None => match self.lexer.next() {
@@ -171,7 +171,7 @@ impl<'input> Parser<'input> {
     fn bump_or_err(
         &mut self,
         expected_tokens: Vec<TokenDiscriminants>,
-    ) -> Result<Loc<Token>, Loc<ParseError>> {
+    ) -> Result<Loc<SyntaxToken>, Loc<ParseError>> {
         self.bump()?.ok_or(loc!(
             ParseError::EndOfFile { expected_tokens },
             LocationRange(self.lexer.current_location, self.lexer.current_location)
@@ -208,20 +208,20 @@ impl<'input> Parser<'input> {
         Ok(())
     }
 
-    fn lookup_op_token(&mut self, span: Loc<Token>) -> Result<Op, Loc<ParseError>> {
+    fn lookup_op_token(&mut self, span: Loc<SyntaxToken>) -> Result<Op, Loc<ParseError>> {
         match span.inner {
-            Token::EqualEqual => Ok(Op::EqualEqual),
-            Token::BangEqual => Ok(Op::BangEqual),
-            Token::Times => Ok(Op::Times),
-            Token::Div => Ok(Op::Div),
-            Token::Plus => Ok(Op::Plus),
-            Token::Minus => Ok(Op::Minus),
-            Token::Greater => Ok(Op::Greater),
-            Token::GreaterEqual => Ok(Op::GreaterEqual),
-            Token::Less => Ok(Op::Less),
-            Token::LessEqual => Ok(Op::LessEqual),
-            Token::AmpAmp => Ok(Op::LogicalAnd),
-            Token::PipePipe => Ok(Op::LogicalOr),
+            SyntaxToken::EqualEqual => Ok(Op::EqualEqual),
+            SyntaxToken::BangEqual => Ok(Op::BangEqual),
+            SyntaxToken::Times => Ok(Op::Times),
+            SyntaxToken::Div => Ok(Op::Div),
+            SyntaxToken::Plus => Ok(Op::Plus),
+            SyntaxToken::Minus => Ok(Op::Minus),
+            SyntaxToken::Greater => Ok(Op::Greater),
+            SyntaxToken::GreaterEqual => Ok(Op::GreaterEqual),
+            SyntaxToken::Less => Ok(Op::Less),
+            SyntaxToken::LessEqual => Ok(Op::LessEqual),
+            SyntaxToken::AmpAmp => Ok(Op::LogicalAnd),
+            SyntaxToken::PipePipe => Ok(Op::LogicalOr),
             _ => Err(loc!(ParseError::NotReachable, span.location)),
         }
     }
@@ -272,7 +272,7 @@ impl<'input> Parser<'input> {
     fn id(&mut self) -> Result<(Name, LocationRange), Loc<ParseError>> {
         match self.bump_or_err(vec![TokenDiscriminants::Ident])? {
             Loc {
-                inner: Token::Ident(id),
+                inner: SyntaxToken::Ident(id),
                 location,
             } => Ok((id, location)),
             Loc {
@@ -293,7 +293,7 @@ impl<'input> Parser<'input> {
         let (id, _) = self.id()?;
         self.expect(TokenDiscriminants::LBrace)?;
         let (fields, right) =
-            self.comma::<(Name, Loc<TypeSig>)>(&Self::record_type_field, Token::RBrace)?;
+            self.comma::<(Name, Loc<TypeSig>)>(&Self::record_type_field, SyntaxToken::RBrace)?;
         Ok(Loc {
             location: LocationRange(left.0, right.1),
             inner: TypeDef::Struct(id, fields),
@@ -317,19 +317,19 @@ impl<'input> Parser<'input> {
         ])?;
         let location = span.location;
         let res = match span.inner {
-            Token::Break => {
+            SyntaxToken::Break => {
                 let (_, right) = self.expect(TokenDiscriminants::Semicolon)?;
                 Ok(loc!(Stmt::Break, LocationRange(location.0, right.1)))
             }
-            Token::Let => self.let_stmt(location),
-            Token::Return => self.return_stmt(location),
-            Token::Export => self.export_stmt(location),
-            Token::If => {
+            SyntaxToken::Let => self.let_stmt(location),
+            SyntaxToken::Return => self.return_stmt(location),
+            SyntaxToken::Export => self.export_stmt(location),
+            SyntaxToken::If => {
                 let if_expr = self.if_expr(location)?;
                 let location = if_expr.location;
                 Ok(loc!(Stmt::Expr(if_expr), location))
             }
-            Token::Loop => {
+            SyntaxToken::Loop => {
                 let (_, left) = self.expect(TokenDiscriminants::LBrace)?;
                 let block = self.expr_block(left)?;
                 let location = LocationRange(left.0, block.location.1);
@@ -373,7 +373,7 @@ impl<'input> Parser<'input> {
     fn export_stmt(&mut self, left: LocationRange) -> Result<Loc<Stmt>, Loc<ParseError>> {
         let span = self.bump_or_err(vec![TokenDiscriminants::Ident])?;
         match span.inner {
-            Token::Ident(name) => {
+            SyntaxToken::Ident(name) => {
                 let (_, right) = self.expect(TokenDiscriminants::Semicolon)?;
                 Ok(Loc {
                     location: LocationRange(left.0, right.1),
@@ -478,13 +478,13 @@ impl<'input> Parser<'input> {
         }) = self.bump()?
         {
             match token {
-                Token::LBrace => self.expr_block(left),
-                Token::If => self.if_expr(left),
-                Token::Ident(id) => {
+                SyntaxToken::LBrace => self.expr_block(left),
+                SyntaxToken::If => self.if_expr(left),
+                SyntaxToken::Ident(id) => {
                     if self.match_one(TokenDiscriminants::LBrace)?.is_some() {
                         self.record_literal(id, left)
                     } else {
-                        self.pushback(loc!(Token::Ident(id), left));
+                        self.pushback(loc!(SyntaxToken::Ident(id), left));
                         self.asgn()
                     }
                 }
@@ -543,11 +543,11 @@ impl<'input> Parser<'input> {
             // If we're undeniably starting a statement then
             // parse it and push onto the vec
             if let Some(span) = self.match_multiple(vec![
-                Token::Let,
-                Token::Return,
-                Token::Export,
-                Token::Loop,
-                Token::Break,
+                SyntaxToken::Let,
+                SyntaxToken::Return,
+                SyntaxToken::Export,
+                SyntaxToken::Loop,
+                SyntaxToken::Break,
             ])? {
                 self.pushback(span);
 
@@ -604,8 +604,8 @@ impl<'input> Parser<'input> {
             LocationRange(self.lexer.current_location, self.lexer.current_location)
         ))?;
         match span.inner {
-            Token::LBrace => self.expr_block(span.location),
-            Token::LParen => {
+            SyntaxToken::LBrace => self.expr_block(span.location),
+            SyntaxToken::LParen => {
                 let mut expr = self.expr()?;
                 let (_, right) = self.expect(TokenDiscriminants::RParen)?;
                 expr.location = LocationRange(span.location.0, right.1);
@@ -635,7 +635,7 @@ impl<'input> Parser<'input> {
 
     fn logical(&mut self) -> Result<Loc<Expr>, Loc<ParseError>> {
         let mut expr = self.equality()?;
-        while let Some(span) = self.match_multiple(vec![Token::AmpAmp, Token::PipePipe])? {
+        while let Some(span) = self.match_multiple(vec![SyntaxToken::AmpAmp, SyntaxToken::PipePipe])? {
             let op = self.lookup_op_token(span)?;
             let rhs = self.equality()?;
             expr = Loc {
@@ -652,7 +652,7 @@ impl<'input> Parser<'input> {
 
     fn equality(&mut self) -> Result<Loc<Expr>, Loc<ParseError>> {
         let lhs = self.comparison()?;
-        if let Some(span) = self.match_multiple(vec![Token::EqualEqual, Token::BangEqual])? {
+        if let Some(span) = self.match_multiple(vec![SyntaxToken::EqualEqual, SyntaxToken::BangEqual])? {
             let op = self.lookup_op_token(span)?;
             let rhs = self.comparison()?;
             Ok(Loc {
@@ -671,10 +671,10 @@ impl<'input> Parser<'input> {
     fn comparison(&mut self) -> Result<Loc<Expr>, Loc<ParseError>> {
         let lhs = self.addition()?;
         if let Some(span) = self.match_multiple(vec![
-            Token::GreaterEqual,
-            Token::Greater,
-            Token::Less,
-            Token::LessEqual,
+            SyntaxToken::GreaterEqual,
+            SyntaxToken::Greater,
+            SyntaxToken::Less,
+            SyntaxToken::LessEqual,
         ])? {
             let op = self.lookup_op_token(span)?;
             let rhs = self.addition()?;
@@ -693,7 +693,7 @@ impl<'input> Parser<'input> {
 
     fn addition(&mut self) -> Result<Loc<Expr>, Loc<ParseError>> {
         let mut expr = self.multiplication()?;
-        while let Some(span) = self.match_multiple(vec![Token::Plus, Token::Minus])? {
+        while let Some(span) = self.match_multiple(vec![SyntaxToken::Plus, SyntaxToken::Minus])? {
             let op = self.lookup_op_token(span)?;
             let rhs = self.multiplication()?;
             expr = Loc {
@@ -710,7 +710,7 @@ impl<'input> Parser<'input> {
 
     fn multiplication(&mut self) -> Result<Loc<Expr>, Loc<ParseError>> {
         let mut expr = self.unary()?;
-        while let Some(span) = self.match_multiple(vec![Token::Times, Token::Div])? {
+        while let Some(span) = self.match_multiple(vec![SyntaxToken::Times, SyntaxToken::Div])? {
             let op = self.lookup_op_token(span)?;
             let rhs = self.unary()?;
             expr = Loc {
@@ -729,11 +729,11 @@ impl<'input> Parser<'input> {
         if let Some(Loc {
             inner: token,
             location: left,
-        }) = self.match_multiple(vec![Token::Bang, Token::Minus])?
+        }) = self.match_multiple(vec![SyntaxToken::Bang, SyntaxToken::Minus])?
         {
             let op = match token {
-                Token::Bang => UnaryOp::Not,
-                Token::Minus => UnaryOp::Minus,
+                SyntaxToken::Bang => UnaryOp::Not,
+                SyntaxToken::Minus => UnaryOp::Minus,
                 _ => return Err(loc!(ParseError::NotReachable, left)),
             };
             let rhs = self.unary()?;
@@ -753,10 +753,10 @@ impl<'input> Parser<'input> {
         let mut expr = self.primary()?;
         while let Some(span) = self.bump()? {
             match span.inner {
-                Token::LParen => {
+                SyntaxToken::LParen => {
                     expr = self.finish_call(expr, span.location)?;
                 }
-                Token::LBracket => {
+                SyntaxToken::LBracket => {
                     let index = self.expr()?;
                     let location = LocationRange(span.location.0, index.location.1);
                     self.expect(TokenDiscriminants::RBracket)?;
@@ -768,19 +768,19 @@ impl<'input> Parser<'input> {
                         location
                     )
                 }
-                Token::Dot => {
+                SyntaxToken::Dot => {
                     let span = self.bump_or_err(vec![
                         TokenDiscriminants::Ident,
                         TokenDiscriminants::Integer,
                     ])?;
                     match span.inner {
-                        Token::Ident(name) => {
+                        SyntaxToken::Ident(name) => {
                             expr = Loc {
                                 location: LocationRange(expr.location.0, span.location.1),
                                 inner: Expr::Field(Box::new(expr), name),
                             };
                         }
-                        Token::Integer(index) => {
+                        SyntaxToken::Integer(index) => {
                             let left = expr.location.0;
                             expr = loc!(
                                 Expr::TupleField(
@@ -795,7 +795,7 @@ impl<'input> Parser<'input> {
                                 LocationRange(left, span.location.1)
                             );
                         }
-                        Token::Float(f_str) => {
+                        SyntaxToken::Float(f_str) => {
                             let left = expr.location.0;
                             let fields: Vec<&str> = f_str.split('.').collect();
                             let first_index: u32 = fields[0].parse().expect("Invalid u32");
@@ -837,7 +837,7 @@ impl<'input> Parser<'input> {
         left: LocationRange,
     ) -> Result<Loc<Expr>, Loc<ParseError>> {
         let args = {
-            let (mut exprs, right) = self.comma::<Loc<Expr>>(&Self::expr, Token::RParen)?;
+            let (mut exprs, right) = self.comma::<Loc<Expr>>(&Self::expr, SyntaxToken::RParen)?;
             if exprs.len() == 1 {
                 exprs.remove(0)
             } else {
@@ -872,25 +872,25 @@ impl<'input> Parser<'input> {
         ))?;
         let location = span.location;
         match span.inner {
-            Token::True => Ok(Loc {
+            SyntaxToken::True => Ok(Loc {
                 location,
                 inner: Expr::Primary {
                     value: Value::Bool(true),
                 },
             }),
-            Token::False => Ok(Loc {
+            SyntaxToken::False => Ok(Loc {
                 location,
                 inner: Expr::Primary {
                     value: Value::Bool(false),
                 },
             }),
-            Token::Integer(int) => Ok(Loc {
+            SyntaxToken::Integer(int) => Ok(Loc {
                 location,
                 inner: Expr::Primary {
                     value: Value::Integer(int),
                 },
             }),
-            Token::Float(float) => Ok(Loc {
+            SyntaxToken::Float(float) => Ok(Loc {
                 location,
                 inner: Expr::Primary {
                     value: Value::Float(
@@ -900,13 +900,13 @@ impl<'input> Parser<'input> {
                     ),
                 },
             }),
-            Token::String(s) => Ok(Loc {
+            SyntaxToken::String(s) => Ok(Loc {
                 location,
                 inner: Expr::Primary {
                     value: Value::String(s),
                 },
             }),
-            Token::Ident(id) => {
+            SyntaxToken::Ident(id) => {
                 let span = self.bump_or_err(vec![
                     TokenDiscriminants::LBrace,
                     TokenDiscriminants::LParen,
@@ -917,7 +917,7 @@ impl<'input> Parser<'input> {
                     TokenDiscriminants::String,
                 ])?;
                 match span.inner {
-                    Token::FatArrow => {
+                    SyntaxToken::FatArrow => {
                         let body = self.function_body()?;
                         let location = LocationRange(location.0, body.location.1);
                         Ok(loc!(
@@ -935,7 +935,7 @@ impl<'input> Parser<'input> {
                     }
                 }
             }
-            Token::LParen => {
+            SyntaxToken::LParen => {
                 let mut exprs = Vec::new();
                 let mut right = location.1;
                 let mut is_params = true;
@@ -983,8 +983,8 @@ impl<'input> Parser<'input> {
                     Ok(loc!(Expr::Tuple(entries), LocationRange(location.0, right)))
                 }
             }
-            Token::LBracket => {
-                let (entries, right) = self.comma(&Self::expr, Token::RBracket)?;
+            SyntaxToken::LBracket => {
+                let (entries, right) = self.comma(&Self::expr, SyntaxToken::RBracket)?;
                 Ok(loc!(
                     Expr::Array(entries),
                     LocationRange(location.0, right.1)
@@ -1018,7 +1018,7 @@ impl<'input> Parser<'input> {
         name_loc: LocationRange,
     ) -> Result<Loc<Expr>, Loc<ParseError>> {
         let (fields, end_loc) =
-            self.comma::<(Name, Loc<Expr>)>(&Self::record_field, Token::RBrace)?;
+            self.comma::<(Name, Loc<Expr>)>(&Self::record_field, SyntaxToken::RBrace)?;
         Ok(Loc {
             location: LocationRange(name_loc.0, end_loc.1),
             inner: Expr::Record { name, fields },
@@ -1053,7 +1053,7 @@ impl<'input> Parser<'input> {
         ))?;
         let left = span.location;
         match span.inner {
-            Token::LParen => {
+            SyntaxToken::LParen => {
                 if let Some(Loc {
                     inner: _,
                     location: right,
@@ -1062,7 +1062,7 @@ impl<'input> Parser<'input> {
                     return Ok(Pat::Empty(LocationRange(left.0, right.0)));
                 }
 
-                let (mut pats, right) = self.comma::<Pat>(&Self::pattern, Token::RParen)?;
+                let (mut pats, right) = self.comma::<Pat>(&Self::pattern, SyntaxToken::RParen)?;
                 // If the pattern is singular, i.e. let (a) = 10, then
                 // we treat it as a single id
                 if pats.len() == 1 {
@@ -1071,8 +1071,8 @@ impl<'input> Parser<'input> {
                     Ok(Pat::Tuple(pats, LocationRange(left.0, right.1)))
                 }
             }
-            Token::LBrace => {
-                let (fields, right) = self.comma::<Name>(&Self::record_pattern, Token::RBrace)?;
+            SyntaxToken::LBrace => {
+                let (fields, right) = self.comma::<Name>(&Self::record_pattern, SyntaxToken::RBrace)?;
                 if let Some(type_sig) = self.type_sig()? {
                     Ok(Pat::Record(
                         fields,
@@ -1083,7 +1083,7 @@ impl<'input> Parser<'input> {
                     Ok(Pat::Record(fields, None, LocationRange(left.0, right.1)))
                 }
             }
-            Token::Ident(name) => {
+            SyntaxToken::Ident(name) => {
                 if let Some(type_sig) = self.type_sig()? {
                     let loc = LocationRange(left.0, type_sig.location.1);
                     Ok(Pat::Id(name, Some(type_sig), loc))
@@ -1117,7 +1117,7 @@ impl<'input> Parser<'input> {
             LocationRange(self.lexer.current_location, self.lexer.current_location)
         ))?;
         match span.inner {
-            Token::Ident(name) => Ok(name),
+            SyntaxToken::Ident(name) => Ok(name),
             token => Err(loc!(
                 ParseError::UnexpectedToken {
                     token: token_to_string(&self.lexer.name_table, &token),
@@ -1147,7 +1147,7 @@ impl<'input> Parser<'input> {
         ))?;
         let location = token.location;
         match token.inner {
-            Token::Ident(name) => {
+            SyntaxToken::Ident(name) => {
                 let mut sig = Loc {
                     location,
                     inner: TypeSig::Name(name),
@@ -1169,8 +1169,8 @@ impl<'input> Parser<'input> {
                     Ok(sig)
                 }
             }
-            Token::LParen => {
-                let (param_types, _) = self.comma(&Self::type_, Token::RParen)?;
+            SyntaxToken::LParen => {
+                let (param_types, _) = self.comma(&Self::type_, SyntaxToken::RParen)?;
                 self.expect(TokenDiscriminants::Arrow)?;
                 let return_type = self.type_()?;
                 Ok(Loc {
@@ -1196,7 +1196,7 @@ impl<'input> Parser<'input> {
     fn comma<T: Debug>(
         &mut self,
         parse_fn: &dyn Fn(&mut Self) -> Result<T, Loc<ParseError>>,
-        end_token: Token,
+        end_token: SyntaxToken,
     ) -> Result<(Vec<T>, LocationRange), Loc<ParseError>> {
         let mut elems: Vec<T> = Vec::new();
         if let Some(Loc {
