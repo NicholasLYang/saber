@@ -154,3 +154,22 @@ Then for control flow, check that there is a return statement at the end.
 
 There should be some form of traits within the language. Basically, a way to define
 an abstract interface that multiple types can implement.
+
+## JS backend
+
+Saber should have a JavaScript back-end. It's a lot more pragmatic and easy of a target. Plus it opens up a lot of easy 
+but sensible use cases.
+
+## JSX 
+
+With a JavaScript back-end, we should have a JSX-type syntax. I'm not opposed to just wholesale putting JSX 
+in the language, but let's consider some other options as well.
+
+Parentheses?
+```
+(Foo bar={
+  })
+  (div)
+  (/ div)
+(/ Foo)
+```

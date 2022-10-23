@@ -17,7 +17,7 @@ jobs:
             // We make sure it's the right side of the diff
             // otherwise we're renaming old code.
             const isRightSide = side === 'RIGHT';
-            const matches = comment.match(/^\s*refactor\s*\(\s*(\w[\w\d]*)\s*,\s*(\w[\w\d]*)\s*\)\s*$/);
+            const matches = comment.match(/^\s*\/rename\s*\(\s*(\w[\w\d]*)\s*,\s*(\w[\w\d]*)\s*\)\s*$/);
             if (matches && isRightSide) {
               console.log('::set-output name=isMatch::true');
               console.log('::set-output name=symbolName::' + matches[1]);

@@ -1,6 +1,7 @@
 #[macro_use]
 extern crate strum_macros;
 
+use crate::js_backend::JsBackend;
 use crate::mir::analyzer::Analyzer;
 use crate::parser::Parser;
 use crate::runtime::run_code;
@@ -18,6 +19,7 @@ use std::fs;
 use wabt::wasm2wat;
 
 mod ast;
+mod js_backend;
 mod lexer;
 mod mir;
 mod parser;
@@ -60,9 +62,33 @@ fn main() -> Result<()> {
         fs::write("out.wasm", saber_program.code)?;
     } else if let Some(run_matches) = matches.subcommand_matches("run") {
         let file = run_matches.value_of("file").unwrap();
-        let saber_program = compile_saber_file(file)?;
-        run_code(saber_program)?;
+        let saber_program = compile_saber_file_to_js(file)?;
+        //run_code(saber_program)?;
     }
+    Ok(())
+}
+
+fn compile_saber_file_to_js(file_name: &str) -> Result<()> {
+    let contents = fs::read_to_string(file_name)?;
+    let writer = StandardStream::stderr(ColorChoice::Always);
+    let config = codespan_reporting::term::Config::default();
+    let file = SimpleFile::new(file_name, contents.as_str());
+
+    let lexer = lexer::Lexer::new(&contents);
+    let mut parser = Parser::new(lexer);
+    let program = parser.program().expect("Error parsing");
+
+    for error in &program.errors {
+        let diagnostic: Diagnostic<()> = error.into();
+        term::emit(&mut writer.lock(), &config, &file, &diagnostic).unwrap();
+    }
+
+    let mut typechecker = TypeChecker::new(parser.get_name_table());
+    let program_t = typechecker.check_program(program);
+
+    let mut js_backend = JsBackend::new(typechecker.name_table);
+    js_backend.generate_function(&program_t.functions[0].inner);
+
     Ok(())
 }
 

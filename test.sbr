@@ -2,10 +2,8 @@ struct Person {
   name: string
 }
 
-let main = () => {
-  let p = Person { name: "Nicholas" };
-
-  print(p.name);
+let main = (foo) => {
+  print(foo);
 }
 
 export main;

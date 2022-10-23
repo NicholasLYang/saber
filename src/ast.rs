@@ -346,6 +346,7 @@ pub enum Value {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Function {
+    pub name: Name,
     pub params: Vec<(Name, TypeId)>,
     pub return_type: TypeId,
     pub body: Vec<Loc<StmtT>>,

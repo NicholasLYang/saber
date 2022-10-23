@@ -512,7 +512,7 @@ impl MirCompiler {
 
                 self.add_instruction(InstructionKind::Unary(op, ptr), ty)
             }
-            ExprT::Print { args, type_ } => {
+            ExprT::Print { args, type_: _ } => {
                 let op = match self.type_arena[args.inner.get_type()] {
                     ast::Type::Integer => UnaryOp::PrintInt,
                     ast::Type::Float => UnaryOp::PrintFloat,

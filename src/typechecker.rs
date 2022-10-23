@@ -783,6 +783,7 @@ impl TypeChecker {
         let scope_index = self.symbol_table.restore_scope();
 
         Ok(Function {
+            name,
             params: func_params,
             body: body_t,
             scope_index,
